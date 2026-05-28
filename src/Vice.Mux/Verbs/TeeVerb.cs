@@ -1,0 +1,95 @@
+using System.Buffers;
+using Vice.Execution;
+using Vice.Lexicon;
+using Vice.Mux.Sinks;
+
+namespace Vice.Mux.Commands;
+
+internal static class TeeVerb
+{
+    public static void Register(IViceApp app)
+    {
+        app.Register(
+            Verbs.Tee() > Connectors.To() * Targets.Sinks,
+            "Read stdin, broadcast every chunk to every sink and to stdout",
+            HandleAsync);
+    }
+
+    private static async Task<int> HandleAsync(CommandContext ctx, CancellationToken ct)
+    {
+        var specs = SinkSpec.Collect(ctx, "sinks");
+        if (specs.Count == 0)
+        {
+            throw new ArgumentException("tee: at least one sink is required");
+        }
+
+        var sinks = new List<ISink>(specs.Count + 1);
+        foreach (var s in specs)
+        {
+            sinks.Add(SinkFactory.Open(s));
+        }
+
+        sinks.Add(new StdoutSink());
+
+        var bufferSize = ctx.GetGlobalOption("chunk-size").AsPositiveInt() ?? 65536;
+        var pool = ArrayPool<byte>.Shared;
+        var buffer = pool.Rent(bufferSize);
+        try
+        {
+            var stdin = Console.OpenStandardInput();
+            int read;
+            while ((read = await stdin.ReadAsync(buffer.AsMemory(0, bufferSize), ct)) > 0)
+            {
+                var copy = pool.Rent(read);
+                try
+                {
+                    Buffer.BlockCopy(buffer, 0, copy, 0, read);
+                    var mem = new ReadOnlyMemory<byte>(copy, 0, read);
+                    var writes = new Task[sinks.Count];
+                    for (int i = 0; i < sinks.Count; i++)
+                    {
+                        writes[i] = sinks[i].WriteAsync(mem, ct).AsTask();
+                    }
+
+                    await Task.WhenAll(writes);
+                }
+                finally
+                {
+                    pool.Return(copy);
+                }
+            }
+            foreach (var s in sinks)
+            {
+                await s.FlushAsync(ct);
+            }
+        }
+        finally
+        {
+            pool.Return(buffer);
+            foreach (var s in sinks)
+            {
+                await s.DisposeAsync();
+            }
+        }
+        return 0;
+    }
+
+    private sealed class StdoutSink : ISink
+    {
+        private readonly Stream _out = Console.OpenStandardOutput();
+        public string Label => "stdout";
+        public ValueTask WriteAsync(ReadOnlyMemory<byte> chunk, CancellationToken ct) => _out.WriteAsync(chunk, ct);
+        public ValueTask FlushAsync(CancellationToken ct) => new(_out.FlushAsync(ct));
+        public async ValueTask DisposeAsync()
+        {
+            try
+            {
+                await _out.FlushAsync();
+            }
+            catch (Exception ex) when (ex is IOException or ObjectDisposedException)
+            {
+                System.Diagnostics.Debug.WriteLine(ex);
+            }
+        }
+    }
+}

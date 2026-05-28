@@ -1,0 +1,410 @@
+using System.Collections.Concurrent;
+using System.IO.Pipes;
+using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
+using System.Security.Principal;
+using Vice.Logging;
+
+namespace Vice.Ipc;
+
+internal sealed class PipeServer : IPipeServer
+{
+    private const int MaxConcurrentClients = 64;
+    private static readonly TimeSpan ClientDisposeTimeout = TimeSpan.FromSeconds(5);
+
+    private readonly string _pipeName;
+    private readonly Func<PipeMessage, CancellationToken, Task<PipeMessage?>> _messageHandler;
+    private readonly CancellationTokenSource _cts = new();
+    private readonly ConcurrentDictionary<int, Task> _clientTasks = new();
+    private int _nextClientId;
+    private Task? _acceptLoop;
+    private CancellationTokenSource? _linkedCts;
+    private volatile bool _isListening;
+    private volatile bool _acceptLoopCrashed;
+    private Exception? _faulted;
+
+    public PipeServer(
+        string pipeName,
+        Func<PipeMessage, CancellationToken, Task<PipeMessage?>> messageHandler,
+        IViceLogger? logger = null)
+    {
+        _ = logger;
+        _pipeName = pipeName;
+        _messageHandler = messageHandler;
+    }
+
+    public bool IsListening => _isListening;
+
+    public bool AcceptLoopCrashed => _acceptLoopCrashed;
+
+    public Exception? Faulted => _faulted;
+
+    public Task StartAsync(CancellationToken ct)
+    {
+        var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, _cts.Token);
+        _linkedCts = linkedCts;
+        var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        _acceptLoop = Task.Run(() => AcceptLoopAsync(linkedCts.Token, ready), linkedCts.Token);
+
+        return ready.Task;
+    }
+
+    private async Task AcceptLoopAsync(CancellationToken ct, TaskCompletionSource ready)
+    {
+        _isListening = true;
+        var readyCompleted = false;
+
+        try
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                NamedPipeServerStream? serverStream = null;
+
+                try
+                {
+                    serverStream = CreateServerStream();
+
+                    if (!readyCompleted)
+                    {
+                        ready.TrySetResult();
+                        readyCompleted = true;
+                    }
+
+                    try
+                    {
+                        await WaitForConnectionWithRestrictiveUmaskAsync(serverStream, ct).ConfigureAwait(false);
+                        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+                        {
+                            TryRestrictUnixPipePermissions();
+                        }
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        await serverStream.DisposeAsync().ConfigureAwait(false);
+                        serverStream = null;
+                        break;
+                    }
+                    catch (Exception ex)
+                    {
+                        Vice.Log.Emit(ViceLogLevel.Warn, $"pipe wait-for-connection failed on '{_pipeName}'", ex);
+                        await serverStream.DisposeAsync().ConfigureAwait(false);
+                        serverStream = null;
+                        continue;
+                    }
+
+                    if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows) && !VerifyPeerUid(serverStream))
+                    {
+                        await serverStream.DisposeAsync().ConfigureAwait(false);
+                        serverStream = null;
+                        continue;
+                    }
+
+                    if (_clientTasks.Count >= MaxConcurrentClients)
+                    {
+                        Vice.Log.Emit(ViceLogLevel.Warn,
+                            $"pipe server '{_pipeName}' at concurrent-client cap ({MaxConcurrentClients}); rejecting connection");
+                        await serverStream.DisposeAsync().ConfigureAwait(false);
+                        serverStream = null;
+                        continue;
+                    }
+
+                    var attached = serverStream;
+                    serverStream = null;
+                    var clientId = Interlocked.Increment(ref _nextClientId);
+                    var clientTask = HandleClientAsync(attached, clientId, ct);
+
+                    _clientTasks[clientId] = clientTask;
+                }
+                catch (Exception ex)
+                {
+                    if (serverStream is not null)
+                    {
+                        try
+                        {
+                            await serverStream.DisposeAsync().ConfigureAwait(false);
+                        }
+                        catch (Exception disposeEx)
+                        {
+                            Vice.Log.Emit(ViceLogLevel.Warn, "pipe server stream dispose failed", disposeEx);
+                        }
+                    }
+
+                    Vice.Log.Emit(ViceLogLevel.Error, $"pipe accept loop iteration failed on '{_pipeName}'", ex);
+                    throw;
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            Vice.Log.Emit(ViceLogLevel.Trace, $"pipe accept loop cancelled on '{_pipeName}'");
+        }
+        catch (Exception ex)
+        {
+            _acceptLoopCrashed = true;
+            _faulted = ex;
+            Vice.Log.Emit(ViceLogLevel.Error, $"pipe accept loop crashed on '{_pipeName}'", ex);
+
+            if (!readyCompleted)
+            {
+                ready.TrySetException(ex);
+                readyCompleted = true;
+            }
+        }
+        finally
+        {
+            _isListening = false;
+
+            if (!readyCompleted)
+            {
+                ready.TrySetResult();
+            }
+        }
+    }
+
+    private NamedPipeServerStream CreateServerStream()
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            return CreateWindowsAclStream();
+        }
+
+        return new NamedPipeServerStream(
+            _pipeName,
+            PipeDirection.InOut,
+            NamedPipeServerStream.MaxAllowedServerInstances,
+            PipeTransmissionMode.Byte,
+            PipeOptions.Asynchronous);
+    }
+
+    private async Task WaitForConnectionWithRestrictiveUmaskAsync(
+        NamedPipeServerStream stream, CancellationToken ct)
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            await stream.WaitForConnectionAsync(ct).ConfigureAwait(false);
+            return;
+        }
+
+        uint previousMask;
+        try
+        {
+            previousMask = Umask(UnixUmaskUserOnly);
+        }
+        catch (Exception ex)
+        {
+            Vice.Log.Emit(ViceLogLevel.Warn,
+                "umask P/Invoke failed; pipe socket may be created with default permissions", ex);
+            await stream.WaitForConnectionAsync(ct).ConfigureAwait(false);
+            return;
+        }
+
+        try
+        {
+            await stream.WaitForConnectionAsync(ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            try
+            {
+                _ = Umask(previousMask);
+            }
+            catch (Exception ex)
+            {
+                Vice.Log.Emit(ViceLogLevel.Warn, "umask restore failed", ex);
+            }
+        }
+    }
+
+    [UnsupportedOSPlatform("windows")]
+    private void TryRestrictUnixPipePermissions()
+    {
+        var socketPath = Path.Combine(Path.GetTempPath(), "CoreFxPipe_" + _pipeName);
+        try
+        {
+            if (File.Exists(socketPath))
+            {
+                File.SetUnixFileMode(socketPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            }
+        }
+        catch (Exception ex)
+        {
+            Vice.Log.Emit(ViceLogLevel.Warn, $"failed to restrict permissions on {socketPath}", ex);
+        }
+    }
+
+    private const uint UnixUmaskUserOnly = 0x3F;
+
+    [DllImport("libc", EntryPoint = "umask")]
+    private static extern uint Umask(uint mask);
+
+    private bool VerifyPeerUid(NamedPipeServerStream stream)
+    {
+        if (!PeerCredentials.TryGetEuid(out var euid))
+        {
+            Vice.Log.Emit(ViceLogLevel.Warn, "pipe peer-uid check: geteuid failed; rejecting connection");
+            return false;
+        }
+
+        if (!PeerCredentials.TryGetPeerUid(stream.SafePipeHandle, out var peerUid))
+        {
+            Vice.Log.Emit(ViceLogLevel.Warn, $"pipe peer-uid check: unable to determine peer uid on '{_pipeName}'; rejecting");
+            return false;
+        }
+
+        if (peerUid != euid)
+        {
+            Vice.Log.Emit(ViceLogLevel.Warn, $"pipe peer-uid mismatch on '{_pipeName}': peer={peerUid} euid={euid}; rejecting");
+            return false;
+        }
+
+        return true;
+    }
+
+    [SupportedOSPlatform("windows")]
+    private NamedPipeServerStream CreateWindowsAclStream()
+    {
+        var security = new PipeSecurity();
+        var currentUser = WindowsIdentity.GetCurrent().User
+            ?? throw new InvalidOperationException("Cannot resolve current Windows user SID for pipe ACL.");
+
+        security.AddAccessRule(new PipeAccessRule(
+            currentUser,
+            PipeAccessRights.ReadWrite,
+            System.Security.AccessControl.AccessControlType.Allow));
+
+        return NamedPipeServerStreamAcl.Create(
+            _pipeName,
+            PipeDirection.InOut,
+            NamedPipeServerStream.MaxAllowedServerInstances,
+            PipeTransmissionMode.Byte,
+            PipeOptions.Asynchronous,
+            inBufferSize: 0,
+            outBufferSize: 0,
+            pipeSecurity: security);
+    }
+
+    private async Task HandleClientAsync(NamedPipeServerStream stream, int clientId, CancellationToken ct)
+    {
+        try
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                PipeMessage? message;
+
+                try
+                {
+                    message = await PipeProtocol.ReadMessageAsync(stream, ct).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+                catch (IOException ex)
+                {
+                    Vice.Log.Emit(ViceLogLevel.Debug, "pipe client read failed", ex);
+                    break;
+                }
+
+                if (message is null)
+                {
+                    break;
+                }
+
+                PipeMessage? response;
+
+                try
+                {
+                    response = await _messageHandler(message, ct).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    Vice.Log.Emit(ViceLogLevel.Warn, "pipe message handler threw", ex);
+                    response = new CommandResponse
+                    {
+                        ExitCode = 1,
+                        Output = string.Empty,
+                        Error = ex.Message,
+                    };
+                }
+
+                if (response is not null)
+                {
+                    try
+                    {
+                        await PipeProtocol.WriteMessageAsync(stream, response, ct).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        break;
+                    }
+                    catch (IOException ex)
+                    {
+                        Vice.Log.Emit(ViceLogLevel.Debug, "pipe client write failed", ex);
+                        break;
+                    }
+                }
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Vice.Log.Emit(ViceLogLevel.Warn, "pipe client handler threw", ex);
+        }
+        finally
+        {
+            await stream.DisposeAsync().ConfigureAwait(false);
+            _clientTasks.TryRemove(clientId, out _);
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await _cts.CancelAsync().ConfigureAwait(false);
+
+        if (_acceptLoop is not null)
+        {
+            try
+            {
+                await _acceptLoop.ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                Vice.Log.Emit(ViceLogLevel.Trace, "pipe accept loop cancelled during dispose");
+            }
+            catch (Exception ex)
+            {
+                Vice.Log.Emit(ViceLogLevel.Warn, "pipe accept loop faulted during dispose", ex);
+            }
+        }
+
+        var tasks = _clientTasks.Values.ToArray();
+
+        if (tasks.Length > 0)
+        {
+            try
+            {
+                await Task.WhenAll(tasks).WaitAsync(ClientDisposeTimeout).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                Vice.Log.Emit(ViceLogLevel.Trace, "pipe client tasks cancelled during dispose");
+            }
+            catch (TimeoutException)
+            {
+                Vice.Log.Emit(ViceLogLevel.Warn,
+                    $"pipe client tasks did not finish within {ClientDisposeTimeout.TotalSeconds:0.0}s; proceeding with dispose");
+            }
+            catch (Exception ex)
+            {
+                Vice.Log.Emit(ViceLogLevel.Warn, "pipe client task faulted during dispose", ex);
+            }
+        }
+
+        _cts.Dispose();
+        _linkedCts?.Dispose();
+    }
+}
