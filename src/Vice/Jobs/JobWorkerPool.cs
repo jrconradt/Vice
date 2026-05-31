@@ -5,6 +5,8 @@ namespace Vice.Jobs;
 
 internal sealed class JobWorkerPool
 {
+    public const int MAX_QUEUED_JOBS = 1024;
+
     private readonly Func<JobStateHolder, Task> _executeJob;
     private readonly CancellationToken _shutdownToken;
     private readonly TimeSpan _shutdownTimeout;
@@ -26,8 +28,9 @@ internal sealed class JobWorkerPool
         _shutdownToken = shutdownToken;
         _shutdownTimeout = shutdownTimeout;
 
-        _workChannel = Channel.CreateUnbounded<JobStateHolder>(new UnboundedChannelOptions
+        _workChannel = Channel.CreateBounded<JobStateHolder>(new BoundedChannelOptions(MAX_QUEUED_JOBS)
         {
+            FullMode = BoundedChannelFullMode.Wait,
             SingleReader = false,
             SingleWriter = false,
         });

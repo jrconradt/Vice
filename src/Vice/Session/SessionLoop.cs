@@ -134,7 +134,8 @@ internal sealed class SessionLoop : ISessionLoop, IDisposable
         var activeJobs = jobs.Count(j => j.Status is JobStatus.Running or JobStatus.Queued);
         if (activeJobs > 0)
         {
-            _console.WriteLine($"Detaching with {activeJobs} active job(s). They will continue in daemon mode.");
+            _console.WriteLine($"Continuing with {activeJobs} active job(s) in this same process; jobs keep running while this terminal stays open.");
+            _console.WriteLine("Closing the terminal sends SIGHUP and stops the jobs. Run under nohup/systemd/supervisord, or 'vice daemon', for terminal-independent persistence.");
             _console.WriteLine("Run 'vice' to reconnect.");
             return true;
         }

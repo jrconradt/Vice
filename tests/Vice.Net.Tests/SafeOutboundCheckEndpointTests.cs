@@ -4,6 +4,9 @@ using Xunit;
 
 namespace Vice.Net.Tests;
 
+[CollectionDefinition("SafeOutboundPolicy", DisableParallelization = true)]
+public sealed class SafeOutboundPolicyCollection { }
+
 [Collection("SafeOutboundPolicy")]
 public class SafeOutboundCheckEndpointTests : IDisposable
 {

@@ -1,4 +1,3 @@
-using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using Vice.Concurrency;
 using Vice.Configuration;
@@ -9,10 +8,7 @@ namespace Vice.Session;
 
 public sealed class SessionState : IAsyncDisposable
 {
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        WriteIndented = true
-    };
+    public const int ProtocolVersion = 1;
 
     private readonly SerialQueue _writeQueue = new();
     private int _disposed;
@@ -34,7 +30,7 @@ public sealed class SessionState : IAsyncDisposable
         _ = logger;
         Dirs = dirs ?? throw new ArgumentNullException(nameof(dirs));
         var name = appName ?? dirs.AppName;
-        PipeName = pipeName ?? $"{name}-session-{Environment.UserName}";
+        PipeName = pipeName ?? $"{name}-session-v{ProtocolVersion}-{Environment.UserName}";
 
         HistoryPath = Dirs.ResolveFileWithLegacy(Dirs.StateDir, "history");
         JobsPath = Dirs.ResolveFileWithLegacy(Dirs.DataDir, "jobs.json");
@@ -63,7 +59,7 @@ public sealed class SessionState : IAsyncDisposable
 
         if (element.ValueKind == JsonValueKind.Number && element.TryGetInt32(out var n))
         {
-            return n;
+            return Math.Clamp(n, 1, Environment.ProcessorCount * 4);
         }
 
         return 3;
@@ -86,9 +82,7 @@ public sealed class SessionState : IAsyncDisposable
             await SaveConfigAsync(config, token).ConfigureAwait(false);
         }, ct);
 
-    [RequiresUnreferencedCode("Generic config deserialize uses reflection over T")]
-    [RequiresDynamicCode("Generic config deserialize uses reflection over T")]
-    public async Task<T> GetConfigAsync<T>(string key, T defaultValue, CancellationToken ct)
+    public async Task<int> GetConfigAsync(string key, int defaultValue, CancellationToken ct)
     {
         var config = await LoadConfigAsync(ct).ConfigureAwait(false);
         if (!config.TryGetValue(key, out var element))
@@ -96,28 +90,40 @@ public sealed class SessionState : IAsyncDisposable
             return defaultValue;
         }
 
-        try
+        if (element.ValueKind == JsonValueKind.Number && element.TryGetInt32(out var n))
         {
-            var value = element.Deserialize<T>(JsonOptions);
-            return value ?? defaultValue;
+            return n;
         }
-        catch (Exception ex)
-        {
-            Vice.Log.Emit(ViceLogLevel.Debug, $"config deserialize miss for key '{key}'", ex);
-            return defaultValue;
-        }
+
+        return defaultValue;
     }
 
-    [RequiresUnreferencedCode("Generic config serialize uses reflection over T")]
-    [RequiresDynamicCode("Generic config serialize uses reflection over T")]
-    public Task SetConfigAsync<T>(string key, T value, CancellationToken ct)
+    public async Task<string> GetConfigAsync(string key, string defaultValue, CancellationToken ct)
+    {
+        var config = await LoadConfigAsync(ct).ConfigureAwait(false);
+        if (!config.TryGetValue(key, out var element))
+        {
+            return defaultValue;
+        }
+
+        if (element.ValueKind == JsonValueKind.String && element.GetString() is { } s)
+        {
+            return s;
+        }
+
+        return defaultValue;
+    }
+
+    public Task SetConfigAsync(string key, int value, CancellationToken ct)
         => _writeQueue.EnqueueAsync(async token =>
         {
             var config = await LoadConfigAsync(token).ConfigureAwait(false);
-            var serialized = JsonSerializer.SerializeToElement(value, JsonOptions);
-            config[key] = serialized;
+            config[key] = JsonDocument.Parse(value.ToString(System.Globalization.CultureInfo.InvariantCulture)).RootElement.Clone();
             await SaveConfigAsync(config, token).ConfigureAwait(false);
         }, ct);
+
+    public Task SetConfigAsync(string key, string value, CancellationToken ct)
+        => SetStringConfigAsync(key, value, ct);
 
     private async Task<Dictionary<string, JsonElement>> LoadConfigAsync(CancellationToken ct)
     {
@@ -139,9 +145,42 @@ public sealed class SessionState : IAsyncDisposable
         }
         catch (JsonException ex)
         {
-            Vice.Log.Emit(ViceLogLevel.Warn, $"config.json corrupt at {ConfigPath}, returning empty", ex);
+            await QuarantineCorruptConfigAsync(json, ex, ct).ConfigureAwait(false);
             return new Dictionary<string, JsonElement>();
         }
+    }
+
+    private async Task QuarantineCorruptConfigAsync(string payload, Exception ex, CancellationToken ct)
+    {
+        var stamp = DateTimeOffset.UtcNow.ToString("yyyyMMddTHHmmssZ");
+        var corruptPath = $"{ConfigPath}.corrupt-{stamp}";
+        try
+        {
+            var options = new FileStreamOptions
+            {
+                Mode = FileMode.Create,
+                Access = FileAccess.Write,
+            };
+            if (!OperatingSystem.IsWindows())
+            {
+                options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+            }
+
+            await using (var fs = new FileStream(corruptPath, options))
+            {
+                var bytes = System.Text.Encoding.UTF8.GetBytes(payload);
+                await fs.WriteAsync(bytes, ct).ConfigureAwait(false);
+                await fs.FlushAsync(ct).ConfigureAwait(false);
+            }
+            Vice.Persistence.FileAccessControl.RestrictToCurrentUser(corruptPath);
+        }
+        catch (Exception writeEx)
+        {
+            Vice.Log.Emit(ViceLogLevel.Warn, $"failed to quarantine corrupt config.json to {corruptPath}", writeEx);
+        }
+        Vice.Log.Emit(ViceLogLevel.Warn,
+                      $"config.json corrupt at {ConfigPath}, returning empty (quarantined to {corruptPath})",
+                      ex);
     }
 
     private async Task SaveConfigAsync(Dictionary<string, JsonElement> config, CancellationToken ct)

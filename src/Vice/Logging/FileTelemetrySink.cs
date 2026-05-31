@@ -8,6 +8,8 @@ public sealed class FileTelemetrySink : IAsyncDisposable
 {
     public const string ConsentEnvVar = "VICE_TELEMETRY_CONSENT";
 
+    private const long MaxFileBytes = 4L * 1024 * 1024;
+
     private readonly string _path;
     private readonly SerialQueue _writer = new();
     private readonly bool _enabled;
@@ -51,7 +53,7 @@ public sealed class FileTelemetrySink : IAsyncDisposable
         {
             foreach (var kv in properties)
             {
-                payload[kv.Key] = kv.Value;
+                payload[kv.Key] = Vice.Session.InputHistory.Redact(kv.Value);
             }
         }
 
@@ -70,13 +72,13 @@ public sealed class FileTelemetrySink : IAsyncDisposable
             ["timestamp"] = DateTime.UtcNow.ToString("o"),
             ["event"] = "exception",
             ["type"] = ex.GetType().FullName,
-            ["message"] = ex.Message,
+            ["message"] = Vice.Session.InputHistory.Redact(ex.Message),
         };
         if (properties is not null)
         {
             foreach (var kv in properties)
             {
-                payload[kv.Key] = kv.Value;
+                payload[kv.Key] = Vice.Session.InputHistory.Redact(kv.Value);
             }
         }
 
@@ -100,6 +102,7 @@ public sealed class FileTelemetrySink : IAsyncDisposable
             try
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
+                Rotate();
                 var options = new FileStreamOptions
                 {
                     Mode = FileMode.Append,
@@ -123,6 +126,19 @@ public sealed class FileTelemetrySink : IAsyncDisposable
                 System.Diagnostics.Debug.WriteLine(ex);
             }
         }, default);
+    }
+
+    private void Rotate()
+    {
+        var info = new FileInfo(_path);
+        if (!info.Exists
+            || info.Length < MaxFileBytes)
+        {
+            return;
+        }
+
+        var rotated = _path + ".1";
+        File.Move(_path, rotated, overwrite: true);
     }
 
     public Task FlushAsync() => _writer.EnqueueAsync(_ => Task.CompletedTask, default);

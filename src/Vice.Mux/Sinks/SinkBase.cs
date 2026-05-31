@@ -1,3 +1,6 @@
+using Vice;
+using Vice.Logging;
+
 namespace Vice.Mux.Sinks;
 
 internal abstract class SinkBase : ISink
@@ -26,7 +29,9 @@ internal abstract class SinkBase : ISink
         }
         catch (Exception ex) when (ex is IOException or ObjectDisposedException)
         {
-            System.Diagnostics.Debug.WriteLine(ex);
+            Log.Emit(ViceLogLevel.Warn,
+                     $"Sink '{Label}' final flush failed during dispose.",
+                     ex);
         }
         try
         {
@@ -34,7 +39,9 @@ internal abstract class SinkBase : ISink
         }
         catch (Exception ex) when (ex is IOException or ObjectDisposedException)
         {
-            System.Diagnostics.Debug.WriteLine(ex);
+            Log.Emit(ViceLogLevel.Warn,
+                     $"Sink '{Label}' stream dispose failed.",
+                     ex);
         }
         await DisposeCoreAsync().ConfigureAwait(false);
     }

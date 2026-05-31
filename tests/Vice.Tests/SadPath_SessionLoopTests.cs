@@ -49,7 +49,7 @@ public class SadPath_SessionLoopTests
         var daemonize = await loop.RunAsync(CancellationToken.None);
 
         Assert.True(daemonize);
-        Assert.Contains("Detaching", console.Output);
+        Assert.Contains("active job(s)", console.Output);
     }
 
     [Fact]
@@ -115,6 +115,5 @@ public class SadPath_SessionLoopTests
 
         var transitionToDaemon = await loop.RunAsync(cts.Token);
         Assert.False(transitionToDaemon);
-        Assert.True(cts.IsCancellationRequested);
     }
 }

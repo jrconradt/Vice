@@ -156,4 +156,244 @@ public class ViceCompositionGeneratorTests
         Assert.NotNull(vice006);
         Assert.Equal(DiagnosticSeverity.Error, vice006!.Severity);
     }
+
+    [Fact]
+    public void HappyPath_EmittedSource_MatchesGolden()
+    {
+        const string SOURCE = """
+            using Vice.Composition;
+            namespace MyApp;
+
+            [ViceHost]
+            internal sealed class HostServices
+            {
+                public IMyService Svc { get; } = null!;
+            }
+
+            public interface IMyService { }
+
+            internal static class Factories
+            {
+                [ViceSessionService]
+                public static IMyService BuildSvc(IMyService svc) => svc;
+            }
+            """;
+
+        const string EXPECTED = "#nullable enable\n"
+            + "using System;\n"
+            + "using Vice;\n"
+            + "\n"
+            + "namespace MyApp;\n"
+            + "\n"
+            + "internal static class ViceComposition\n"
+            + "{\n"
+            + "    internal static global::Vice.ViceAppBuilder ComposeFromAttributes(this global::Vice.ViceAppBuilder builder, global::MyApp.HostServices host)\n"
+            + "    {\n"
+            + "        if (builder is null)\n"
+            + "        {\n"
+            + "            throw new global::System.ArgumentNullException(nameof(builder));\n"
+            + "        }\n"
+            + "        if (host is null)\n"
+            + "        {\n"
+            + "            throw new global::System.ArgumentNullException(nameof(host));\n"
+            + "        }\n"
+            + "        builder.WithSessionService<global::MyApp.IMyService>(global::MyApp.Factories.BuildSvc(host.Svc));\n"
+            + "        return builder;\n"
+            + "    }\n"
+            + "\n"
+            + "    internal static global::Vice.IViceApp RegisterDiscoveredPacks(this global::Vice.IViceApp app, global::MyApp.HostServices host)\n"
+            + "    {\n"
+            + "        if (app is null)\n"
+            + "        {\n"
+            + "            throw new global::System.ArgumentNullException(nameof(app));\n"
+            + "        }\n"
+            + "        if (host is null)\n"
+            + "        {\n"
+            + "            throw new global::System.ArgumentNullException(nameof(host));\n"
+            + "        }\n"
+            + "        return app;\n"
+            + "    }\n"
+            + "}\n";
+
+        var result = GeneratorHarness.Run(SOURCE);
+
+        Assert.Single(result.GeneratedSources);
+        var emitted = result.GeneratedSources[0].Replace("\r\n", "\n");
+        Assert.Equal(EXPECTED, emitted);
+    }
+
+    [Fact]
+    public void HappyPath_GeneratedWiring_CompilesAgainstViceAssembly()
+    {
+        const string SOURCE = """
+            using Vice.Composition;
+            namespace MyApp;
+
+            [ViceHost]
+            internal sealed class HostServices
+            {
+                public IMyService Svc { get; } = null!;
+            }
+
+            public interface IMyService { }
+
+            internal static class Factories
+            {
+                [ViceSessionService]
+                public static IMyService BuildSvc(IMyService svc) => svc;
+            }
+            """;
+
+        var result = GeneratorHarness.Run(SOURCE);
+
+        Assert.Empty(result.GeneratorDiagnostics.Where(d => d.Severity == DiagnosticSeverity.Error));
+        Assert.Empty(result.CompilationDiagnostics.Where(d => d.Severity == DiagnosticSeverity.Error));
+    }
+
+    [Fact]
+    public void Targets_ChainScanSuccess_EmitsTargetSetFromTargetName()
+    {
+        const string SOURCE = """
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Vice;
+            using Vice.Composition;
+            using Vice.Execution;
+
+            namespace MyApp;
+
+            public static class MyTargets
+            {
+                [TargetName("foo")]
+                public static readonly TargetDef Foo = new("foo");
+            }
+
+            public static class Commands
+            {
+                [ViceCommand]
+                public static Task<int> Handle(CommandContext ctx, CancellationToken ct) => Task.FromResult(0);
+
+                public static void Wire(IViceApp app)
+                {
+                    app.Register("do" * MyTargets.Foo, "does a thing", Handle);
+                }
+            }
+            """;
+
+        var result = GeneratorHarness.Run(SOURCE);
+
+        Assert.Empty(result.GeneratorDiagnostics.Where(d => d.Id == "VICE010"));
+        Assert.Empty(result.GeneratorDiagnostics.Where(d => d.Id == "VICE011"));
+        var emitted = result.CombinedSource;
+        Assert.Contains("static class Handle_", emitted);
+        Assert.Contains("_Targets", emitted);
+        Assert.Contains("TargetSet Of(", emitted);
+        Assert.Contains("public string Foo => _ctx[\"foo\"]", emitted);
+    }
+
+    [Fact]
+    public void Targets_ChainThroughLocal_EmitsVICE010Warning()
+    {
+        const string SOURCE = """
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Vice;
+            using Vice.Composition;
+            using Vice.Execution;
+
+            namespace MyApp;
+
+            public static class MyTargets
+            {
+                [TargetName("foo")]
+                public static readonly TargetDef Foo = new("foo");
+            }
+
+            public static class Commands
+            {
+                [ViceCommand]
+                public static Task<int> Handle(CommandContext ctx, CancellationToken ct) => Task.FromResult(0);
+
+                public static void Wire(IViceApp app)
+                {
+                    var chain = "do" * MyTargets.Foo;
+                    app.Register(chain, "does a thing", Handle);
+                }
+            }
+            """;
+
+        var result = GeneratorHarness.Run(SOURCE);
+
+        var vice010 = result.GeneratorDiagnostics.FirstOrDefault(d => d.Id == "VICE010");
+        Assert.NotNull(vice010);
+        Assert.Equal(DiagnosticSeverity.Warning, vice010!.Severity);
+    }
+
+    [Fact]
+    public void Targets_DisagreeingRegistrations_EmitsVICE011Error()
+    {
+        const string SOURCE = """
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Vice;
+            using Vice.Composition;
+            using Vice.Execution;
+
+            namespace MyApp;
+
+            public static class MyTargets
+            {
+                [TargetName("foo")]
+                public static readonly TargetDef Foo = new("foo");
+
+                [TargetName("bar")]
+                public static readonly TargetDef Bar = new("bar");
+            }
+
+            public static class Commands
+            {
+                [ViceCommand]
+                public static Task<int> Handle(CommandContext ctx, CancellationToken ct) => Task.FromResult(0);
+
+                public static void Wire(IViceApp app)
+                {
+                    app.Register("do" * MyTargets.Foo, "first", Handle);
+                    app.Register("do" * MyTargets.Bar, "second", Handle);
+                }
+            }
+            """;
+
+        var result = GeneratorHarness.Run(SOURCE);
+
+        var vice011 = result.GeneratorDiagnostics.FirstOrDefault(d => d.Id == "VICE011");
+        Assert.NotNull(vice011);
+        Assert.Equal(DiagnosticSeverity.Error, vice011!.Severity);
+    }
+
+    [Fact]
+    public void Targets_ExplicitTargets_OverrideChainInference()
+    {
+        const string SOURCE = """
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Vice.Composition;
+            using Vice.Execution;
+
+            namespace MyApp;
+
+            public static class Commands
+            {
+                [ViceCommand("alpha", "beta")]
+                public static Task<int> Handle(CommandContext ctx, CancellationToken ct) => Task.FromResult(0);
+            }
+            """;
+
+        var result = GeneratorHarness.Run(SOURCE);
+
+        Assert.Empty(result.GeneratorDiagnostics.Where(d => d.Id == "VICE010"));
+        Assert.Empty(result.GeneratorDiagnostics.Where(d => d.Id == "VICE011"));
+        var emitted = result.CombinedSource;
+        Assert.Contains("public string Alpha => _ctx[\"alpha\"]", emitted);
+        Assert.Contains("public string Beta => _ctx[\"beta\"]", emitted);
+    }
 }

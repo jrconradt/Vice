@@ -17,6 +17,12 @@ public class FileAccessControlTests
 
         Assert.True(File.Exists(path));
         Assert.Equal("x", File.ReadAllText(path));
+
+        if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS()
+            || OperatingSystem.IsFreeBSD())
+        {
+            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(path));
+        }
     }
 
     [Fact]
@@ -30,6 +36,13 @@ public class FileAccessControlTests
         FileAccessControl.RestrictToCurrentUser(dir);
 
         Assert.True(Directory.Exists(dir));
+
+        if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS()
+            || OperatingSystem.IsFreeBSD())
+        {
+            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute,
+                         File.GetUnixFileMode(dir));
+        }
     }
 
     [Fact]
@@ -45,7 +58,8 @@ public class FileAccessControlTests
     [Fact]
     public void RestrictToCurrentUser_UnixGivesUserOnlyMode()
     {
-        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS() && !OperatingSystem.IsFreeBSD())
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS()
+            && !OperatingSystem.IsFreeBSD())
         {
             return;
         }
@@ -63,7 +77,8 @@ public class FileAccessControlTests
     [Fact]
     public void RestrictToCurrentUser_UnixGivesUserOnlyDirMode()
     {
-        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS() && !OperatingSystem.IsFreeBSD())
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS()
+            && !OperatingSystem.IsFreeBSD())
         {
             return;
         }

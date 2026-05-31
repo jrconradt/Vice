@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Vice.Commands;
+using Vice.Logging;
 
 namespace Vice.Plugins;
 
@@ -68,8 +69,11 @@ internal static class PluginDispatcher
             return false;
         }
 
-        if (!IsTrustedPluginFile(candidate, pluginDir))
+        if (!IsTrustedPluginFile(candidate, pluginDir, out var rejection))
         {
+            Vice.Log.Emit(
+                ViceLogLevel.Warn,
+                $"plugin rejected as untrusted: candidate='{candidate}' reason={rejection}");
             return false;
         }
 
@@ -109,8 +113,11 @@ internal static class PluginDispatcher
             return false;
         }
 
-        if (!IsTrustedPluginFile(candidate, pluginDir))
+        if (!IsTrustedPluginFile(candidate, pluginDir, out var rejection))
         {
+            Vice.Log.Emit(
+                ViceLogLevel.Warn,
+                $"plugin rejected as untrusted: candidate='{candidate}' reason={rejection}");
             return false;
         }
 
@@ -169,7 +176,7 @@ internal static class PluginDispatcher
         }
     }
 
-    private static bool IsTrustedPluginFile(string candidate, string pluginDir)
+    private static bool IsTrustedPluginFile(string candidate, string pluginDir, out string reason)
     {
         string resolved;
         try
@@ -183,6 +190,7 @@ internal static class PluginDispatcher
         }
         catch
         {
+            reason = "resolve-failed";
             return false;
         }
 
@@ -192,12 +200,20 @@ internal static class PluginDispatcher
         if (!resolved.StartsWith(rooted, StringComparison.Ordinal) &&
             !string.Equals(resolved, pluginDir, StringComparison.Ordinal))
         {
+            reason = "outside-plugin-dir";
             return false;
         }
 
         if (OperatingSystem.IsWindows())
         {
-            return IsTrustedWindowsAcl(resolved);
+            if (IsTrustedWindowsAcl(resolved))
+            {
+                reason = "";
+                return true;
+            }
+
+            reason = "windows-acl-untrusted";
+            return false;
         }
 
         try
@@ -205,18 +221,71 @@ internal static class PluginDispatcher
             var mode = File.GetUnixFileMode(resolved);
             if ((mode & UnixFileMode.OtherWrite) != 0)
             {
+                reason = "file-other-writable";
                 return false;
             }
 
             if ((mode & UnixFileMode.GroupWrite) != 0)
             {
+                reason = "file-group-writable";
                 return false;
             }
         }
         catch (Exception)
         {
+            reason = "file-mode-unreadable";
             return false;
         }
+
+        if (!IsDirectoryNonWritable(pluginDir, out var dirReason))
+        {
+            reason = dirReason;
+            return false;
+        }
+
+        var containingDir = Path.GetDirectoryName(resolved);
+        if (!string.IsNullOrEmpty(containingDir)
+            && !string.Equals(containingDir, pluginDir, StringComparison.Ordinal)
+            && !IsDirectoryNonWritable(containingDir, out var containerReason))
+        {
+            reason = containerReason;
+            return false;
+        }
+
+        reason = "";
+        return true;
+    }
+
+    private static bool IsDirectoryNonWritable(string dir, out string reason)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            reason = "";
+            return true;
+        }
+
+        try
+        {
+            var mode = File.GetUnixFileMode(dir);
+            if ((mode & UnixFileMode.OtherWrite) != 0)
+            {
+                reason = "plugin-dir-other-writable";
+                return false;
+            }
+
+            if ((mode & UnixFileMode.GroupWrite) != 0)
+            {
+                reason = "plugin-dir-group-writable";
+                return false;
+            }
+        }
+        catch (Exception)
+        {
+            reason = "plugin-dir-mode-unreadable";
+            return false;
+        }
+
+        reason = "";
         return true;
     }
 
@@ -248,7 +317,8 @@ internal static class PluginDispatcher
                 System.Security.Principal.WellKnownSidType.AccountDomainAdminsSid, null);
 
             if (!ownerSid.Equals(currentUser) && !ownerSid.Equals(localSystem)
-                && !ownerSid.Equals(administrators) && !ownerSid.Equals(trustedAdmin))
+                && !ownerSid.Equals(administrators)
+                && !ownerSid.Equals(trustedAdmin))
             {
                 return false;
             }
@@ -270,7 +340,8 @@ internal static class PluginDispatcher
                 }
 
                 var sid = (System.Security.Principal.SecurityIdentifier)rule.IdentityReference;
-                if (!sid.Equals(everyone) && !sid.Equals(authenticated) && !sid.Equals(users))
+                if (!sid.Equals(everyone) && !sid.Equals(authenticated)
+                    && !sid.Equals(users))
                 {
                     continue;
                 }
@@ -295,6 +366,9 @@ internal static class PluginDispatcher
 
     public static async Task<int> RunAsync(string pluginPath, string[] args, CancellationToken ct)
     {
+        Vice.Log.Emit(
+            ViceLogLevel.Info,
+            $"plugin execution: path='{pluginPath}' argc={args.Length}");
         var psi = new ProcessStartInfo
         {
             FileName = pluginPath,

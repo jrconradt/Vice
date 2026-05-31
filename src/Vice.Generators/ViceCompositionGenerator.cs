@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Text;
 
 namespace Vice.Generators;
@@ -57,20 +58,96 @@ public sealed partial class ViceCompositionGenerator : IIncrementalGenerator
                 transform: static (ctx, _) => (INamedTypeSymbol)ctx.TargetSymbol)
             .Collect();
 
+        var localPacks = context.SyntaxProvider
+            .ForAttributeWithMetadataName(
+                PACK_ATTR,
+                predicate: static (node, _) => node is TypeDeclarationSyntax,
+                transform: static (ctx, _) => ctx.TargetSymbol as INamedTypeSymbol)
+            .Where(static t => t is not null && t.DeclaredAccessibility != Accessibility.Private)
+            .Collect();
+
+        var localJobRunners = context.SyntaxProvider
+            .ForAttributeWithMetadataName(
+                JOB_RUNNER_ATTR,
+                predicate: static (node, _) => node is MethodDeclarationSyntax,
+                transform: static (ctx, _) => ctx.TargetSymbol as IMethodSymbol)
+            .Where(static m => m is { IsStatic: true } && IsContainerVisible(m))
+            .Collect();
+
+        var localSessionServices = context.SyntaxProvider
+            .ForAttributeWithMetadataName(
+                SESSION_SERVICE_ATTR,
+                predicate: static (node, _) => node is MethodDeclarationSyntax,
+                transform: static (ctx, _) => ctx.TargetSymbol as IMethodSymbol)
+            .Where(static m => m is { IsStatic: true } && IsContainerVisible(m))
+            .Collect();
+
+        var localOptions = context.SyntaxProvider
+            .ForAttributeWithMetadataName(
+                OPTION_ATTR,
+                predicate: static (node, _) => node is TypeDeclarationSyntax,
+                transform: static (ctx, _) => ctx.TargetSymbol as INamedTypeSymbol)
+            .Where(static t => t is { IsAbstract: false } && t.DeclaredAccessibility != Accessibility.Private)
+            .Collect();
+
+        var localCommands = context.SyntaxProvider
+            .ForAttributeWithMetadataName(
+                COMMAND_ATTR,
+                predicate: static (node, _) => node is TypeDeclarationSyntax,
+                transform: static (ctx, _) => ctx.TargetSymbol as INamedTypeSymbol)
+            .Where(static t => t is { IsAbstract: false }
+                               && t.DeclaredAccessibility != Accessibility.Private
+                               && ImplementsIViceCommand(t))
+            .Collect();
+
+        var local = localPacks.Combine(localJobRunners)
+            .Combine(localSessionServices)
+            .Combine(localOptions)
+            .Combine(localCommands);
+
         var compilation = context.CompilationProvider;
 
-        context.RegisterSourceOutput(hosts.Combine(compilation), static (spc, pair) =>
+        context.RegisterSourceOutput(hosts.Combine(local).Combine(compilation), static (spc, pair) =>
         {
-            var (hostList, comp) = pair;
-            Run(spc, hostList, comp);
+            var ((hostList, locals), comp) = pair;
+            var ((((packs, jobRunners), sessionServices), options), commands) = locals;
+            var localDiscovery = new LocalDiscovery(packs, jobRunners, sessionServices, options, commands);
+            Run(spc, hostList, localDiscovery, comp);
         });
 
         InitializeTargetsPipeline(context);
     }
 
-    static void Run(SourceProductionContext spc, ImmutableArray<INamedTypeSymbol> hostList, Compilation comp)
+    sealed class LocalDiscovery
     {
-        var discovered = Discover(hostList, comp);
+        public ImmutableArray<INamedTypeSymbol?> Packs { get; }
+        public ImmutableArray<IMethodSymbol?> JobRunners { get; }
+        public ImmutableArray<IMethodSymbol?> SessionServices { get; }
+        public ImmutableArray<INamedTypeSymbol?> Options { get; }
+        public ImmutableArray<INamedTypeSymbol?> Commands { get; }
+
+        public LocalDiscovery(
+            ImmutableArray<INamedTypeSymbol?> packs,
+            ImmutableArray<IMethodSymbol?> jobRunners,
+            ImmutableArray<IMethodSymbol?> sessionServices,
+            ImmutableArray<INamedTypeSymbol?> options,
+            ImmutableArray<INamedTypeSymbol?> commands)
+        {
+            Packs = packs;
+            JobRunners = jobRunners;
+            SessionServices = sessionServices;
+            Options = options;
+            Commands = commands;
+        }
+    }
+
+    static void Run(
+        SourceProductionContext spc,
+        ImmutableArray<INamedTypeSymbol> hostList,
+        LocalDiscovery local,
+        Compilation comp)
+    {
+        var discovered = Discover(hostList, local, comp);
         var (host, errors) = Validate(discovered, spc);
         foreach (var e in errors)
         {
@@ -86,35 +163,74 @@ public sealed partial class ViceCompositionGenerator : IIncrementalGenerator
         spc.AddSource("ViceComposition.g.cs", SourceText.From(source, Encoding.UTF8));
     }
 
-    static HostInfo Discover(ImmutableArray<INamedTypeSymbol> hostList, Compilation comp)
+    static HostInfo Discover(
+        ImmutableArray<INamedTypeSymbol> hostList,
+        LocalDiscovery local,
+        Compilation comp)
     {
-        var packs = new List<PackEntry>();
-        var jobRunners = new List<FactoryEntry>();
-        var sessionServices = new List<FactoryEntry>();
-        var globalOptions = new List<INamedTypeSymbol>();
-        var commandClasses = new List<INamedTypeSymbol>();
+        var sink = new DiscoverySink();
 
-        var assemblies = new List<IAssemblySymbol> { comp.Assembly };
+        foreach (var pack in local.Packs)
+        {
+            if (pack is not null)
+            {
+                sink.Packs.Add(new PackEntry(pack));
+            }
+        }
+
+        foreach (var runner in local.JobRunners)
+        {
+            if (runner is not null)
+            {
+                sink.JobRunners.Add(new FactoryEntry(runner));
+            }
+        }
+
+        foreach (var service in local.SessionServices)
+        {
+            if (service is not null)
+            {
+                sink.SessionServices.Add(new FactoryEntry(service));
+            }
+        }
+
+        foreach (var option in local.Options)
+        {
+            if (option is not null)
+            {
+                sink.GlobalOptions.Add(option);
+            }
+        }
+
+        foreach (var command in local.Commands)
+        {
+            if (command is not null)
+            {
+                sink.CommandClasses.Add(command);
+            }
+        }
+
         foreach (var r in comp.References)
         {
             if (comp.GetAssemblyOrModuleSymbol(r) is IAssemblySymbol asm)
             {
-                assemblies.Add(asm);
+                Scan(asm.GlobalNamespace, sink);
             }
         }
 
-        foreach (var asm in assemblies)
-        {
-            Scan(asm.GlobalNamespace, packs, jobRunners, sessionServices, globalOptions, commandClasses, asm);
-        }
+        sink.Packs.Sort(static (a, b) => string.CompareOrdinal(LocationKey(a.Type), LocationKey(b.Type)));
+        sink.JobRunners.Sort(static (a, b) => string.CompareOrdinal(LocationKey(a.Method), LocationKey(b.Method)));
+        sink.SessionServices.Sort(static (a, b) => string.CompareOrdinal(LocationKey(a.Method), LocationKey(b.Method)));
+        sink.GlobalOptions.Sort(static (a, b) => string.CompareOrdinal(a.ToDisplayString(), b.ToDisplayString()));
+        sink.CommandClasses.Sort(static (a, b) => string.CompareOrdinal(a.ToDisplayString(), b.ToDisplayString()));
 
-        packs.Sort(static (a, b) => string.CompareOrdinal(LocationKey(a.Type), LocationKey(b.Type)));
-        jobRunners.Sort(static (a, b) => string.CompareOrdinal(LocationKey(a.Method), LocationKey(b.Method)));
-        sessionServices.Sort(static (a, b) => string.CompareOrdinal(LocationKey(a.Method), LocationKey(b.Method)));
-        globalOptions.Sort(static (a, b) => string.CompareOrdinal(a.ToDisplayString(), b.ToDisplayString()));
-        commandClasses.Sort(static (a, b) => string.CompareOrdinal(a.ToDisplayString(), b.ToDisplayString()));
-
-        return new HostInfo(hostList, packs, jobRunners, sessionServices, globalOptions, commandClasses);
+        return new HostInfo(
+            hostList,
+            sink.Packs,
+            sink.JobRunners,
+            sink.SessionServices,
+            sink.GlobalOptions,
+            sink.CommandClasses);
     }
 
     static (HostInfo? host, IReadOnlyList<Diagnostic> errors) Validate(HostInfo discovered, SourceProductionContext spc)
@@ -141,24 +257,40 @@ public sealed partial class ViceCompositionGenerator : IIncrementalGenerator
         var hostProps = HostMembers(host);
         var hostDisplay = host.ToDisplayString();
 
-        var packs = info.Packs;
-        var jobRunners = info.JobRunners;
-        var sessionServices = info.SessionServices;
-        var globalOptions = info.GlobalOptions;
-
         var ns = host.ContainingNamespace.IsGlobalNamespace ? null : host.ContainingNamespace.ToDisplayString();
-        var namespaceBlock = ns is not null ? $"namespace {ns};\n\n" : "";
-
         var hostFq = host.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+        var visibility = host.DeclaredAccessibility == Accessibility.Public ? "public" : "internal";
         var hostNullCheck = host.IsReferenceType
             ? "        if (host is null)\n        {\n            throw new global::System.ArgumentNullException(nameof(host));\n        }\n"
             : "";
 
-        var visibility = host.DeclaredAccessibility == Accessibility.Public ? "public" : "internal";
+        WarnDuplicates(spc, info.SessionServices, "ViceSessionService");
 
-        WarnDuplicates(spc, sessionServices, "ViceSessionService");
+        var composeBody =
+            RenderJobRunners(info.JobRunners, hostProps, spc, hostDisplay)
+            + RenderSessionServices(info.SessionServices, hostProps, spc, hostDisplay)
+            + RenderHostSessionServices(host)
+            + RenderGlobalOptions(info.GlobalOptions, spc, comp);
 
-        var jobRunnerLines = new List<string>();
+        var registerBody =
+            RenderPacks(info.Packs, hostProps, spc, hostDisplay, comp)
+            + RenderCommands(info.CommandClasses);
+
+        return BuildSource(ns,
+                           visibility,
+                           hostFq,
+                           hostNullCheck,
+                           composeBody,
+                           registerBody);
+    }
+
+    static string RenderJobRunners(
+        List<FactoryEntry> jobRunners,
+        List<(string Name, ITypeSymbol Type, bool IsField)> hostProps,
+        SourceProductionContext spc,
+        string hostDisplay)
+    {
+        var lines = new List<string>();
         foreach (var jr in jobRunners)
         {
             if (!TryRenderFactoryCall(jr.Method, hostProps, spc, "ViceJobRunner", hostDisplay, out var call))
@@ -166,10 +298,19 @@ public sealed partial class ViceCompositionGenerator : IIncrementalGenerator
                 continue;
             }
 
-            jobRunnerLines.Add($"        builder.WithJobRunner({call});\n");
+            lines.Add($"        builder.WithJobRunner({call});\n");
         }
 
-        var sessionServiceLines = new List<string>();
+        return string.Concat(lines);
+    }
+
+    static string RenderSessionServices(
+        List<FactoryEntry> sessionServices,
+        List<(string Name, ITypeSymbol Type, bool IsField)> hostProps,
+        SourceProductionContext spc,
+        string hostDisplay)
+    {
+        var lines = new List<string>();
         foreach (var ss in sessionServices)
         {
             if (!TryRenderFactoryCall(ss.Method, hostProps, spc, "ViceSessionService", hostDisplay, out var call))
@@ -178,10 +319,15 @@ public sealed partial class ViceCompositionGenerator : IIncrementalGenerator
             }
 
             var returnType = ss.Method.ReturnType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
-            sessionServiceLines.Add($"        builder.WithSessionService<{returnType}>({call});\n");
+            lines.Add($"        builder.WithSessionService<{returnType}>({call});\n");
         }
 
-        var hostSessionLines = new List<string>();
+        return string.Concat(lines);
+    }
+
+    static string RenderHostSessionServices(INamedTypeSymbol host)
+    {
+        var lines = new List<string>();
         foreach (var hostMember in host.GetMembers()
                      .Where(m => !m.IsStatic && HasAttr(m, SESSION_SERVICE_ATTR)))
         {
@@ -197,11 +343,19 @@ public sealed partial class ViceCompositionGenerator : IIncrementalGenerator
             }
 
             var typeFq = memberType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
-            hostSessionLines.Add($"        builder.WithSessionService<{typeFq}>(host.{hostMember.Name});\n");
+            lines.Add($"        builder.WithSessionService<{typeFq}>(host.{hostMember.Name});\n");
         }
 
+        return string.Concat(lines);
+    }
+
+    static string RenderGlobalOptions(
+        List<INamedTypeSymbol> globalOptions,
+        SourceProductionContext spc,
+        Compilation comp)
+    {
         var globalOptionType = comp.GetTypeByMetadataName("Vice.Options.GlobalOption");
-        var globalOptionLines = new List<string>();
+        var lines = new List<string>();
         foreach (var go in globalOptions)
         {
             if (!IsUsableGlobalOption(go, globalOptionType))
@@ -211,10 +365,20 @@ public sealed partial class ViceCompositionGenerator : IIncrementalGenerator
             }
 
             var fq = go.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
-            globalOptionLines.Add($"        builder.WithGlobalOption(new {fq}());\n");
+            lines.Add($"        builder.WithGlobalOption(new {fq}());\n");
         }
 
-        var packLines = new List<string>();
+        return string.Concat(lines);
+    }
+
+    static string RenderPacks(
+        List<PackEntry> packs,
+        List<(string Name, ITypeSymbol Type, bool IsField)> hostProps,
+        SourceProductionContext spc,
+        string hostDisplay,
+        Compilation comp)
+    {
+        var lines = new List<string>();
         foreach (var p in packs)
         {
             var register = FindPackRegister(p.Type, comp);
@@ -228,14 +392,32 @@ public sealed partial class ViceCompositionGenerator : IIncrementalGenerator
                 continue;
             }
 
-            packLines.Add($"        {p.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)}.{call};\n");
+            lines.Add($"        {p.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)}.{call};\n");
         }
 
-        var commandLines = new List<string>();
-        foreach (var cmd in info.CommandClasses)
+        return string.Concat(lines);
+    }
+
+    static string RenderCommands(List<INamedTypeSymbol> commandClasses)
+    {
+        var lines = new List<string>();
+        foreach (var cmd in commandClasses)
         {
-            commandLines.Add(RenderCommandRegistration(cmd));
+            lines.Add(RenderCommandRegistration(cmd));
         }
+
+        return string.Concat(lines);
+    }
+
+    static string BuildSource(
+        string? ns,
+        string visibility,
+        string hostFq,
+        string hostNullCheck,
+        string composeBody,
+        string registerBody)
+    {
+        var namespaceBlock = ns is not null ? $"namespace {ns};\n\n" : "";
 
         return
             $"#nullable enable\n" +
@@ -252,10 +434,7 @@ public sealed partial class ViceCompositionGenerator : IIncrementalGenerator
             $"            throw new global::System.ArgumentNullException(nameof(builder));\n" +
             $"        }}\n" +
             $"{hostNullCheck}" +
-            $"{string.Concat(jobRunnerLines)}" +
-            $"{string.Concat(sessionServiceLines)}" +
-            $"{string.Concat(hostSessionLines)}" +
-            $"{string.Concat(globalOptionLines)}" +
+            $"{composeBody}" +
             $"        return builder;\n" +
             $"    }}\n" +
             $"\n" +
@@ -266,8 +445,7 @@ public sealed partial class ViceCompositionGenerator : IIncrementalGenerator
             $"            throw new global::System.ArgumentNullException(nameof(app));\n" +
             $"        }}\n" +
             $"{hostNullCheck}" +
-            $"{string.Concat(packLines)}" +
-            $"{string.Concat(commandLines)}" +
+            $"{registerBody}" +
             $"        return app;\n" +
             $"    }}\n" +
             $"}}\n";
@@ -330,36 +508,36 @@ public sealed partial class ViceCompositionGenerator : IIncrementalGenerator
         return list;
     }
 
-    static void Scan(
-        INamespaceSymbol ns,
-        List<PackEntry> packs,
-        List<FactoryEntry> jobRunners,
-        List<FactoryEntry> sessionServices,
-        List<INamedTypeSymbol> globalOptions,
-        List<INamedTypeSymbol> commandClasses,
-        IAssemblySymbol owningAssembly)
+    static void Scan(INamespaceSymbol ns, DiscoverySink sink)
     {
-        foreach (var member in ns.GetMembers())
+        var pending = new Stack<INamespaceOrTypeSymbol>();
+        pending.Push(ns);
+
+        while (pending.Count > 0)
         {
-            switch (member)
+            var current = pending.Pop();
+            switch (current)
             {
                 case INamespaceSymbol n:
-                    Scan(n, packs, jobRunners, sessionServices, globalOptions, commandClasses, owningAssembly);
+                    foreach (var member in n.GetMembers())
+                    {
+                        pending.Push(member);
+                    }
+
                     break;
                 case INamedTypeSymbol t:
-                    ScanType(t, packs, jobRunners, sessionServices, globalOptions, commandClasses);
+                    ScanType(t, sink);
+                    foreach (var nested in t.GetTypeMembers())
+                    {
+                        pending.Push(nested);
+                    }
+
                     break;
             }
         }
     }
 
-    static void ScanType(
-        INamedTypeSymbol t,
-        List<PackEntry> packs,
-        List<FactoryEntry> jobRunners,
-        List<FactoryEntry> sessionServices,
-        List<INamedTypeSymbol> globalOptions,
-        List<INamedTypeSymbol> commandClasses)
+    static void ScanType(INamedTypeSymbol t, DiscoverySink sink)
     {
         if (t.DeclaredAccessibility == Accessibility.Private)
         {
@@ -369,20 +547,20 @@ public sealed partial class ViceCompositionGenerator : IIncrementalGenerator
         var packAttr = t.GetAttributes().FirstOrDefault(a => a.AttributeClass?.ToDisplayString() == PACK_ATTR);
         if (packAttr is not null)
         {
-            packs.Add(new PackEntry(t));
+            sink.Packs.Add(new PackEntry(t));
         }
 
         if (!t.IsAbstract
             && HasAttr(t, COMMAND_ATTR)
             && ImplementsIViceCommand(t))
         {
-            commandClasses.Add(t);
+            sink.CommandClasses.Add(t);
         }
 
         if (!t.IsAbstract
             && HasAttr(t, OPTION_ATTR))
         {
-            globalOptions.Add(t);
+            sink.GlobalOptions.Add(t);
         }
 
         foreach (var m in t.GetMembers())
@@ -392,22 +570,26 @@ public sealed partial class ViceCompositionGenerator : IIncrementalGenerator
                 case IMethodSymbol method when method.IsStatic:
                     if (HasAttr(method, JOB_RUNNER_ATTR))
                     {
-                        jobRunners.Add(new FactoryEntry(method));
+                        sink.JobRunners.Add(new FactoryEntry(method));
                     }
 
                     if (HasAttr(method, SESSION_SERVICE_ATTR))
                     {
-                        sessionServices.Add(new FactoryEntry(method));
+                        sink.SessionServices.Add(new FactoryEntry(method));
                     }
 
                     break;
             }
         }
+    }
 
-        foreach (var nested in t.GetTypeMembers())
-        {
-            ScanType(nested, packs, jobRunners, sessionServices, globalOptions, commandClasses);
-        }
+    sealed class DiscoverySink
+    {
+        public List<PackEntry> Packs { get; } = new();
+        public List<FactoryEntry> JobRunners { get; } = new();
+        public List<FactoryEntry> SessionServices { get; } = new();
+        public List<INamedTypeSymbol> GlobalOptions { get; } = new();
+        public List<INamedTypeSymbol> CommandClasses { get; } = new();
     }
 
     static bool HasAttr(ISymbol sym, string fullName)
@@ -421,6 +603,11 @@ public sealed partial class ViceCompositionGenerator : IIncrementalGenerator
         }
 
         return false;
+    }
+
+    static bool IsContainerVisible(IMethodSymbol method)
+    {
+        return method.ContainingType is { DeclaredAccessibility: not Accessibility.Private };
     }
 
     static bool IsUsableGlobalOption(INamedTypeSymbol type, INamedTypeSymbol? globalOptionType)
@@ -588,20 +775,18 @@ public sealed partial class ViceCompositionGenerator : IIncrementalGenerator
         out string call)
     {
         call = "";
-        var args = new List<string>();
-        foreach (var p in method.Parameters)
+        if (!TryResolveArgs(method,
+                            0,
+                            new List<string>(),
+                            hostMembers,
+                            spc,
+                            $"[{attrLabel}] factory {method.ToDisplayString()}",
+                            hostDisplay,
+                            out var args))
         {
-            if (!TryResolveParameter(p, hostMembers, out var expr))
-            {
-                spc.ReportDiagnostic(Diagnostic.Create(UnresolvedParameter, method.Locations.FirstOrDefault(),
-                    $"[{attrLabel}] factory {method.ToDisplayString()}",
-                    p.Name,
-                    p.Type.ToDisplayString(),
-                    hostDisplay));
-                return false;
-            }
-            args.Add(expr);
+            return false;
         }
+
         var typeFq = method.ContainingType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
         call = $"{typeFq}.{method.Name}({string.Join(", ", args)})";
         return true;
@@ -615,20 +800,50 @@ public sealed partial class ViceCompositionGenerator : IIncrementalGenerator
         out string call)
     {
         call = "";
-        var args = new List<string> { "app" };
-        for (int i = 1; i < method.Parameters.Length; i++)
+        if (!TryResolveArgs(method,
+                            1,
+                            new List<string> { "app" },
+                            hostMembers,
+                            spc,
+                            $"[ViceCommandPack] {method.ContainingType.ToDisplayString()}.Register",
+                            hostDisplay,
+                            out var args))
+        {
+            return false;
+        }
+
+        call = $"Register({string.Join(", ", args)})";
+        return true;
+    }
+
+    static bool TryResolveArgs(
+        IMethodSymbol method,
+        int startIndex,
+        List<string> seedArgs,
+        List<(string Name, ITypeSymbol Type, bool IsField)> hostMembers,
+        SourceProductionContext spc,
+        string label,
+        string hostDisplay,
+        out List<string> args)
+    {
+        args = seedArgs;
+        for (int i = startIndex; i < method.Parameters.Length; i++)
         {
             var p = method.Parameters[i];
             if (!TryResolveParameter(p, hostMembers, out var expr))
             {
-                spc.ReportDiagnostic(Diagnostic.Create(UnresolvedParameter, method.Locations.FirstOrDefault(),
-                    $"[ViceCommandPack] {method.ContainingType.ToDisplayString()}.Register",
-                    p.Name, p.Type.ToDisplayString(), hostDisplay));
+                spc.ReportDiagnostic(Diagnostic.Create(UnresolvedParameter,
+                                                       method.Locations.FirstOrDefault(),
+                                                       label,
+                                                       p.Name,
+                                                       p.Type.ToDisplayString(),
+                                                       hostDisplay));
                 return false;
             }
+
             args.Add(expr);
         }
-        call = $"Register({string.Join(", ", args)})";
+
         return true;
     }
 

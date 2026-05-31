@@ -6,6 +6,8 @@ namespace Vice.Configuration;
 
 public sealed class SourcesFile : IAsyncDisposable
 {
+    public const int CurrentSchemaVersion = 1;
+
     private readonly string _path;
     private readonly SerialQueue _writeQueue = new();
 
@@ -60,13 +62,24 @@ public sealed class SourcesFile : IAsyncDisposable
         try
         {
             var model = JsonSerializer.Deserialize(json, SourcesJsonContext.Default.SourceList);
-            return model is null ? Array.Empty<string>() : Dedup(model.Sources);
+            if (model is null)
+            {
+                return Array.Empty<string>();
+            }
+
+            return Dedup(Migrate(model).Sources);
         }
         catch (JsonException)
         {
             return Array.Empty<string>();
         }
     }
+
+    private static SourceList Migrate(SourceList model) => model.SchemaVersion switch
+    {
+        <= CurrentSchemaVersion => model with { SchemaVersion = CurrentSchemaVersion },
+        _ => model,
+    };
 
     private async Task SaveAsync(IReadOnlyList<string> sources, CancellationToken ct)
     {
@@ -78,6 +91,7 @@ public sealed class SourcesFile : IAsyncDisposable
 
         var model = new SourceList
         {
+            SchemaVersion = CurrentSchemaVersion,
             Sources = sources,
         };
         var json = JsonSerializer.Serialize(model, SourcesJsonContext.Default.SourceList);

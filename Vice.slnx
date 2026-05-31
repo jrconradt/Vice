@@ -1,0 +1,26 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Vice/Vice.csproj" />
+    <Project Path="src/Vice.Build/Vice.Build.csproj" />
+    <Project Path="src/Vice.Cli/Vice.Cli.csproj" />
+    <Project Path="src/Vice.Files/Vice.Files.csproj" />
+    <Project Path="src/Vice.Generators/Vice.Generators.csproj" />
+    <Project Path="src/Vice.Mux/Vice.Mux.csproj" />
+    <Project Path="src/Vice.Mux.Cli/Vice.Mux.Cli.csproj" />
+    <Project Path="src/Vice.Net/Vice.Net.csproj" />
+    <Project Path="src/Vice.Parser/Vice.Parser.csproj" />
+  </Folder>
+  <Folder Name="/bench/">
+    <Project Path="bench/Vice.Benchmarks/Vice.Benchmarks.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Vice.Build.Tests/Vice.Build.Tests.csproj" />
+    <Project Path="tests/Vice.Cli.Tests/Vice.Cli.Tests.csproj" />
+    <Project Path="tests/Vice.Files.Tests/Vice.Files.Tests.csproj" />
+    <Project Path="tests/Vice.Generators.Tests/Vice.Generators.Tests.csproj" />
+    <Project Path="tests/Vice.Mux.Tests/Vice.Mux.Tests.csproj" />
+    <Project Path="tests/Vice.Net.Tests/Vice.Net.Tests.csproj" />
+    <Project Path="tests/Vice.Parser.Tests/Vice.Parser.Tests.csproj" />
+    <Project Path="tests/Vice.Tests/Vice.Tests.csproj" />
+  </Folder>
+</Solution>

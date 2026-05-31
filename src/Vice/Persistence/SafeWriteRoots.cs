@@ -1,3 +1,5 @@
+using Vice.Logging;
+
 namespace Vice.Persistence;
 
 public static class SafeWriteRoots
@@ -19,6 +21,8 @@ public static class SafeWriteRoots
         catch (Exception ex)
         {
             reason = $"invalid path ({ex.Message})";
+            Vice.Log.Emit(ViceLogLevel.Warn,
+                          $"safe-write-root denied: requested='{fullPath}' reason='{reason}'");
             return false;
         }
 
@@ -34,6 +38,8 @@ public static class SafeWriteRoots
         }
 
         reason = $"outside allowed roots ({string.Join(", ", roots)})";
+        Vice.Log.Emit(ViceLogLevel.Warn,
+                      $"safe-write-root denied: requested='{fullPath}' canonical='{canonical}' reason='{reason}'");
         return false;
     }
 
@@ -67,30 +73,31 @@ public static class SafeWriteRoots
         }
     }
 
-    private static string ComputeRootsCacheKey()
+    private static IEnumerable<string?> RootSources()
     {
-        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile) ?? "";
-        var xdgData = Environment.GetEnvironmentVariable("XDG_DATA_HOME") ?? "";
-        var xdgCache = Environment.GetEnvironmentVariable("XDG_CACHE_HOME") ?? "";
-        var xdgState = Environment.GetEnvironmentVariable("XDG_STATE_HOME") ?? "";
-        var tmpdir = Environment.GetEnvironmentVariable("TMPDIR") ?? "";
-        var allowed = Environment.GetEnvironmentVariable("VICE_ALLOWED_ROOTS") ?? "";
-        var cwd = Environment.CurrentDirectory ?? "";
-        return $"{home}|{xdgData}|{xdgCache}|{xdgState}|{tmpdir}|{allowed}|{cwd}";
+        yield return Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        yield return Environment.GetEnvironmentVariable("XDG_DATA_HOME");
+        yield return Environment.GetEnvironmentVariable("XDG_CACHE_HOME");
+        yield return Environment.GetEnvironmentVariable("XDG_STATE_HOME");
+        yield return Environment.GetEnvironmentVariable("TMPDIR");
+        yield return Path.GetTempPath();
+        yield return Environment.CurrentDirectory;
+        var allowed = Environment.GetEnvironmentVariable("VICE_ALLOWED_ROOTS");
+        if (!string.IsNullOrEmpty(allowed))
+        {
+            foreach (var entry in allowed.Split(':', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                yield return entry;
+            }
+        }
     }
+
+    private static string ComputeRootsCacheKey()
+        => string.Join("|", RootSources().Select(s => s ?? ""));
 
     private static List<string> CollectRoots()
     {
-        var raw = new List<string?>
-        {
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            Environment.GetEnvironmentVariable("XDG_DATA_HOME"),
-            Environment.GetEnvironmentVariable("XDG_CACHE_HOME"),
-            Environment.GetEnvironmentVariable("XDG_STATE_HOME"),
-            Environment.GetEnvironmentVariable("TMPDIR"),
-            Path.GetTempPath(),
-            Environment.CurrentDirectory,
-        };
+        var raw = RootSources();
 
         var resolved = new List<string>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
@@ -157,6 +164,26 @@ public static class SafeWriteRoots
                 {
                     var resolvedParent = Path.GetFullPath(target.FullName);
                     full = Path.Combine(resolvedParent, Path.GetFileName(full));
+                }
+            }
+            catch (IOException ex)
+            {
+                System.Diagnostics.Debug.WriteLine(ex);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                System.Diagnostics.Debug.WriteLine(ex);
+            }
+        }
+
+        if (File.Exists(full))
+        {
+            try
+            {
+                var target = File.ResolveLinkTarget(full, returnFinalTarget: true);
+                if (target is not null && !string.IsNullOrEmpty(target.FullName))
+                {
+                    full = Path.GetFullPath(target.FullName);
                 }
             }
             catch (IOException ex)

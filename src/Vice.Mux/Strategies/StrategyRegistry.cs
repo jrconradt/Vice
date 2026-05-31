@@ -1,7 +1,9 @@
 namespace Vice.Mux.Strategies;
 
-internal sealed class StrategyRegistry
+public sealed class StrategyRegistry
 {
+    public static StrategyRegistry Create() => new();
+
     private readonly Dictionary<string, StrategyEntry> _entries = new(StringComparer.OrdinalIgnoreCase);
 
     private bool _frozen;

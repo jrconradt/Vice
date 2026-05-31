@@ -1,9 +1,11 @@
+using Vice.Composition;
 using Vice.Execution;
 using Vice.Lexicon;
 
 namespace Vice.Mux.Commands;
 
-internal static class InspectVerb
+[ViceCommandPack]
+public static class InspectCommands
 {
     public static void Register(IViceApp app)
     {
@@ -76,7 +78,9 @@ internal static class InspectVerb
                 newlines++;
             }
 
-            if ((b >= 0x20 && b < 0x7F) || b == 0x09 || b == 0x0A || b == 0x0D)
+            if ((b >= 0x20 && b < 0x7F) || b == 0x09
+                || b == 0x0A
+                || b == 0x0D)
             {
                 ascii++;
             }

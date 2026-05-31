@@ -5,6 +5,31 @@ namespace Vice.Mux.Sinks;
 
 public static class SinkFactory
 {
+    private static readonly Dictionary<string, Func<string, ISink>> Schemes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["file"] = rest => OpenFile(rest, append: false),
+        ["append"] = rest => OpenFile(rest, append: true),
+        ["tcp"] = OpenTcp,
+        ["exec"] = OpenExec,
+        ["pipe"] = OpenPipe,
+        ["null"] = _ => new NullSink(),
+    };
+
+    public static void Register(string scheme, Func<string, ISink> factory)
+    {
+        if (string.IsNullOrWhiteSpace(scheme))
+        {
+            throw new ArgumentException("sink scheme is empty");
+        }
+
+        if (factory is null)
+        {
+            throw new ArgumentNullException(nameof(factory));
+        }
+
+        Schemes[scheme] = factory;
+    }
+
     public static ISink Open(string spec)
     {
         if (string.IsNullOrWhiteSpace(spec))
@@ -16,16 +41,12 @@ public static class SinkFactory
         var scheme = colon < 0 ? "file" : spec[..colon].ToLowerInvariant();
         var rest = colon < 0 ? spec : spec[(colon + 1)..];
 
-        return scheme switch
+        if (!Schemes.TryGetValue(scheme, out var factory))
         {
-            "file" => OpenFile(rest, append: false),
-            "append" => OpenFile(rest, append: true),
-            "tcp" => OpenTcp(rest),
-            "exec" => OpenExec(rest),
-            "pipe" => OpenPipe(rest),
-            "null" => new NullSink(),
-            _ => throw new ArgumentException($"unknown sink scheme '{scheme}' in '{spec}'"),
-        };
+            throw new ArgumentException($"unknown sink scheme '{scheme}' in '{spec}'");
+        }
+
+        return factory(rest);
     }
 
     private static ISink OpenFile(string path, bool append)

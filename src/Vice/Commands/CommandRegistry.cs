@@ -8,13 +8,16 @@ namespace Vice.Commands;
 
 internal sealed class CommandRegistry : ICommandRegistry
 {
-    private readonly List<CommandRegistration> _registrations = new();
+    private const int DefaultChannelCapacity = 100;
+
+    private readonly object _gate = new();
+    private IReadOnlyList<CommandRegistration> _registrations = Array.Empty<CommandRegistration>();
     private IReadOnlyList<CommandRegistration>? _userRegistrationsCache;
     private IReadOnlyList<CommandRegistration>? _helpVisibleCache;
     private IReadOnlyList<IChainDescriptor>? _descriptorsCache;
     private int _collisionsReported;
 
-    public IReadOnlyList<CommandRegistration> Registrations => _registrations;
+    public IReadOnlyList<CommandRegistration> Registrations => Volatile.Read(ref _registrations);
 
     public IReadOnlyList<CommandRegistration> UserRegistrations
     {
@@ -26,7 +29,7 @@ internal sealed class CommandRegistry : ICommandRegistry
                 return cached;
             }
 
-            var built = _registrations.Where(r => !r.IsBuiltin).ToList();
+            var built = Volatile.Read(ref _registrations).Where(r => !r.IsBuiltin).ToList();
             Interlocked.CompareExchange(ref _userRegistrationsCache, built, null);
             return _userRegistrationsCache!;
         }
@@ -42,9 +45,22 @@ internal sealed class CommandRegistry : ICommandRegistry
                 return cached;
             }
 
-            var built = _registrations.Where(r => r.ShowInHelp).ToList();
+            var built = Volatile.Read(ref _registrations).Where(r => r.ShowInHelp).ToList();
             Interlocked.CompareExchange(ref _helpVisibleCache, built, null);
             return _helpVisibleCache!;
+        }
+    }
+
+    private void Append(CommandRegistration registration)
+    {
+        lock (_gate)
+        {
+            var next = new List<CommandRegistration>(_registrations)
+            {
+                registration,
+            };
+            Volatile.Write(ref _registrations, next);
+            InvalidateCaches();
         }
     }
 
@@ -63,8 +79,7 @@ internal sealed class CommandRegistry : ICommandRegistry
         bool isBuiltin = false,
         bool? showInHelp = null)
     {
-        _registrations.Add(new CommandRegistration(chain, description, handler, isBuiltin, showInHelp));
-        InvalidateCaches();
+        Append(new CommandRegistration(chain, description, handler, isBuiltin, showInHelp));
     }
 
     public void RegisterPipeline(
@@ -75,8 +90,7 @@ internal sealed class CommandRegistry : ICommandRegistry
         bool isBuiltin = false,
         bool? showInHelp = null)
     {
-        _registrations.Add(new CommandRegistration(chain, description, defaultHandler, stageHandlers, isBuiltin, showInHelp));
-        InvalidateCaches();
+        Append(new CommandRegistration(chain, description, defaultHandler, stageHandlers, isBuiltin, showInHelp));
     }
 
     public void RegisterStreaming<T>(
@@ -88,10 +102,22 @@ internal sealed class CommandRegistry : ICommandRegistry
         bool isBuiltin = false,
         bool? showInHelp = null)
     {
-        var capacity = options?.ChannelCapacity ?? 100;
+        var capacity = options?.ChannelCapacity ?? DefaultChannelCapacity;
         var launcher = new StreamingLauncher<T>(producer: handler, consumer: null, defaultChannelCapacity: capacity);
 
-        Func<CommandContext, CancellationToken, Task<int>> fallback = classicFallback ?? (async (ctx, ct) =>
+        var fallback = classicFallback ?? BuildStreamingFallback(handler, capacity);
+
+        Append(new CommandRegistration(
+            chain, description, fallback,
+            StageMode.StreamProducer, options, launcher,
+            isBuiltin, showInHelp));
+    }
+
+    private static Func<CommandContext, CancellationToken, Task<int>> BuildStreamingFallback<T>(
+        Func<IStreamingCommandContext<T>, CancellationToken, Task<int>> handler,
+        int capacity)
+    {
+        return async (ctx, ct) =>
         {
             var channel = new StreamChannel<T>(capacity);
             await using (channel)
@@ -120,13 +146,7 @@ internal sealed class CommandRegistry : ICommandRegistry
                 ctx.Console.Write(output);
                 return exitCode;
             }
-        });
-
-        _registrations.Add(new CommandRegistration(
-            chain, description, fallback,
-            StageMode.StreamProducer, options, launcher,
-            isBuiltin, showInHelp));
-        InvalidateCaches();
+        };
     }
 
     public void RegisterStreamConsumer<T>(
@@ -137,12 +157,25 @@ internal sealed class CommandRegistry : ICommandRegistry
         bool isBuiltin = false,
         bool? showInHelp = null)
     {
-        var capacity = options?.ChannelCapacity ?? 100;
+        var capacity = options?.ChannelCapacity ?? DefaultChannelCapacity;
         var launcher = new StreamingLauncher<T>(producer: null, consumer: handler, defaultChannelCapacity: capacity);
 
-        Func<CommandContext, CancellationToken, Task<int>> classicFallback = async (ctx, ct) =>
+        var classicFallback = BuildConsumerFallback(handler, capacity);
+
+        Append(new CommandRegistration(
+            chain, description, classicFallback,
+            StageMode.StreamConsumer, options, launcher,
+            isBuiltin, showInHelp));
+    }
+
+    private static Func<CommandContext, CancellationToken, Task<int>> BuildConsumerFallback<T>(
+        Func<IConsumingCommandContext<T>, CancellationToken, Task<int>> handler,
+        int capacity)
+    {
+        return async (ctx, ct) =>
         {
-            if (typeof(T) == typeof(byte[]) && ctx.PipelineInput is null && System.Console.IsInputRedirected)
+            if (typeof(T) == typeof(byte[]) && ctx.PipelineInput is null
+                && System.Console.IsInputRedirected)
             {
                 var byteChannel = new StreamChannel<byte[]>(capacity);
                 await using (byteChannel)
@@ -192,12 +225,6 @@ internal sealed class CommandRegistry : ICommandRegistry
                     "Use a streaming producer upstream or register a string-typed consumer.");
             }
         };
-
-        _registrations.Add(new CommandRegistration(
-            chain, description, classicFallback,
-            StageMode.StreamConsumer, options, launcher,
-            isBuiltin, showInHelp));
-        InvalidateCaches();
     }
 
     public void RegisterStreamingPipeline<T>(
@@ -209,10 +236,23 @@ internal sealed class CommandRegistry : ICommandRegistry
         bool isBuiltin = false,
         bool? showInHelp = null)
     {
-        var capacity = options?.ChannelCapacity ?? 100;
+        var capacity = options?.ChannelCapacity ?? DefaultChannelCapacity;
         var launcher = new StreamingLauncher<T>(producer: producer, consumer: consumer, defaultChannelCapacity: capacity);
 
-        Func<CommandContext, CancellationToken, Task<int>> defaultHandler = async (ctx, ct) =>
+        var defaultHandler = BuildPipelineFallback(producer, consumer, capacity);
+
+        Append(new CommandRegistration(
+            chain, description, defaultHandler,
+            StageMode.StreamProducer, options, launcher,
+            isBuiltin, showInHelp));
+    }
+
+    private static Func<CommandContext, CancellationToken, Task<int>> BuildPipelineFallback<T>(
+        Func<IStreamingCommandContext<T>, CancellationToken, Task<int>> producer,
+        Func<IConsumingCommandContext<T>, CancellationToken, Task<int>> consumer,
+        int capacity)
+    {
+        return async (ctx, ct) =>
         {
             var channel = new StreamChannel<T>(capacity);
             await using (channel)
@@ -275,12 +315,6 @@ internal sealed class CommandRegistry : ICommandRegistry
                 return producerExit != 0 ? producerExit : consumerExit;
             }
         };
-
-        _registrations.Add(new CommandRegistration(
-            chain, description, defaultHandler,
-            StageMode.StreamProducer, options, launcher,
-            isBuiltin, showInHelp));
-        InvalidateCaches();
     }
 
     public IReadOnlyList<IChainDescriptor> GetDescriptors()
@@ -291,7 +325,7 @@ internal sealed class CommandRegistry : ICommandRegistry
             return cached;
         }
 
-        var built = _registrations.Select(r => (IChainDescriptor)r.Chain).ToList();
+        var built = Volatile.Read(ref _registrations).Select(r => (IChainDescriptor)r.Chain).ToList();
         Interlocked.CompareExchange(ref _descriptorsCache, built, null);
         if (Interlocked.Exchange(ref _collisionsReported, 1) == 0)
         {
@@ -309,7 +343,7 @@ internal sealed class CommandRegistry : ICommandRegistry
 
     public CommandRegistration? FindByVerb(string verb)
     {
-        return _registrations.FirstOrDefault(r =>
+        return Volatile.Read(ref _registrations).FirstOrDefault(r =>
         {
             if (r.IsBuiltin)
             {
@@ -335,7 +369,7 @@ internal sealed class CommandRegistry : ICommandRegistry
     }
 
     public IReadOnlyList<CommandRegistration> FindContaining(string token)
-        => _registrations
+        => Volatile.Read(ref _registrations)
             .Where(r => !r.IsBuiltin && ChainContains(r.Chain, token))
             .ToList();
 
@@ -373,10 +407,11 @@ internal sealed class CommandRegistry : ICommandRegistry
 
     public IReadOnlyList<string> ValidateCollisions()
     {
+        var registrations = Volatile.Read(ref _registrations);
         var bySignature = new Dictionary<string, List<int>>(StringComparer.Ordinal);
-        for (var i = 0; i < _registrations.Count; i++)
+        for (var i = 0; i < registrations.Count; i++)
         {
-            var sig = ChainSignature(_registrations[i].Chain);
+            var sig = ChainSignature(registrations[i].Chain);
             bySignature.TryGetValue(sig, out var bucket);
             bucket ??= bySignature[sig] = new List<int>();
             bucket.Add(i);

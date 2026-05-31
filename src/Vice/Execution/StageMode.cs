@@ -1,3 +1,3 @@
 namespace Vice.Execution;
 
-internal enum StageMode { Classic, StreamProducer, StreamConsumer }
+internal enum StageMode { Buffered, StreamProducer, StreamConsumer }

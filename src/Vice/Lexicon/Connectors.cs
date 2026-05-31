@@ -16,9 +16,9 @@ public static class Connectors
     public static ConjunctiveNode By() => new("by");
     public static ConjunctiveNode And() => new("and");
 
-    public static ConjunctiveNode Then() => new("then", ConjunctiveKind.Piping);
-    public static ConjunctiveNode Send() => new("send", ConjunctiveKind.Piping);
-    public static ConjunctiveNode AndPipe() => new("and", ConjunctiveKind.Piping);
-    public static ConjunctiveNode Pipe() => new("pipe", ConjunctiveKind.Piping);
-    public static ConjunctiveNode Or() => new("or", ConjunctiveKind.Piping);
+    public static ConjunctiveNode Then() => new("then", ConjunctiveKind.StageSeparator);
+    public static ConjunctiveNode Send() => new("send", ConjunctiveKind.StageSeparator);
+    public static ConjunctiveNode AndPipe() => new("and", ConjunctiveKind.StageSeparator);
+    public static ConjunctiveNode Pipe() => new("pipe", ConjunctiveKind.StageSeparator);
+    public static ConjunctiveNode Or() => new("or", ConjunctiveKind.StageSeparator);
 }

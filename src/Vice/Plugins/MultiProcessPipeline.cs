@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Threading.Channels;
 using Vice.Commands;
 using Vice.Execution;
+using Vice.Logging;
 
 namespace Vice.Plugins;
 
@@ -20,6 +21,56 @@ internal static class MultiProcessPipeline
             throw new ArgumentException("MultiProcessPipeline requires at least 2 segments");
         }
 
+        var resolution = ResolveSegments(appName, segments, registry);
+        if (resolution.Error is int resolveError)
+        {
+            return resolveError;
+        }
+
+        var resolved = resolution.Resolved!;
+        var topology = BuildTopology(segments);
+
+        var procs = new Process[segments.Count];
+        int started = 0;
+        try
+        {
+            var startError = StartProcesses(segments.Count, resolved, topology, procs, ref started);
+            if (startError is int startCode)
+            {
+                return startCode;
+            }
+
+            var pumps = WirePumps(segments.Count, topology, procs, ct);
+
+            using var registration = ct.Register(() => KillAll(procs));
+
+            await Task.WhenAll(pumps).ConfigureAwait(false);
+
+            var waits = new Task[segments.Count];
+            for (int i = 0; i < segments.Count; i++)
+            {
+                waits[i] = procs[i].WaitForExitAsync(ct);
+            }
+
+            await Task.WhenAll(waits).ConfigureAwait(false);
+
+            return FirstNonZeroExitCode(procs);
+        }
+        catch (OperationCanceledException)
+        {
+            return ViceExitCode.INTERRUPTED;
+        }
+        finally
+        {
+            DisposeProcesses(procs, started);
+        }
+    }
+
+    private static SegmentResolution ResolveSegments(
+        string appName,
+        IReadOnlyList<RawArgsSplitter.Segment> segments,
+        ICommandRegistry registry)
+    {
         var resolved = new ResolvedSegment[segments.Count];
         for (int i = 0; i < segments.Count; i++)
         {
@@ -27,8 +78,9 @@ internal static class MultiProcessPipeline
             if (seg.Args.Length == 0)
             {
                 Console.Error.WriteLine($"Pipeline segment {i + 1}: empty");
-                return 2;
+                return SegmentResolution.Failed(2);
             }
+
             var verb = seg.Args[0];
             string filePath;
             string[] procArgs;
@@ -45,11 +97,17 @@ internal static class MultiProcessPipeline
             else
             {
                 Console.Error.WriteLine($"Pipeline segment {i + 1}: unknown verb '{verb}' (not in registry, not on PATH as '{appName}-{verb}')");
-                return 127;
+                return SegmentResolution.Failed(127);
             }
+
             resolved[i] = new ResolvedSegment(filePath, procArgs);
         }
 
+        return SegmentResolution.Succeeded(resolved);
+    }
+
+    private static PipelineTopology BuildTopology(IReadOnlyList<RawArgsSplitter.Segment> segments)
+    {
         var upstreamIdx = new int[segments.Count];
         upstreamIdx[0] = -1;
         for (int i = 1; i < segments.Count; i++)
@@ -73,103 +131,110 @@ internal static class MultiProcessPipeline
             }
         }
 
-        var procs = new Process[segments.Count];
-        int started = 0;
-        try
+        return new PipelineTopology(upstreamIdx, downstreams);
+    }
+
+    private static int? StartProcesses(
+        int count,
+        ResolvedSegment[] resolved,
+        PipelineTopology topology,
+        Process[] procs,
+        ref int started)
+    {
+        for (int i = 0; i < count; i++)
         {
-            for (int i = 0; i < segments.Count; i++)
+            var psi = new ProcessStartInfo
             {
-                var psi = new ProcessStartInfo
-                {
-                    FileName = resolved[i].FileName,
-                    UseShellExecute = false,
-                    RedirectStandardInput = upstreamIdx[i] >= 0,
-                    RedirectStandardOutput = downstreams[i].Count > 0,
-                };
-                foreach (var a in resolved[i].Args)
-                {
-                    psi.ArgumentList.Add(a);
-                }
-
-                var p = new Process { StartInfo = psi };
-                if (!p.Start())
-                {
-                    Console.Error.WriteLine($"Pipeline segment {i + 1}: failed to start '{resolved[i].FileName}'");
-                    return 127;
-                }
-                procs[i] = p;
-                started = i + 1;
+                FileName = resolved[i].FileName,
+                UseShellExecute = false,
+                RedirectStandardInput = topology.UpstreamIdx[i] >= 0,
+                RedirectStandardOutput = topology.Downstreams[i].Count > 0,
+            };
+            foreach (var a in resolved[i].Args)
+            {
+                psi.ArgumentList.Add(a);
             }
 
-            var pumps = new List<Task>(segments.Count);
-            for (int i = 0; i < segments.Count; i++)
+            var p = new Process { StartInfo = psi };
+            if (!p.Start())
             {
-                if (downstreams[i].Count == 0)
-                {
-                    continue;
-                }
-
-                var src = procs[i].StandardOutput.BaseStream;
-                var dsts = downstreams[i].Select(j => procs[j].StandardInput.BaseStream).ToArray();
-                pumps.Add(dsts.Length == 1
-                    ? PumpOneAsync(src, dsts[0], ct)
-                    : PumpFanAsync(src, dsts, ct));
+                Console.Error.WriteLine($"Pipeline segment {i + 1}: failed to start '{resolved[i].FileName}'");
+                return 127;
             }
 
-            using var registration = ct.Register(() =>
-            {
-                foreach (var p in procs)
-                {
-                    try
-                    {
-                        if (p is not null && !p.HasExited)
-                        {
-                            p.Kill(entireProcessTree: true);
-                        }
-                    }
-                    catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException or System.ComponentModel.Win32Exception)
-                    {
-                        Debug.WriteLine(ex);
-                    }
-                }
-            });
-
-            await Task.WhenAll(pumps).ConfigureAwait(false);
-
-            var waits = new Task[segments.Count];
-            for (int i = 0; i < segments.Count; i++)
-            {
-                waits[i] = procs[i].WaitForExitAsync(ct);
-            }
-
-            await Task.WhenAll(waits).ConfigureAwait(false);
-
-            for (int i = segments.Count - 1; i >= 0; i--)
-            {
-                if (procs[i].ExitCode != 0)
-                {
-                    return procs[i].ExitCode;
-                }
-            }
-
-            return 0;
+            procs[i] = p;
+            started = i + 1;
         }
-        catch (OperationCanceledException)
+
+        return null;
+    }
+
+    private static List<Task> WirePumps(
+        int count,
+        PipelineTopology topology,
+        Process[] procs,
+        CancellationToken ct)
+    {
+        var pumps = new List<Task>(count);
+        for (int i = 0; i < count; i++)
         {
-            return ViceExitCode.INTERRUPTED;
-        }
-        finally
-        {
-            for (int i = 0; i < started; i++)
+            if (topology.Downstreams[i].Count == 0)
             {
-                try
+                continue;
+            }
+
+            var src = procs[i].StandardOutput.BaseStream;
+            var dsts = topology.Downstreams[i].Select(j => procs[j].StandardInput.BaseStream).ToArray();
+            pumps.Add(dsts.Length == 1
+                ? PumpOneAsync(src, dsts[0], ct)
+                : PumpFanAsync(src, dsts, ct));
+        }
+
+        return pumps;
+    }
+
+    private static void KillAll(Process[] procs)
+    {
+        foreach (var p in procs)
+        {
+            try
+            {
+                if (p is not null && !p.HasExited)
                 {
-                    procs[i]?.Dispose();
+                    p.Kill(entireProcessTree: true);
                 }
-                catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException)
-                {
-                    Debug.WriteLine(ex);
-                }
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException or System.ComponentModel.Win32Exception)
+            {
+                Debug.WriteLine(ex);
+            }
+        }
+    }
+
+    private static int FirstNonZeroExitCode(Process[] procs)
+    {
+        for (int i = procs.Length - 1; i >= 0; i--)
+        {
+            if (procs[i].ExitCode != 0)
+            {
+                return procs[i].ExitCode;
+            }
+        }
+
+        return 0;
+    }
+
+    private static void DisposeProcesses(Process[] procs, int started)
+    {
+        for (int i = 0; i < started; i++)
+        {
+            try
+            {
+                procs[i]?.Dispose();
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException)
+            {
+                Vice.Log.Emit(ViceLogLevel.Warn, $"pipeline segment {i + 1} process dispose failed", ex);
             }
         }
     }
@@ -188,7 +253,7 @@ internal static class MultiProcessPipeline
         }
         catch (IOException ex)
         {
-            Debug.WriteLine(ex);
+            Vice.Log.Emit(ViceLogLevel.Warn, "pipeline stream pump failed", ex);
         }
         catch (OperationCanceledException ex)
         {
@@ -196,23 +261,28 @@ internal static class MultiProcessPipeline
         }
         finally
         {
-            try
-            {
-                await dst.FlushAsync(CancellationToken.None).ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is IOException or ObjectDisposedException)
-            {
-                Debug.WriteLine(ex);
-            }
+            await CloseDownstreamAsync(dst).ConfigureAwait(false);
+        }
+    }
 
-            try
-            {
-                dst.Close();
-            }
-            catch (Exception ex) when (ex is IOException or ObjectDisposedException)
-            {
-                Debug.WriteLine(ex);
-            }
+    private static async Task CloseDownstreamAsync(Stream dst)
+    {
+        try
+        {
+            await dst.FlushAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is IOException or ObjectDisposedException)
+        {
+            Debug.WriteLine(ex);
+        }
+
+        try
+        {
+            dst.Close();
+        }
+        catch (Exception ex) when (ex is IOException or ObjectDisposedException)
+        {
+            Debug.WriteLine(ex);
         }
     }
 
@@ -251,7 +321,7 @@ internal static class MultiProcessPipeline
                 }
                 catch (IOException ex)
                 {
-                    Debug.WriteLine(ex);
+                    Vice.Log.Emit(ViceLogLevel.Warn, "pipeline fan-out downstream write failed", ex);
                 }
                 catch (OperationCanceledException ex)
                 {
@@ -259,23 +329,7 @@ internal static class MultiProcessPipeline
                 }
                 finally
                 {
-                    try
-                    {
-                        await di.FlushAsync(CancellationToken.None).ConfigureAwait(false);
-                    }
-                    catch (Exception ex) when (ex is IOException or ObjectDisposedException)
-                    {
-                        Debug.WriteLine(ex);
-                    }
-
-                    try
-                    {
-                        di.Close();
-                    }
-                    catch (Exception ex) when (ex is IOException or ObjectDisposedException)
-                    {
-                        Debug.WriteLine(ex);
-                    }
+                    await CloseDownstreamAsync(di).ConfigureAwait(false);
                 }
             }, ct);
         }
@@ -288,15 +342,18 @@ internal static class MultiProcessPipeline
             {
                 var chunk = new byte[read];
                 Buffer.BlockCopy(buf, 0, chunk, 0, read);
+                var dispatch = new Task[queues.Length];
                 for (int i = 0; i < queues.Length; i++)
                 {
-                    await queues[i].Writer.WriteAsync(chunk, ct).ConfigureAwait(false);
+                    dispatch[i] = queues[i].Writer.WriteAsync(chunk, ct).AsTask();
                 }
+
+                await Task.WhenAll(dispatch).ConfigureAwait(false);
             }
         }
         catch (IOException ex)
         {
-            Debug.WriteLine(ex);
+            Vice.Log.Emit(ViceLogLevel.Warn, "pipeline fan-out source read failed", ex);
         }
         catch (OperationCanceledException ex)
         {
@@ -317,4 +374,13 @@ internal static class MultiProcessPipeline
         => Environment.ProcessPath ?? throw new InvalidOperationException("Environment.ProcessPath is null");
 
     private sealed record ResolvedSegment(string FileName, string[] Args);
+
+    private readonly record struct PipelineTopology(int[] UpstreamIdx, List<int>[] Downstreams);
+
+    private readonly record struct SegmentResolution(ResolvedSegment[]? Resolved, int? Error)
+    {
+        public static SegmentResolution Succeeded(ResolvedSegment[] resolved) => new(resolved, null);
+
+        public static SegmentResolution Failed(int error) => new(null, error);
+    }
 }

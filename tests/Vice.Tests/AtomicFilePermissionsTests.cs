@@ -9,7 +9,8 @@ public class AtomicFilePermissionsTests
     [Fact]
     public async Task WriteAllBytesAsync_OnUnix_CreatesFileWithUserOnlyPermissions()
     {
-        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS() && !OperatingSystem.IsFreeBSD())
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS()
+            && !OperatingSystem.IsFreeBSD())
         {
             return;
         }
@@ -26,7 +27,8 @@ public class AtomicFilePermissionsTests
     [Fact]
     public async Task WriteAllBytesAsync_OnUnix_CreatesParentDirectoryWith0700()
     {
-        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS() && !OperatingSystem.IsFreeBSD())
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS()
+            && !OperatingSystem.IsFreeBSD())
         {
             return;
         }
@@ -45,7 +47,8 @@ public class AtomicFilePermissionsTests
     [Fact]
     public async Task AppendTextAsync_OnUnix_CreatesFileWithUserOnlyPermissions()
     {
-        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS() && !OperatingSystem.IsFreeBSD())
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS()
+            && !OperatingSystem.IsFreeBSD())
         {
             return;
         }

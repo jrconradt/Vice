@@ -19,3 +19,13 @@ Per-source notes:
 - **AlphaFold** — `--format cif`, `--format mmcif`, `--format bcif`, or `--format pae` change download target; default is PDB. `fetch` returns model metadata and the available structure URLs.
 
 The query string passed to `search`/`archive` is **forwarded verbatim** to the upstream URL after `WebUtility.UrlEncode`. The syntax it expects is the upstream API's — Vice does not normalise across sources.
+
+## Data-source attribution and content terms
+
+`vice` redistributes content fetched from these upstream providers to you, the end user. The data carries its own content licenses, separate from the code-dependency licenses listed in `THIRD_PARTY_NOTICE`. When you redistribute, publish, or otherwise reuse downloaded content, you are responsible for honouring these terms:
+
+- **AlphaFold** (EMBL-EBI) — AlphaFold Protein Structure Database content is distributed under [CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/), which requires attribution to AlphaFold/EMBL-EBI. See <https://alphafold.ebi.ac.uk/>.
+- **UniProt** (EMBL-EBI / SIB / PIR) — UniProt data is distributed under [CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/), which requires attribution to the UniProt Consortium. See <https://www.uniprot.org/help/license>.
+- **arXiv** — licensing is per paper; many submissions are **not** redistributable. Check each item's license at <https://arxiv.org/help/license> before reuse.
+- **Project Gutenberg** — texts are public domain in the US, but the "Project Gutenberg" trademark and the accompanying license header carry conditions. See <https://www.gutenberg.org/policy/license.html>.
+- **PubMed** (NCBI E-utilities) — record content and abstracts are subject to NCBI usage policies and the individual copyright of each cited work. See <https://www.ncbi.nlm.nih.gov/home/about/policies/>.

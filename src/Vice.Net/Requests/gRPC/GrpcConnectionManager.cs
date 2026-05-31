@@ -1,12 +1,18 @@
 using System.Collections.Concurrent;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using Grpc.Net.Client;
+using Vice.Display;
 using Vice.Logging;
 
 namespace Vice.Network.gRPC;
 
-internal sealed class GrpcConnectionManager : IAsyncDisposable
+public sealed class GrpcConnectionManager : IAsyncDisposable
 {
+    public const string PinnedCertEnvVar = "VICE_GRPC_PINNED_CERT_SHA256";
+
     private const int MAX_GRPC_MESSAGE_BYTES = 32 * 1024 * 1024;
+    private const int MaxConnections = 256;
     private static readonly TimeSpan DefaultShutdownTimeout = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan IdleTtl = TimeSpan.FromMinutes(10);
     private static readonly TimeSpan EvictionScanInterval = TimeSpan.FromSeconds(60);
@@ -67,6 +73,13 @@ internal sealed class GrpcConnectionManager : IAsyncDisposable
                         continue;
                     }
 
+                    var recheckTicks = Interlocked.Read(ref removed.Value.LastUsedTicks);
+                    if (recheckTicks > cutoffTicks)
+                    {
+                        _connections.TryAdd(kvp.Key, removed);
+                        continue;
+                    }
+
                     try
                     {
                         removed.Value.Channel.Dispose();
@@ -93,14 +106,62 @@ internal sealed class GrpcConnectionManager : IAsyncDisposable
         }
     }
 
-    public static void WarnInsecure(IViceLogger? logger, string endpoint)
+    public static void WarnInsecure(IViceLogger? logger, string endpoint, IConsoleWriter? writer = null)
     {
-        _ = logger;
-        Vice.Log.Emit(
-            ViceLogLevel.Warn,
-            $"TLS certificate validation disabled for {endpoint} via --insecure flag");
-        Console.Error.WriteLine(
-            $"vice: WARNING: TLS certificate validation disabled for endpoint {endpoint}");
+        var pinned = ParsePin(Environment.GetEnvironmentVariable(PinnedCertEnvVar)) is not null;
+        var headline = pinned
+            ? $"TLS chain validation bypassed for {endpoint} via --insecure; certificate pinned to {PinnedCertEnvVar}"
+            : $"TLS certificate validation disabled for {endpoint} via --insecure flag";
+
+        if (logger is not null)
+        {
+            logger.Log(ViceLogLevel.Warn, headline);
+        }
+        else
+        {
+            Vice.Log.Emit(ViceLogLevel.Warn, headline);
+        }
+
+        var lines = BuildInsecureBanner(endpoint, pinned);
+        if (writer is not null)
+        {
+            foreach (var line in lines)
+            {
+                writer.WriteError(line);
+            }
+            return;
+        }
+
+        foreach (var line in lines)
+        {
+            Vice.Output.Error(line);
+        }
+    }
+
+    private static string[] BuildInsecureBanner(string endpoint, bool pinned)
+    {
+        if (pinned)
+        {
+            return new[]
+            {
+                "vice: ============================================================",
+                $"vice: WARNING: TLS chain validation is BYPASSED for {endpoint}",
+                $"vice: --insecure is accepting only the certificate pinned via {PinnedCertEnvVar}.",
+                "vice: A pin narrows exposure, but the normal CA trust chain is NOT enforced.",
+                "vice: ============================================================",
+            };
+        }
+
+        return new[]
+        {
+            "vice: ============================================================",
+            $"vice: WARNING: TLS certificate validation is DISABLED for {endpoint}",
+            "vice: --insecure accepts ANY certificate, including attacker-substituted ones.",
+            "vice: All credentials and request payloads sent to this endpoint can be",
+            "vice: intercepted and read by an active network (MITM) attacker.",
+            $"vice: Set {PinnedCertEnvVar}=<sha256 hex> to pin one expected certificate instead.",
+            "vice: ============================================================",
+        };
     }
 
     public GrpcChannel Connect(string endpoint, bool plaintext = false, bool insecure = false)
@@ -118,8 +179,68 @@ internal sealed class GrpcConnectionManager : IAsyncDisposable
                 LazyThreadSafetyMode.ExecutionAndPublication));
 
         var entry = lazy.Value;
+        if (entry.Plaintext != plaintext
+            || entry.Insecure != insecure)
+        {
+            throw new InvalidOperationException(
+                $"Cached connection to {endpoint} was established with plaintext={entry.Plaintext}, insecure={entry.Insecure}; refusing to reuse it for a request with plaintext={plaintext}, insecure={insecure}.");
+        }
+
         Interlocked.Exchange(ref entry.LastUsedTicks, DateTime.UtcNow.Ticks);
+        EnforceMaxConnections(endpoint);
         return entry.Channel;
+    }
+
+    private void EnforceMaxConnections(string keepEndpoint)
+    {
+        while (_connections.Count > MaxConnections)
+        {
+            string? lruKey = null;
+            var lruTicks = long.MaxValue;
+            foreach (var kvp in _connections)
+            {
+                if (kvp.Key == keepEndpoint
+                    || !kvp.Value.IsValueCreated)
+                {
+                    continue;
+                }
+
+                var ticks = Interlocked.Read(ref kvp.Value.Value.LastUsedTicks);
+                if (ticks < lruTicks)
+                {
+                    lruTicks = ticks;
+                    lruKey = kvp.Key;
+                }
+            }
+
+            if (lruKey is null)
+            {
+                break;
+            }
+
+            if (!_connections.TryRemove(lruKey, out var removed) || !removed.IsValueCreated)
+            {
+                continue;
+            }
+
+            try
+            {
+                removed.Value.Channel.Dispose();
+            }
+            catch (Exception ex)
+            {
+                Vice.Log.Emit(ViceLogLevel.Warn, $"gRPC LRU eviction channel dispose failed for {lruKey}", ex);
+            }
+
+            try
+            {
+                removed.Value.Handler?.Dispose();
+            }
+            catch (Exception ex)
+            {
+                Vice.Log.Emit(ViceLogLevel.Warn, $"gRPC LRU eviction handler dispose failed for {lruKey}", ex);
+            }
+        }
     }
 
     public GrpcChannel GetChannel(string endpoint)
@@ -284,19 +405,70 @@ internal sealed class GrpcConnectionManager : IAsyncDisposable
         var handler = new SocketsHttpHandler
         {
             ConnectCallback = SafeOutboundConnection.ConnectAsync,
+            KeepAlivePingDelay = TimeSpan.FromSeconds(30),
+            KeepAlivePingTimeout = TimeSpan.FromSeconds(10),
+            KeepAlivePingPolicy = HttpKeepAlivePingPolicy.WithActiveRequests,
+            PooledConnectionIdleTimeout = TimeSpan.FromMinutes(2),
+            EnableMultipleHttp2Connections = true,
         };
 
         if (insecure)
         {
             handler.SslOptions = new System.Net.Security.SslClientAuthenticationOptions
             {
-                RemoteCertificateValidationCallback = (_, _, _, _) => true,
+                RemoteCertificateValidationCallback = BuildInsecureValidationCallback(),
             };
         }
 
         options.HttpHandler = handler;
         var scheme = plaintext ? "http" : "https";
         return (GrpcChannel.ForAddress($"{scheme}://{endpoint}", options), handler);
+    }
+
+    internal static System.Net.Security.RemoteCertificateValidationCallback BuildInsecureValidationCallback()
+    {
+        var pin = ParsePin(Environment.GetEnvironmentVariable(PinnedCertEnvVar));
+        if (pin is null)
+        {
+            return (_, _, _, _) => true;
+        }
+
+        return (_, certificate, _, _) => CertificateMatchesPin(certificate, pin);
+    }
+
+    private static bool CertificateMatchesPin(X509Certificate? certificate, byte[] pin)
+    {
+        if (certificate is null)
+        {
+            return false;
+        }
+
+        var raw = certificate.GetRawCertData();
+        var actual = SHA256.HashData(raw);
+        return CryptographicOperations.FixedTimeEquals(actual, pin);
+    }
+
+    private static byte[]? ParsePin(string? configured)
+    {
+        if (string.IsNullOrWhiteSpace(configured))
+        {
+            return null;
+        }
+
+        var normalized = configured.Trim().Replace(":", string.Empty).Replace(" ", string.Empty);
+        if (normalized.Length != 64)
+        {
+            return null;
+        }
+
+        try
+        {
+            return Convert.FromHexString(normalized);
+        }
+        catch (FormatException)
+        {
+            return null;
+        }
     }
 
     private class ConnectionEntry

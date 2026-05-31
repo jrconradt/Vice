@@ -5,6 +5,8 @@ namespace Vice.Ipc;
 
 internal sealed class PipeClient : IPipeClient
 {
+    private static readonly TimeSpan RoundTripTimeout = TimeSpan.FromSeconds(30);
+
     private readonly NamedPipeClientStream _stream;
 
     private PipeClient(NamedPipeClientStream stream)
@@ -59,8 +61,20 @@ internal sealed class PipeClient : IPipeClient
 
     public async Task<PipeMessage?> SendAsync(PipeMessage message, CancellationToken ct)
     {
-        await PipeProtocol.WriteMessageAsync(_stream, message, ct).ConfigureAwait(false);
-        return await PipeProtocol.ReadMessageAsync(_stream, ct).ConfigureAwait(false);
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeoutCts.CancelAfter(RoundTripTimeout);
+        var token = timeoutCts.Token;
+
+        try
+        {
+            await PipeProtocol.WriteMessageAsync(_stream, message, token).ConfigureAwait(false);
+            return await PipeProtocol.ReadMessageAsync(_stream, token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !ct.IsCancellationRequested)
+        {
+            throw new TimeoutException(
+                $"IPC round-trip exceeded {RoundTripTimeout.TotalSeconds:0}s with no response from the daemon.");
+        }
     }
 
     public ValueTask DisposeAsync()

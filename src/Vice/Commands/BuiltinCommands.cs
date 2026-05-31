@@ -1,4 +1,5 @@
 using Vice.Completions;
+using Vice.Configuration;
 using Vice.Execution;
 using Vice.Help;
 using Vice.Ipc;
@@ -6,6 +7,7 @@ using Vice.Lexicon;
 using Vice.Manpages;
 using Vice.Options;
 using Vice.Session;
+using static Vice.Dsl;
 
 namespace Vice.Commands;
 
@@ -171,6 +173,72 @@ internal static class BuiltinCommands
                 }
                 Vice.Output.Line(script);
                 return 0;
+            },
+            isBuiltin: true);
+
+        registry.Register(
+            verb("sources"),
+            "List configured research sources.",
+            async (ctx, ct) =>
+            {
+                await using var file = new SourcesFile(new ViceDirectories(app.Name));
+                var sources = await file.ReadAsync(ct).ConfigureAwait(false);
+                if (sources.Count == 0)
+                {
+                    Vice.Output.Line("No sources configured.");
+                    return ViceExitCode.SUCCESS;
+                }
+
+                foreach (var source in sources)
+                {
+                    Vice.Output.Line(source);
+                }
+
+                return ViceExitCode.SUCCESS;
+            },
+            isBuiltin: true);
+
+        registry.Register(
+            verb("sources") > noun("add") * Targets.Source,
+            "Add a research source to the configured list.",
+            async (ctx, ct) =>
+            {
+                var source = ctx.Target(Targets.Source);
+                if (string.IsNullOrWhiteSpace(source))
+                {
+                    Vice.Output.Error("sources add: a source is required.");
+                    return ViceExitCode.USAGE_ERROR;
+                }
+
+                await using var file = new SourcesFile(new ViceDirectories(app.Name));
+                await file.AddAsync(source, ct).ConfigureAwait(false);
+                Vice.Output.Line($"Added source '{source}'.");
+                return ViceExitCode.SUCCESS;
+            },
+            isBuiltin: true);
+
+        registry.Register(
+            verb("sources") > noun("remove") * Targets.Source,
+            "Remove a research source from the configured list.",
+            async (ctx, ct) =>
+            {
+                var source = ctx.Target(Targets.Source);
+                if (string.IsNullOrWhiteSpace(source))
+                {
+                    Vice.Output.Error("sources remove: a source is required.");
+                    return ViceExitCode.USAGE_ERROR;
+                }
+
+                await using var file = new SourcesFile(new ViceDirectories(app.Name));
+                var removed = await file.RemoveAsync(source, ct).ConfigureAwait(false);
+                if (removed)
+                {
+                    Vice.Output.Line($"Removed source '{source}'.");
+                    return ViceExitCode.SUCCESS;
+                }
+
+                Vice.Output.Line($"Source '{source}' was not configured.");
+                return ViceExitCode.SUCCESS;
             },
             isBuiltin: true);
     }

@@ -42,6 +42,9 @@ public static class SafeOutboundConnection
         var hostDecision = policy.EvaluateHost(host);
         if (hostDecision == SafeNetDecision.Refuse)
         {
+            Vice.Log.Emit(
+                Vice.Logging.ViceLogLevel.Warn,
+                $"SafeNet: refused outbound connection to '{host}': host on deny list.");
             throw new SafeNetBlockedException(
                 $"refused outbound connection to '{host}': host on deny list.");
         }
@@ -62,6 +65,9 @@ public static class SafeOutboundConnection
             var ipDecision = policy.EvaluateAddress(addr);
             if (ipDecision == SafeNetDecision.Refuse)
             {
+                Vice.Log.Emit(
+                    Vice.Logging.ViceLogLevel.Warn,
+                    $"SafeNet: refused outbound connection to '{host}': address {addr} on deny list.");
                 throw new SafeNetBlockedException(
                     $"refused outbound connection to '{host}': address {addr} on deny list.");
             }
@@ -73,6 +79,9 @@ public static class SafeOutboundConnection
 
             if (IsPrivateOrLocal(addr))
             {
+                Vice.Log.Emit(
+                    Vice.Logging.ViceLogLevel.Warn,
+                    $"SafeNet: refused outbound connection to '{host}': resolves to private/local address {addr}.");
                 throw new SafeNetBlockedException(
                     $"refused outbound connection to '{host}': resolves to private/local address {addr}.");
             }
@@ -101,7 +110,8 @@ public static class SafeOutboundConnection
                 return true;
             }
 
-            if (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31)
+            if (bytes[0] == 172 && bytes[1] >= 16
+                && bytes[1] <= 31)
             {
                 return true;
             }
@@ -116,7 +126,8 @@ public static class SafeOutboundConnection
                 return true;
             }
 
-            if (bytes[0] == 100 && bytes[1] >= 64 && bytes[1] <= 127)
+            if (bytes[0] == 100 && bytes[1] >= 64
+                && bytes[1] <= 127)
             {
                 return true;
             }

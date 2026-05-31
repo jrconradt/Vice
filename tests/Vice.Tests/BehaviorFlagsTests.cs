@@ -42,7 +42,7 @@ public class BehaviorFlagsTests
     {
         var (app, _, flags) = Build();
         await app.RunAsync(new[] { "--no-pager", "probe" });
-        Assert.Equal(1, flags[4]);
+        Assert.Equal(new[] { 0, 0, 0, 0, 1 }, flags);
     }
 
     [Fact]
@@ -50,7 +50,7 @@ public class BehaviorFlagsTests
     {
         var (app, _, flags) = Build();
         await app.RunAsync(new[] { "--verbose", "probe" });
-        Assert.Equal(1, flags[0]);
+        Assert.Equal(new[] { 1, 0, 0, 0, 0 }, flags);
     }
 
     [Fact]
@@ -58,7 +58,7 @@ public class BehaviorFlagsTests
     {
         var (app, _, flags) = Build();
         await app.RunAsync(new[] { "--quiet", "probe" });
-        Assert.Equal(1, flags[1]);
+        Assert.Equal(new[] { 0, 1, 0, 0, 0 }, flags);
     }
 
     [Fact]
@@ -66,7 +66,7 @@ public class BehaviorFlagsTests
     {
         var (app, _, flags) = Build();
         await app.RunAsync(new[] { "--dry-run", "probe" });
-        Assert.Equal(1, flags[2]);
+        Assert.Equal(new[] { 0, 0, 1, 0, 0 }, flags);
     }
 
     [Fact]
@@ -74,7 +74,7 @@ public class BehaviorFlagsTests
     {
         var (app, _, flags) = Build();
         await app.RunAsync(new[] { "--non-interactive", "probe" });
-        Assert.Equal(1, flags[3]);
+        Assert.Equal(new[] { 0, 0, 0, 1, 0 }, flags);
     }
 
     [Fact]

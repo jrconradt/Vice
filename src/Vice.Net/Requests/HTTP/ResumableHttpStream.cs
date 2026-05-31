@@ -6,6 +6,8 @@ namespace Vice.Net.Http;
 
 public sealed class ResumableHttpStream
 {
+    private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(15);
+
     private readonly HttpClient _http;
     private readonly Uri _uri;
     private readonly long _maxBytes;
@@ -33,8 +35,9 @@ public sealed class ResumableHttpStream
 
     private async Task<ProbeResult> ProbeAsync()
     {
+        using var timeoutCts = new CancellationTokenSource(ProbeTimeout);
         using var request = new HttpRequestMessage(HttpMethod.Head, _uri);
-        using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, CancellationToken.None).ConfigureAwait(false);
+        using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeoutCts.Token).ConfigureAwait(false);
 
         response.EnsureSuccessStatusCode();
 

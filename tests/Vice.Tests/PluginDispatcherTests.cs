@@ -44,7 +44,9 @@ public class PluginDispatcherTests
         File.WriteAllText(Path.Combine(dir.Path, pluginName), "#!/bin/sh\nexit 0\n");
         if (!OperatingSystem.IsWindows())
         {
-            File.SetUnixFileMode(Path.Combine(dir.Path, pluginName),
+            UnixPerms.Set(dir.Path,
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            UnixPerms.Set(Path.Combine(dir.Path, pluginName),
                 UnixFileMode.UserRead | UnixFileMode.UserExecute | UnixFileMode.UserWrite);
         }
 
@@ -55,18 +57,16 @@ public class PluginDispatcherTests
         Assert.False(PluginDispatcher.TryFind("vice", new[] { "list" }, Registry(), out _, out _));
     }
 
-    [Fact]
+    [UnixOnlyFact]
     public void UnknownVerb_WithPluginDir_Found()
     {
-        if (OperatingSystem.IsWindows())
-        {
-            return;
-        }
-
         using var dir = new TempDir();
+        UnixPerms.Set(dir.Path,
+            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+
         var pluginPath = Path.Combine(dir.Path, "vice-myextra");
         File.WriteAllText(pluginPath, "#!/bin/sh\nexit 42\n");
-        File.SetUnixFileMode(pluginPath,
+        UnixPerms.Set(pluginPath,
             UnixFileMode.UserRead | UnixFileMode.UserExecute | UnixFileMode.UserWrite);
 
         using var env = new EnvScope(
@@ -81,18 +81,13 @@ public class PluginDispatcherTests
         Assert.Equal(new[] { "arg1" }, pluginArgs);
     }
 
-    [Fact]
+    [UnixOnlyFact]
     public async Task RunAsync_ForwardsExitCode()
     {
-        if (OperatingSystem.IsWindows())
-        {
-            return;
-        }
-
         using var dir = new TempDir();
         var pluginPath = Path.Combine(dir.Path, "vice-myextra");
         File.WriteAllText(pluginPath, "#!/bin/sh\nexit 42\n");
-        File.SetUnixFileMode(pluginPath,
+        UnixPerms.Set(pluginPath,
             UnixFileMode.UserRead | UnixFileMode.UserExecute | UnixFileMode.UserWrite);
 
         var exit = await PluginDispatcher.RunAsync(pluginPath, Array.Empty<string>(), CancellationToken.None);
@@ -100,19 +95,14 @@ public class PluginDispatcherTests
         Assert.Equal(42, exit);
     }
 
-    [Fact]
+    [UnixOnlyFact]
     public async Task RunAsync_PassesArguments()
     {
-        if (OperatingSystem.IsWindows())
-        {
-            return;
-        }
-
         using var dir = new TempDir();
         var pluginPath = Path.Combine(dir.Path, "vice-echoargs");
         var outFile = Path.Combine(dir.Path, "captured.txt");
         File.WriteAllText(pluginPath, $"#!/bin/sh\necho \"$@\" > {outFile}\nexit 0\n");
-        File.SetUnixFileMode(pluginPath,
+        UnixPerms.Set(pluginPath,
             UnixFileMode.UserRead | UnixFileMode.UserExecute | UnixFileMode.UserWrite);
 
         var exit = await PluginDispatcher.RunAsync(pluginPath, new[] { "alpha", "beta gamma" }, CancellationToken.None);
@@ -123,18 +113,16 @@ public class PluginDispatcherTests
         Assert.Contains("beta gamma", captured);
     }
 
-    [Fact]
+    [UnixOnlyFact]
     public async Task ViceApp_DispatchesToPlugin_EndToEnd()
     {
-        if (OperatingSystem.IsWindows())
-        {
-            return;
-        }
-
         using var dir = new TempDir();
+        UnixPerms.Set(dir.Path,
+            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+
         var pluginPath = Path.Combine(dir.Path, "vice-greet");
         File.WriteAllText(pluginPath, "#!/bin/sh\nexit 7\n");
-        File.SetUnixFileMode(pluginPath,
+        UnixPerms.Set(pluginPath,
             UnixFileMode.UserRead | UnixFileMode.UserExecute | UnixFileMode.UserWrite);
 
         using var env = new EnvScope(

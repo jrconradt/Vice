@@ -7,7 +7,7 @@ public sealed class ConjunctiveNode : ChainNode
     private readonly string _word;
     private readonly ConjunctiveKind _conjunctiveKind;
 
-    public ConjunctiveNode(string word, ConjunctiveKind conjunctiveKind = ConjunctiveKind.Relational)
+    public ConjunctiveNode(string word, ConjunctiveKind conjunctiveKind = ConjunctiveKind.Preposition)
     {
         _word = word;
         _conjunctiveKind = conjunctiveKind;

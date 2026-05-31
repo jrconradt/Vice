@@ -13,5 +13,6 @@ public static class CommandContextExtensions
     }
 
     public static int? AsPositiveInt(this string? value)
-        => (value is not null && int.TryParse(value, out var n) && n > 0) ? n : null;
+        => (value is not null && int.TryParse(value, out var n)
+            && n > 0) ? n : null;
 }

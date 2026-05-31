@@ -4,11 +4,7 @@ Roslyn source generators for the Vice framework. Discovers `[ViceCommandPack]`-d
 
 ## Install
 
-```bash
-dotnet add package Vice.Generators
-```
-
-Targets `netstandard2.0` as a Roslyn analyzer component. Consume from a project that already references [`Vice`](https://www.nuget.org/packages/Vice).
+Not separately installable. The generator targets `net10.0` and is `IsPackable=false`; it ships embedded under `analyzers/` inside the [`Vice`](https://www.nuget.org/packages/Vice) package and runs automatically. Reference `Vice` and the generator is wired up for you.
 
 ## What it does
 

@@ -101,7 +101,7 @@ internal sealed class JobManager : IJobManager
         _jobs.TryAdd(id, holder);
         EvictOldCompleted();
 
-        _persistenceDriver.SignalDirty();
+        await FlushCriticalAsync().ConfigureAwait(false);
         await _workerPool.EnqueueAsync(holder, _shutdownCts.Token).ConfigureAwait(false);
         return id;
     }
@@ -122,14 +122,7 @@ internal sealed class JobManager : IJobManager
         _persistenceDriver.SignalDirty();
 
         _jobCts.TryGetValue(jobId, out var cts);
-        try
-        {
-            cts?.Cancel();
-        }
-        catch (ObjectDisposedException ode)
-        {
-            System.Diagnostics.Debug.WriteLine(ode);
-        }
+        SafeCancel(cts);
 
         await DrainActiveTaskAsync(jobId, holder, ct).ConfigureAwait(false);
     }
@@ -153,18 +146,13 @@ internal sealed class JobManager : IJobManager
             var transitioned = TryTransitionToFailed(holder, "pause drain timed out");
             _activeTasks.TryRemove(jobId, out _);
             _jobCts.TryRemove(jobId, out var stuckCts);
-            try
-            {
-                stuckCts?.Dispose();
-            }
-            catch (ObjectDisposedException ode)
-            {
-                System.Diagnostics.Debug.WriteLine(ode);
-            }
-            _persistenceDriver.SignalDirty();
+            SafeDispose(stuckCts);
+            await FlushCriticalAsync().ConfigureAwait(false);
             if (transitioned)
             {
-                JobFailed?.Invoke(holder.Read(), "pause drain timed out");
+                var failed = holder.Read();
+                EmitFailedTelemetry(failed, "pause drain timed out");
+                JobFailed?.Invoke(failed, "pause drain timed out");
             }
         }
         catch (Exception ex)
@@ -198,12 +186,12 @@ internal sealed class JobManager : IJobManager
         await _workerPool.EnqueueAsync(holder, _shutdownCts.Token).ConfigureAwait(false);
     }
 
-    public Task CancelAsync(int jobId, CancellationToken ct)
+    public async Task CancelAsync(int jobId, CancellationToken ct)
     {
         var holder = FindHolder(jobId);
         if (holder is null)
         {
-            return Task.CompletedTask;
+            return;
         }
 
         var didFail = holder.TryUpdate(s =>
@@ -234,22 +222,16 @@ internal sealed class JobManager : IJobManager
 
         if (!didFail)
         {
-            return Task.CompletedTask;
+            return;
         }
 
         _jobCts.TryGetValue(jobId, out var cts);
 
-        _persistenceDriver.SignalDirty();
-        try
-        {
-            cts?.Cancel();
-        }
-        catch (ObjectDisposedException ode)
-        {
-            System.Diagnostics.Debug.WriteLine(ode);
-        }
-        JobFailed?.Invoke(holder.Read(), "Cancelled");
-        return Task.CompletedTask;
+        await FlushCriticalAsync().ConfigureAwait(false);
+        SafeCancel(cts);
+        var failed = holder.Read();
+        EmitFailedTelemetry(failed, "Cancelled");
+        JobFailed?.Invoke(failed, "Cancelled");
     }
 
     public IReadOnlyList<JobState> GetJobs()
@@ -260,25 +242,11 @@ internal sealed class JobManager : IJobManager
 
     public async ValueTask DisposeAsync()
     {
-        try
-        {
-            _shutdownCts.Cancel();
-        }
-        catch (ObjectDisposedException ode)
-        {
-            System.Diagnostics.Debug.WriteLine(ode);
-        }
+        SafeCancel(_shutdownCts);
 
         foreach (var cts in _jobCts.Values)
         {
-            try
-            {
-                cts.Cancel();
-            }
-            catch (ObjectDisposedException ode)
-            {
-                System.Diagnostics.Debug.WriteLine(ode);
-            }
+            SafeCancel(cts);
         }
 
         await _workerPool.DrainAsync().ConfigureAwait(false);
@@ -307,23 +275,16 @@ internal sealed class JobManager : IJobManager
             }
         }
 
-        await _persistenceDriver.DisposeAsync().ConfigureAwait(false);
+        await _persistenceDriver.DrainAndFlushAsync(SnapshotJobs(), CancellationToken.None).ConfigureAwait(false);
 
-        await _persistenceDriver.FlushAsync(SnapshotJobs(), CancellationToken.None).ConfigureAwait(false);
+        await _persistenceDriver.DisposeAsync().ConfigureAwait(false);
 
         var leftoverCts = _jobCts.Values.ToArray();
         _jobCts.Clear();
 
         foreach (var cts in leftoverCts)
         {
-            try
-            {
-                cts.Dispose();
-            }
-            catch (ObjectDisposedException ode)
-            {
-                System.Diagnostics.Debug.WriteLine(ode);
-            }
+            SafeDispose(cts);
         }
 
         _shutdownCts.Dispose();
@@ -372,31 +333,37 @@ internal sealed class JobManager : IJobManager
             return;
         }
 
-        var resurrected = false;
+        var mutated = false;
+        var requeue = new List<JobStateHolder>();
         foreach (var job in loaded)
         {
-            var initial = job;
-            if (initial.Status == JobStatus.Running)
+            var initial = NormalizeLoaded(job, ref mutated);
+
+            var holder = new JobStateHolder(initial);
+            if (!_jobs.TryAdd(initial.Id, holder))
             {
-                initial = initial with
-                {
-                    Status = JobStatus.Failed,
-                    CompletedAt = DateTime.UtcNow,
-                    ErrorMessage = "interrupted by previous shutdown",
-                };
-                resurrected = true;
+                Vice.Log.Emit(ViceLogLevel.Warn,
+                    $"duplicate job id {initial.Id} in jobs.json; keeping first record, dropping duplicate");
+                mutated = true;
+                continue;
             }
 
-            _jobs.TryAdd(initial.Id, new JobStateHolder(initial));
-            if (initial.Id > _nextId)
+            SeedNextId(initial.Id);
+
+            if (initial.Status == JobStatus.Queued)
             {
-                _nextId = initial.Id;
+                requeue.Add(holder);
+            }
+            else if (initial.Status == JobStatus.Paused)
+            {
+                Vice.Log.Emit(ViceLogLevel.Info,
+                    $"job {initial.Id} restored in Paused state; issue 'resume' to continue it");
             }
         }
 
         EvictOldCompleted();
 
-        if (resurrected)
+        if (mutated)
         {
             try
             {
@@ -411,17 +378,91 @@ internal sealed class JobManager : IJobManager
                 Vice.Log.Emit(ViceLogLevel.Warn, "job persistence save failed", ex);
             }
         }
+
+        foreach (var holder in requeue)
+        {
+            await _workerPool.EnqueueAsync(holder, _shutdownCts.Token).ConfigureAwait(false);
+        }
+    }
+
+    private static JobState NormalizeLoaded(JobState job, ref bool mutated)
+    {
+        var normalized = job;
+
+        if (normalized.Status == JobStatus.Running)
+        {
+            normalized = normalized with
+            {
+                Status = JobStatus.Failed,
+                CompletedAt = DateTime.UtcNow,
+                ErrorMessage = "interrupted by previous shutdown",
+            };
+            mutated = true;
+        }
+
+        var isTerminal = normalized.Status is JobStatus.Completed or JobStatus.Failed;
+        if (isTerminal
+            && normalized.CompletedAt is null)
+        {
+            normalized = normalized with { CompletedAt = normalized.CreatedAt };
+            mutated = true;
+        }
+        else if (!isTerminal
+            && normalized.CompletedAt is not null)
+        {
+            normalized = normalized with { CompletedAt = null };
+            mutated = true;
+        }
+
+        if (normalized.TotalBytes is long total
+            && normalized.BytesDownloaded > total)
+        {
+            normalized = normalized with { BytesDownloaded = total };
+            mutated = true;
+        }
+
+        return normalized;
+    }
+
+    private void SeedNextId(int id)
+    {
+        var current = Volatile.Read(ref _nextId);
+        while (id > current)
+        {
+            var observed = Interlocked.CompareExchange(ref _nextId, id, current);
+            if (observed == current)
+            {
+                return;
+            }
+
+            current = observed;
+        }
     }
 
     private void EvictOldCompleted()
     {
+        var completedCount = 0;
+        foreach (var holder in _jobs.Values)
+        {
+            if (holder.Read().Status is JobStatus.Completed or JobStatus.Failed)
+            {
+                completedCount++;
+            }
+        }
+
+        var excess = completedCount - MAX_RETAINED_JOBS;
+        if (excess <= 0)
+        {
+            return;
+        }
+
         var completed = _jobs.Values
             .Select(h => h.Read())
             .Where(s => s.Status is JobStatus.Completed or JobStatus.Failed)
             .OrderBy(s => s.CompletedAt ?? DateTime.MinValue)
+            .ThenBy(s => s.Id)
             .ToList();
 
-        var excess = completed.Count - MAX_RETAINED_JOBS;
         for (var i = 0; i < excess; i++)
         {
             var stale = completed[i];
@@ -450,7 +491,7 @@ internal sealed class JobManager : IJobManager
         var runner = FindRunner(snapshot.Kind);
         if (runner is null)
         {
-            OnNoRunner(holder, snapshot.Kind);
+            await OnNoRunnerAsync(holder, snapshot.Kind).ConfigureAwait(false);
             return;
         }
 
@@ -465,15 +506,15 @@ internal sealed class JobManager : IJobManager
         try
         {
             await runner.RunAsync(holder.Read(), CreateProgressReporter(holder), linkedCts.Token).ConfigureAwait(false);
-            OnSuccess(holder);
+            await OnSuccessAsync(holder).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
-            OnCancellation(holder, jobId);
+            await OnCancellationAsync(holder, jobId).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            OnFailure(holder, jobId, ex);
+            await OnFailureAsync(holder, jobId, ex).ConfigureAwait(false);
         }
         finally
         {
@@ -494,25 +535,29 @@ internal sealed class JobManager : IJobManager
             JobProgressChanged?.Invoke(updated, p);
         });
 
-    private void OnNoRunner(JobStateHolder holder, JobKind kind)
+    private async Task OnNoRunnerAsync(JobStateHolder holder, JobKind kind)
     {
         var errorMsg = $"No runner found for job kind: {kind}";
         TryTransitionToFailed(holder, errorMsg);
-        _persistenceDriver.SignalDirty();
-        JobFailed?.Invoke(holder.Read(), errorMsg);
+        await FlushCriticalAsync().ConfigureAwait(false);
+        var failed = holder.Read();
+        EmitFailedTelemetry(failed, errorMsg);
+        JobFailed?.Invoke(failed, errorMsg);
     }
 
-    private void OnSuccess(JobStateHolder holder)
+    private async Task OnSuccessAsync(JobStateHolder holder)
     {
         var transitioned = holder.TryTransition(JobStatus.Completed);
-        _persistenceDriver.SignalDirty();
+        await FlushCriticalAsync().ConfigureAwait(false);
         if (transitioned)
         {
-            JobCompleted?.Invoke(holder.Read());
+            var completed = holder.Read();
+            EmitCompletedTelemetry(completed);
+            JobCompleted?.Invoke(completed);
         }
     }
 
-    private void OnCancellation(JobStateHolder holder, int jobId)
+    private async Task OnCancellationAsync(JobStateHolder holder, int jobId)
     {
         var currentSnap = holder.Read();
         if (currentSnap.Status == JobStatus.Paused)
@@ -529,15 +574,17 @@ internal sealed class JobManager : IJobManager
             TryTransitionToFailed(holder, reason);
         }
 
-        _persistenceDriver.SignalDirty();
+        await FlushCriticalAsync().ConfigureAwait(false);
         Vice.Log.Emit(ViceLogLevel.Info, $"job {jobId} cancelled");
         if (!alreadyFailed)
         {
-            JobFailed?.Invoke(holder.Read(), reason);
+            var failed = holder.Read();
+            EmitFailedTelemetry(failed, reason);
+            JobFailed?.Invoke(failed, reason);
         }
     }
 
-    private void OnFailure(JobStateHolder holder, int jobId, Exception ex)
+    private async Task OnFailureAsync(JobStateHolder holder, int jobId, Exception ex)
     {
         holder.TryUpdate(s => JobStateTransitions.IsValid(s.Status, JobStatus.Failed)
             ? s with
@@ -548,10 +595,37 @@ internal sealed class JobManager : IJobManager
             }
             : s with { ErrorMessage = ex.Message });
 
-        _persistenceDriver.SignalDirty();
+        await FlushCriticalAsync().ConfigureAwait(false);
         Vice.Log.Emit(ViceLogLevel.Warn, $"job {jobId} failed: {ex.Message}", ex);
-        JobFailed?.Invoke(holder.Read(), ex.Message);
+        var failed = holder.Read();
+        EmitFailedTelemetry(failed, ex.Message);
+        JobFailed?.Invoke(failed, ex.Message);
     }
+
+    private async Task FlushCriticalAsync()
+    {
+        try
+        {
+            await _persistenceDriver.FlushNowAsync(_shutdownCts.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            _persistenceDriver.SignalDirty();
+        }
+        catch (Exception ex)
+        {
+            _persistenceDriver.SignalDirty();
+            Vice.Log.Emit(ViceLogLevel.Warn, "synchronous job persistence flush failed", ex);
+        }
+    }
+
+    private static void EmitCompletedTelemetry(JobState job)
+        => Vice.Log.Emit(ViceLogLevel.Info,
+                         $"job terminal id={job.Id} kind={job.Kind} status=Completed source={job.Source}");
+
+    private static void EmitFailedTelemetry(JobState job, string reason)
+        => Vice.Log.Emit(ViceLogLevel.Warn,
+                         $"job terminal id={job.Id} kind={job.Kind} status=Failed source={job.Source} error={reason}");
 
     private static bool TryTransitionToFailed(JobStateHolder holder, string reason) =>
         holder.TryUpdate(s => JobStateTransitions.IsValid(s.Status, JobStatus.Failed)
@@ -562,6 +636,30 @@ internal sealed class JobManager : IJobManager
                 ErrorMessage = reason,
             }
             : null);
+
+    private static void SafeCancel(CancellationTokenSource? cts)
+    {
+        try
+        {
+            cts?.Cancel();
+        }
+        catch (ObjectDisposedException ode)
+        {
+            System.Diagnostics.Debug.WriteLine(ode);
+        }
+    }
+
+    private static void SafeDispose(CancellationTokenSource? cts)
+    {
+        try
+        {
+            cts?.Dispose();
+        }
+        catch (ObjectDisposedException ode)
+        {
+            System.Diagnostics.Debug.WriteLine(ode);
+        }
+    }
 
     private void CleanupJobCts(int jobId, CancellationTokenSource linkedCts)
     {
@@ -574,14 +672,7 @@ internal sealed class JobManager : IJobManager
             }
         }
 
-        try
-        {
-            toDispose?.Dispose();
-        }
-        catch (ObjectDisposedException ode)
-        {
-            System.Diagnostics.Debug.WriteLine(ode);
-        }
+        SafeDispose(toDispose);
     }
 
     private IJobRunner? FindRunner(JobKind kind)

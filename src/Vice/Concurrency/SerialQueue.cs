@@ -4,17 +4,20 @@ namespace Vice.Concurrency;
 
 internal sealed class SerialQueue : IAsyncDisposable
 {
+    private const int DefaultCapacity = 1024;
+
     private readonly Channel<Func<Task>> _channel;
     private readonly Task _worker;
     private int _disposed;
 
-    public SerialQueue()
+    public SerialQueue(int capacity = DefaultCapacity)
     {
-        _channel = Channel.CreateUnbounded<Func<Task>>(new UnboundedChannelOptions
+        _channel = Channel.CreateBounded<Func<Task>>(new BoundedChannelOptions(capacity)
         {
             SingleReader = true,
             SingleWriter = false,
             AllowSynchronousContinuations = false,
+            FullMode = BoundedChannelFullMode.Wait,
         });
         _worker = Task.Run(DrainAsync);
     }

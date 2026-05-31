@@ -31,7 +31,7 @@ internal sealed class CommandRegistration
         StageHandlers = null;
         IsBuiltin = isBuiltin;
         ShowInHelp = showInHelp ?? !isBuiltin;
-        Mode = StageMode.Classic;
+        Mode = StageMode.Buffered;
     }
 
     public CommandRegistration(
@@ -48,7 +48,7 @@ internal sealed class CommandRegistration
         StageHandlers = stageHandlers;
         IsBuiltin = isBuiltin;
         ShowInHelp = showInHelp ?? !isBuiltin;
-        Mode = StageMode.Classic;
+        Mode = StageMode.Buffered;
     }
 
     public CommandRegistration(

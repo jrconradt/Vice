@@ -23,7 +23,7 @@ public sealed class CommandContext : ICommandContext
     public bool NonInteractive => _globalOptions.ContainsKey(new NonInteractiveOption().Name);
     public bool NoPager => _globalOptions.ContainsKey(new NoPagerOption().Name);
     public OutputFormatKind OutputFormat { get; }
-    public bool WantsJson => OutputFormat is OutputFormatKind.Json or OutputFormatKind.Jsonl or OutputFormatKind.Ndjson;
+    public bool WantsJson => OutputFormat is OutputFormatKind.Json or OutputFormatKind.Ndjson;
     public string? Locale =>
         _globalOptions.TryGetValue(new LocaleOption().Name, out var l) && !string.IsNullOrEmpty(l) ? l : null;
     public string? PipelineInput { get; }
@@ -74,6 +74,23 @@ public sealed class CommandContext : ICommandContext
 
     public string? GetTarget(string name) =>
         _targetValues.TryGetValue(name, out var value) ? value : null;
+
+    public string? Target(TargetDef target) =>
+        _targetValues.TryGetValue(target.Name, out var value) ? value : null;
+
+    public bool HasTarget(TargetDef target) => _targetValues.ContainsKey(target.Name);
+
+    public string RequireTarget(TargetDef target)
+    {
+        if (_targetValues.TryGetValue(target.Name, out var value) && value is not null)
+        {
+            return value;
+        }
+
+        throw new InvalidOperationException($"Required target '{target.Name}' was not provided.");
+    }
+
+    public IReadOnlyList<string> Targets(TargetDef target) => GetTargets(target.Name);
 
     public IReadOnlyList<string> GetTargets(string name)
     {

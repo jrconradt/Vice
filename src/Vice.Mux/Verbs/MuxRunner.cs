@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.Collections;
 using Vice.Execution;
+using Vice.Mux;
 using Vice.Mux.Sinks;
 using Vice.Mux.Strategies;
 
@@ -8,14 +9,28 @@ namespace Vice.Mux.Commands;
 
 internal static class MuxRunner
 {
-    public static async Task<int> RunAsync(
-        CommandContext ctx, CancellationToken ct,
-        StrategyRegistry strategies, bool requireN)
+    public static Task<int> RunAsync(
+        CommandContext ctx,
+        CancellationToken ct,
+        StrategyRegistry strategies,
+        bool requireN)
+        => RunAsync(ctx,
+                    Console.OpenStandardInput(),
+                    ct,
+                    strategies,
+                    requireN);
+
+    internal static async Task<int> RunAsync(
+        CommandContext ctx,
+        Stream input,
+        CancellationToken ct,
+        StrategyRegistry strategies,
+        bool requireN)
     {
         var strategyName = ctx.GetTarget("strategy") ?? throw new ArgumentException("missing {strategy}");
         if (!strategies.TryGet(strategyName, out var entry))
         {
-            throw new ArgumentException($"unknown strategy '{strategyName}'; try `vice mux strategies`");
+            throw new ArgumentException($"unknown strategy '{strategyName}'; try `vice-mux strategies`");
         }
 
         var specs = SinkSpec.Collect(ctx, "sinks");
@@ -65,14 +80,15 @@ internal static class MuxRunner
             sinks[i] = SinkFactory.Open(specs[i]);
         }
 
-        var bufferSize = ctx.GetGlobalOption("chunk-size").AsPositiveInt() ?? 65536;
+        var bufferSize = ctx.GetGlobalOption("chunk-size").AsPositiveInt() ?? MuxDefaults.DefaultChunkSize;
         var pool = ArrayPool<byte>.Shared;
         var buffer = pool.Rent(bufferSize);
+        var mask = new BitArray(sinkCount);
+        var writes = new Task[sinkCount];
         try
         {
-            var stdin = Console.OpenStandardInput();
             int read;
-            while ((read = await stdin.ReadAsync(buffer.AsMemory(0, bufferSize), ct)) > 0)
+            while ((read = await input.ReadAsync(buffer.AsMemory(0, bufferSize), ct)) > 0)
             {
                 state.ChunkIndex++;
                 state.ByteCount += read;
@@ -80,23 +96,24 @@ internal static class MuxRunner
 
                 if (entry.Kind == StrategyKind.Broadcast)
                 {
-                    var mask = new BitArray(sinkCount);
+                    mask.SetAll(false);
                     entry.Broadcast!(span, sinkCount, state, mask);
                     var copy = pool.Rent(read);
                     try
                     {
                         Buffer.BlockCopy(buffer, 0, copy, 0, read);
                         var mem = new ReadOnlyMemory<byte>(copy, 0, read);
-                        var writes = new List<Task>(sinkCount);
+                        var writeCount = 0;
                         for (int i = 0; i < sinkCount; i++)
                         {
                             if (mask[i])
                             {
-                                writes.Add(sinks[i].WriteAsync(mem, ct).AsTask());
+                                writes[writeCount] = sinks[i].WriteAsync(mem, ct).AsTask();
+                                writeCount++;
                             }
                         }
 
-                        await Task.WhenAll(writes);
+                        await Task.WhenAll(writes.AsSpan(0, writeCount));
                     }
                     finally
                     {

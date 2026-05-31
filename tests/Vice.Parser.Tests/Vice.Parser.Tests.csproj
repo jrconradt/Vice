@@ -11,8 +11,10 @@
     <PackageReference Include="xunit.runner.visualstudio" />
     <PackageReference Include="coverlet.collector" />
     <PackageReference Include="JunitXml.TestLogger" />
+    <PackageReference Include="CsCheck" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="..\..\src\Vice.Parser\Vice.Parser.csproj" />
     <ProjectReference Include="..\..\src\Vice\Vice.csproj" />
   </ItemGroup>
 </Project>

@@ -1,6 +1,7 @@
 using System.Threading.Tasks;
 using Vice;
 using Vice.Commands;
+using Vice.Execution;
 using Vice.Jobs;
 using Vice.Logging;
 using Vice.Display;
@@ -12,6 +13,8 @@ namespace Vice.Tests;
 
 public class SadPath_SessionBuiltinsTests
 {
+    private const int UnknownId = 9999;
+
     private static async Task<(CommandExecutor, JobManager, RecordingConsole, TempDir)> Build()
     {
         var tmp = new TempDir();
@@ -33,35 +36,58 @@ public class SadPath_SessionBuiltinsTests
     }
 
     [Fact]
-    public async Task Pause_UnknownId_NoCrashNoOutputDamage()
+    public async Task Pause_UnknownId_NoStateChange_ReportsSuccess()
     {
         var (exec, jobs, console, tmp) = await Build();
         using (tmp) await using (jobs)
         {
-            var exit = await exec.ExecuteAsync("pause 9999");
+            Assert.Empty(jobs.GetJobs());
 
+            var exit = await exec.ExecuteAsync($"pause {UnknownId}");
+
+            Assert.Equal(ViceExitCode.SUCCESS, exit);
+            Assert.Contains($"Job #{UnknownId} paused.", console.Output);
+            Assert.Empty(jobs.GetJobs());
+            Assert.Null(jobs.GetJob(UnknownId));
+            Assert.Equal("", console.Error);
             Assert.DoesNotContain("Exception", console.Error);
         }
     }
 
     [Fact]
-    public async Task Resume_UnknownId_NoCrashNoOutputDamage()
+    public async Task Resume_UnknownId_NoStateChange_ReportsSuccess()
     {
         var (exec, jobs, console, tmp) = await Build();
         using (tmp) await using (jobs)
         {
-            await exec.ExecuteAsync("resume 9999");
+            Assert.Empty(jobs.GetJobs());
+
+            var exit = await exec.ExecuteAsync($"resume {UnknownId}");
+
+            Assert.Equal(ViceExitCode.SUCCESS, exit);
+            Assert.Contains($"Job #{UnknownId} resumed.", console.Output);
+            Assert.Empty(jobs.GetJobs());
+            Assert.Null(jobs.GetJob(UnknownId));
+            Assert.Equal("", console.Error);
             Assert.DoesNotContain("Exception", console.Error);
         }
     }
 
     [Fact]
-    public async Task Cancel_UnknownId_NoCrashNoOutputDamage()
+    public async Task Cancel_UnknownId_NoStateChange_ReportsSuccess()
     {
         var (exec, jobs, console, tmp) = await Build();
         using (tmp) await using (jobs)
         {
-            await exec.ExecuteAsync("cancel 9999");
+            Assert.Empty(jobs.GetJobs());
+
+            var exit = await exec.ExecuteAsync($"cancel {UnknownId}");
+
+            Assert.Equal(ViceExitCode.SUCCESS, exit);
+            Assert.Contains($"Job #{UnknownId} cancelled.", console.Output);
+            Assert.Empty(jobs.GetJobs());
+            Assert.Null(jobs.GetJob(UnknownId));
+            Assert.Equal("", console.Error);
             Assert.DoesNotContain("Exception", console.Error);
         }
     }

@@ -10,7 +10,9 @@ namespace Vice.Ipc;
 internal sealed class PipeServer : IPipeServer
 {
     private const int MaxConcurrentClients = 64;
+    private const int SingleServerInstance = 1;
     private static readonly TimeSpan ClientDisposeTimeout = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan AcceptIterationBackoff = TimeSpan.FromMilliseconds(250);
 
     private readonly string _pipeName;
     private readonly Func<PipeMessage, CancellationToken, Task<PipeMessage?>> _messageHandler;
@@ -25,10 +27,8 @@ internal sealed class PipeServer : IPipeServer
 
     public PipeServer(
         string pipeName,
-        Func<PipeMessage, CancellationToken, Task<PipeMessage?>> messageHandler,
-        IViceLogger? logger = null)
+        Func<PipeMessage, CancellationToken, Task<PipeMessage?>> messageHandler)
     {
-        _ = logger;
         _pipeName = pipeName;
         _messageHandler = messageHandler;
     }
@@ -54,6 +54,7 @@ internal sealed class PipeServer : IPipeServer
     {
         _isListening = true;
         var readyCompleted = false;
+        var everBound = false;
 
         try
         {
@@ -64,6 +65,7 @@ internal sealed class PipeServer : IPipeServer
                 try
                 {
                     serverStream = CreateServerStream();
+                    everBound = true;
 
                     if (!readyCompleted)
                     {
@@ -74,10 +76,6 @@ internal sealed class PipeServer : IPipeServer
                     try
                     {
                         await WaitForConnectionWithRestrictiveUmaskAsync(serverStream, ct).ConfigureAwait(false);
-                        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-                        {
-                            TryRestrictUnixPipePermissions();
-                        }
                     }
                     catch (OperationCanceledException)
                     {
@@ -93,7 +91,8 @@ internal sealed class PipeServer : IPipeServer
                         continue;
                     }
 
-                    if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows) && !VerifyPeerUid(serverStream))
+                    var peerCheck = VerifyPeer(serverStream);
+                    if (!peerCheck.Authorized)
                     {
                         await serverStream.DisposeAsync().ConfigureAwait(false);
                         serverStream = null;
@@ -102,8 +101,10 @@ internal sealed class PipeServer : IPipeServer
 
                     if (_clientTasks.Count >= MaxConcurrentClients)
                     {
-                        Vice.Log.Emit(ViceLogLevel.Warn,
-                            $"pipe server '{_pipeName}' at concurrent-client cap ({MaxConcurrentClients}); rejecting connection");
+                        var capMessage =
+                            $"pipe server '{_pipeName}' at concurrent-client cap ({MaxConcurrentClients}); rejecting connection peer-uid={peerCheck.PeerUid} peer-pid={peerCheck.PeerPid}";
+                        Vice.Log.Emit(ViceLogLevel.Warn, capMessage);
+                        EmitAudit(capMessage);
                         await serverStream.DisposeAsync().ConfigureAwait(false);
                         serverStream = null;
                         continue;
@@ -112,6 +113,8 @@ internal sealed class PipeServer : IPipeServer
                     var attached = serverStream;
                     serverStream = null;
                     var clientId = Interlocked.Increment(ref _nextClientId);
+                    EmitAudit(
+                        $"pipe connection accepted on '{_pipeName}': client={clientId} peer-uid={peerCheck.PeerUid} peer-pid={peerCheck.PeerPid}");
                     var clientTask = HandleClientAsync(attached, clientId, ct);
 
                     _clientTasks[clientId] = clientTask;
@@ -130,8 +133,35 @@ internal sealed class PipeServer : IPipeServer
                         }
                     }
 
-                    Vice.Log.Emit(ViceLogLevel.Error, $"pipe accept loop iteration failed on '{_pipeName}'", ex);
-                    throw;
+                    if (!everBound)
+                    {
+                        var bindMessage =
+                            $"pipe server '{_pipeName}' could not bind (another daemon may already own this pipe); not starting a second listener";
+                        Vice.Log.Emit(ViceLogLevel.Error, bindMessage, ex);
+                        EmitAudit(bindMessage);
+                        _acceptLoopCrashed = true;
+                        _faulted = ex;
+
+                        if (!readyCompleted)
+                        {
+                            ready.TrySetException(ex);
+                            readyCompleted = true;
+                        }
+
+                        break;
+                    }
+
+                    Vice.Log.Emit(ViceLogLevel.Error,
+                        $"pipe accept loop iteration failed on '{_pipeName}'; backing off and retrying", ex);
+
+                    try
+                    {
+                        await Task.Delay(AcceptIterationBackoff, ct).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        break;
+                    }
                 }
             }
         }
@@ -169,51 +199,50 @@ internal sealed class PipeServer : IPipeServer
             return CreateWindowsAclStream();
         }
 
-        return new NamedPipeServerStream(
-            _pipeName,
-            PipeDirection.InOut,
-            NamedPipeServerStream.MaxAllowedServerInstances,
-            PipeTransmissionMode.Byte,
-            PipeOptions.Asynchronous);
-    }
-
-    private async Task WaitForConnectionWithRestrictiveUmaskAsync(
-        NamedPipeServerStream stream, CancellationToken ct)
-    {
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-        {
-            await stream.WaitForConnectionAsync(ct).ConfigureAwait(false);
-            return;
-        }
-
-        uint previousMask;
+        var maskApplied = false;
+        var previousMask = 0u;
         try
         {
             previousMask = Umask(UnixUmaskUserOnly);
+            maskApplied = true;
         }
         catch (Exception ex)
         {
             Vice.Log.Emit(ViceLogLevel.Warn,
                 "umask P/Invoke failed; pipe socket may be created with default permissions", ex);
-            await stream.WaitForConnectionAsync(ct).ConfigureAwait(false);
-            return;
         }
 
         try
         {
-            await stream.WaitForConnectionAsync(ct).ConfigureAwait(false);
+            var stream = new NamedPipeServerStream(
+                _pipeName,
+                PipeDirection.InOut,
+                SingleServerInstance,
+                PipeTransmissionMode.Byte,
+                PipeOptions.Asynchronous);
+            TryRestrictUnixPipePermissions();
+            return stream;
         }
         finally
         {
-            try
+            if (maskApplied)
             {
-                _ = Umask(previousMask);
-            }
-            catch (Exception ex)
-            {
-                Vice.Log.Emit(ViceLogLevel.Warn, "umask restore failed", ex);
+                try
+                {
+                    _ = Umask(previousMask);
+                }
+                catch (Exception ex)
+                {
+                    Vice.Log.Emit(ViceLogLevel.Warn, "umask restore failed", ex);
+                }
             }
         }
+    }
+
+    private async Task WaitForConnectionWithRestrictiveUmaskAsync(
+        NamedPipeServerStream stream, CancellationToken ct)
+    {
+        await stream.WaitForConnectionAsync(ct).ConfigureAwait(false);
     }
 
     [UnsupportedOSPlatform("windows")]
@@ -238,27 +267,63 @@ internal sealed class PipeServer : IPipeServer
     [DllImport("libc", EntryPoint = "umask")]
     private static extern uint Umask(uint mask);
 
-    private bool VerifyPeerUid(NamedPipeServerStream stream)
+    private readonly record struct PeerCheck(bool Authorized, int PeerUid, int PeerPid);
+
+    private PeerCheck VerifyPeer(NamedPipeServerStream stream)
     {
-        if (!PeerCredentials.TryGetEuid(out var euid))
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
         {
-            Vice.Log.Emit(ViceLogLevel.Warn, "pipe peer-uid check: geteuid failed; rejecting connection");
+            return new PeerCheck(true, -1, -1);
+        }
+
+        var gotEuid = PeerCredentials.TryGetEuid(out var euid);
+        if (!gotEuid)
+        {
+            var message = $"pipe peer-uid check: geteuid failed on '{_pipeName}'; rejecting connection";
+            Vice.Log.Emit(ViceLogLevel.Warn, message);
+            EmitAudit(message);
+        }
+
+        var gotPeer = PeerCredentials.TryGetPeerCredentials(stream.SafePipeHandle, out var peerUid, out var peerPid);
+        if (gotEuid && !gotPeer)
+        {
+            var message = $"pipe peer-uid check: unable to determine peer uid on '{_pipeName}'; rejecting";
+            Vice.Log.Emit(ViceLogLevel.Warn, message);
+            EmitAudit(message);
+        }
+
+        if (gotEuid
+            && gotPeer
+            && peerUid != euid)
+        {
+            var message =
+                $"pipe peer-uid mismatch on '{_pipeName}': peer-uid={peerUid} peer-pid={peerPid} euid={euid}; rejecting";
+            Vice.Log.Emit(ViceLogLevel.Warn, message);
+            EmitAudit(message);
+        }
+
+        var authorized = AuthorizePeer(peerUid, euid, gotEuid, gotPeer);
+        return new PeerCheck(authorized, peerUid, peerPid);
+    }
+
+    private static void EmitAudit(string message)
+    {
+        Vice.Log.Audit.Log(ViceLogLevel.Warn, message);
+    }
+
+    internal static bool AuthorizePeer(int peerUid, int euid, bool gotEuid, bool gotPeer)
+    {
+        if (!gotEuid)
+        {
             return false;
         }
 
-        if (!PeerCredentials.TryGetPeerUid(stream.SafePipeHandle, out var peerUid))
+        if (!gotPeer)
         {
-            Vice.Log.Emit(ViceLogLevel.Warn, $"pipe peer-uid check: unable to determine peer uid on '{_pipeName}'; rejecting");
             return false;
         }
 
-        if (peerUid != euid)
-        {
-            Vice.Log.Emit(ViceLogLevel.Warn, $"pipe peer-uid mismatch on '{_pipeName}': peer={peerUid} euid={euid}; rejecting");
-            return false;
-        }
-
-        return true;
+        return peerUid == euid;
     }
 
     [SupportedOSPlatform("windows")]
@@ -276,7 +341,7 @@ internal sealed class PipeServer : IPipeServer
         return NamedPipeServerStreamAcl.Create(
             _pipeName,
             PipeDirection.InOut,
-            NamedPipeServerStream.MaxAllowedServerInstances,
+            SingleServerInstance,
             PipeTransmissionMode.Byte,
             PipeOptions.Asynchronous,
             inBufferSize: 0,
@@ -309,6 +374,12 @@ internal sealed class PipeServer : IPipeServer
                 if (message is null)
                 {
                     break;
+                }
+
+                if (message is CommandMessage commandMessage)
+                {
+                    EmitAudit(
+                        $"pipe command on '{_pipeName}': client={clientId} command={commandMessage.CommandLine}");
                 }
 
                 PipeMessage? response;

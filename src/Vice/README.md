@@ -16,14 +16,17 @@ Requires .NET 10.
 - Typed streaming channels with backpressure between piped stages
 - Built-in session REPL with job management (`jobs`, `pause`, `resume`, `cancel`, `history`) and background-daemon detachment on exit
 - `[ViceCommandPack]` attribute for in-process command extensions with full host-service access
-- Git-style external plugin discovery: any executable named `<app>-<verb>` on PATH dispatches as a verb (the host's executable name supplies `<app>`)
+- Git-style external plugin discovery: an executable named `<app>-<verb>` in the trusted plugin directory (`$VICE_PLUGIN_DIR`, else `$XDG_DATA_HOME/vice/plugins/`) dispatches as a verb (the host's executable name supplies `<app>`); `$PATH` is intentionally not consulted
 - Hookable framework services: `IViceLogger`, `IKeyring`, telemetry sink
 - Global options for pager, clipboard, and locale
 
-## Companion packages
+## What ships in this package
 
-- [`Vice.Parser`](https://www.nuget.org/packages/Vice.Parser) — standalone lexer/resolver
-- [`Vice.Generators`](https://www.nuget.org/packages/Vice.Generators) — source generators for command composition
-- [`Vice.Net`](https://www.nuget.org/packages/Vice.Net) — reference CLI tool built on this framework
+The `Vice` package wires the framework together:
+
+- Lexing and resolution come from the standalone [`Vice.Parser`](https://www.nuget.org/packages/Vice.Parser) package (the `Vice.Parser` namespace — lexer, `CommandResolver`, `ParseResult`), referenced as a dependency so installing `Vice` pulls it in automatically.
+- The command-composition source generator ships embedded under `analyzers/` in this package and runs automatically; it is not a separately installable `Vice.Generators` package.
+
+The reference CLI tool is published separately as [`Vice.Cli`](https://www.nuget.org/packages/Vice.Cli) (`dotnet tool install --global Vice.Cli`), produced from `Vice.Cli`; its network commands live in the non-packable `Vice.Net` library.
 
 Apache 2.0.

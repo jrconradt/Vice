@@ -1,4 +1,3 @@
-using System.Collections.Frozen;
 using Vice.Commands;
 using Vice.Execution;
 using Vice.Ipc;
@@ -30,8 +29,6 @@ public sealed class ViceApp : IViceApp, IAsyncDisposable
     private readonly TimeSpan _shutdownTimeout;
     private readonly Dictionary<string, GlobalOption> _options
         = new(StringComparer.OrdinalIgnoreCase);
-    private readonly FrozenSet<string> _valueBearingOptionNames;
-    private readonly FrozenSet<string> _flagOptionNames;
     private readonly IOutputSink _priorOutputSink;
     private readonly IStatusSink _priorStatusSink;
     private readonly ILogSink _priorLogSink;
@@ -93,38 +90,44 @@ public sealed class ViceApp : IViceApp, IAsyncDisposable
             }
         }
 
-        _valueBearingOptionNames = _options.Values.Where(o => o.TakesValue).Select(o => o.Name)
-            .ToFrozenSet(StringComparer.OrdinalIgnoreCase);
-        _flagOptionNames = _options.Values.Where(o => !o.TakesValue).Select(o => o.Name)
-            .ToFrozenSet(StringComparer.OrdinalIgnoreCase);
-
         _priorOutputSink = Vice.Output.Current;
         _priorStatusSink = Vice.Status.Current;
         _priorLogSink = Vice.Log.Current;
 
-        if (console is null)
+        try
         {
-            Vice.Output.Configure(new ConsoleOutputSink());
-        }
-        _console = console ?? new ConsoleWriter();
-        _capabilities = capabilities ?? TerminalCapabilities.Detect();
-        if (status is null && _console is ConsoleWriter && !System.Console.IsErrorRedirected)
-        {
-            Vice.Status.Configure(new UnifiedStatusSink(_capabilities, _console));
-            _status = new UnifiedStatusDisplay(_capabilities);
-        }
-        else
-        {
-            _status = status ?? NullStatusDisplay.Instance;
-        }
+            if (console is null)
+            {
+                Vice.Output.Configure(new ConsoleOutputSink());
+            }
+            _console = console ?? new ConsoleWriter();
+            _capabilities = capabilities ?? TerminalCapabilities.Detect();
+            if (status is null && _console is ConsoleWriter
+                && !System.Console.IsErrorRedirected)
+            {
+                Vice.Status.Configure(new UnifiedStatusSink(_capabilities, _console));
+                _status = new UnifiedStatusDisplay(_capabilities);
+            }
+            else
+            {
+                _status = status ?? NullStatusDisplay.Instance;
+            }
 
-        if (_logger is not NullViceLogger)
-        {
-            Vice.Log.Configure(new ViceLoggerLogSink(_logger));
-        }
+            if (_logger is not NullViceLogger)
+            {
+                Vice.Log.Configure(new ViceLoggerLogSink(_logger));
+            }
 
-        BuiltinCommands.Register(_registry, this);
-        SessionBuiltins.RegisterChains(_registry);
+            BuiltinCommands.Register(_registry, this);
+            SessionBuiltins.RegisterChains(_registry);
+        }
+        catch
+        {
+            Vice.Output.Configure(_priorOutputSink);
+            Vice.Status.Configure(_priorStatusSink);
+            Vice.Log.Configure(_priorLogSink);
+            throw;
+        }
     }
 
     public IReadOnlyCollection<GlobalOption> RegisteredGlobalOptions => _options.Values;
@@ -132,10 +135,6 @@ public sealed class ViceApp : IViceApp, IAsyncDisposable
     public IViceLogger Logger => _logger;
 
     public TimeSpan ShutdownTimeout => _shutdownTimeout;
-
-    private IReadOnlySet<string> ValueBearingOptionNames => _valueBearingOptionNames;
-
-    private IReadOnlySet<string> FlagOptionNames => _flagOptionNames;
 
     public static ViceAppBuilder Create(string name, string version)
         => new ViceAppBuilder(name, version);
@@ -298,16 +297,59 @@ public sealed class ViceApp : IViceApp, IAsyncDisposable
         SessionContext sessionCtx,
         CancellationToken ct)
     {
+        PipeClient? existing;
+        try
+        {
+            existing = await PipeClient.TryConnectAsync(state.PipeName, timeoutMs: 500, _logger, ct).ConfigureAwait(false);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            Vice.Log.Emit(ViceLogLevel.Error, $"permission denied probing daemon pipe '{state.PipeName}'; refusing to start", ex);
+            return ViceExitCode.FAILURE;
+        }
+
+        if (existing is not null)
+        {
+            await using (existing)
+            {
+                Vice.Log.Emit(ViceLogLevel.Info, $"{_name} daemon already running on '{state.PipeName}'; not starting a second instance");
+            }
+
+            return ViceExitCode.SUCCESS;
+        }
+
         var handler = new DaemonMessageHandler(this, jobManager, sessionCtx, NullConsoleWriter.Instance);
 
         await using var server = new PipeServer(state.PipeName, handler.HandleAsync);
 
         await server.StartAsync(ct);
 
+        return await SuperviseAcceptLoopAsync(server, ct).ConfigureAwait(false);
+    }
+
+    private static async Task<int> SuperviseAcceptLoopAsync(PipeServer server, CancellationToken ct)
+    {
         var tcs = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
-        await using (ct.Register(() => tcs.TrySetResult(0)))
+        await using (ct.Register(() => tcs.TrySetResult(ViceExitCode.SUCCESS)))
         {
-            return await tcs.Task.ConfigureAwait(false);
+            while (!ct.IsCancellationRequested)
+            {
+                if (server.AcceptLoopCrashed
+                    || (!server.IsListening && !ct.IsCancellationRequested))
+                {
+                    Vice.Log.Emit(ViceLogLevel.Error, "daemon pipe accept loop terminated; exiting so a supervisor can restart", server.Faulted);
+                    return ViceExitCode.FAILURE;
+                }
+
+                var poll = Task.Delay(TimeSpan.FromMilliseconds(250), CancellationToken.None);
+                var completed = await Task.WhenAny(tcs.Task, poll).ConfigureAwait(false);
+                if (completed == tcs.Task)
+                {
+                    return await tcs.Task.ConfigureAwait(false);
+                }
+            }
+
+            return ViceExitCode.SUCCESS;
         }
     }
 

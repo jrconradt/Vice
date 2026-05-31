@@ -6,10 +6,10 @@ public static class Signals
 {
     public static CancellationTokenSource HookGracefulShutdown(IConsoleWriter? console = null)
     {
-        var cts = new CancellationTokenSource();
         var writer = console ?? new ConsoleWriter();
+        var cts = new ShutdownTokenSource();
         int count = 0;
-        Console.CancelKeyPress += (_, e) =>
+        ConsoleCancelEventHandler handler = (_, e) =>
         {
             var n = Interlocked.Increment(ref count);
             if (n == 1)
@@ -19,12 +19,31 @@ public static class Signals
                 writer.WriteError("Shutting down — press Ctrl+C again to force exit.");
             }
         };
+        cts.Handler = handler;
+        Console.CancelKeyPress += handler;
         return cts;
+    }
+
+    private sealed class ShutdownTokenSource : CancellationTokenSource
+    {
+        public ConsoleCancelEventHandler? Handler { get; set; }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing && Handler is not null)
+            {
+                Console.CancelKeyPress -= Handler;
+                Handler = null;
+            }
+
+            base.Dispose(disposing);
+        }
     }
 
     public static bool IsBrokenPipe(Exception ex)
     {
-        if (ex is IOException io && io.InnerException is { } inner && inner.GetType().Name == "SocketException")
+        if (ex is IOException io && io.InnerException is { } inner
+            && inner.GetType().Name == "SocketException")
         {
             return true;
         }

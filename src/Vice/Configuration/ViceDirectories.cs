@@ -151,9 +151,40 @@ public sealed class ViceDirectories
             var legacy = Path.Combine(LegacyDir, fileName);
             if (File.Exists(legacy))
             {
+                if (TryCopyForward(legacy, modernDir, modern))
+                {
+                    return modern;
+                }
+
                 return legacy;
             }
         }
         return modern;
+    }
+
+    private static bool TryCopyForward(string legacy, string modernDir, string modern)
+    {
+        try
+        {
+            if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS()
+                || OperatingSystem.IsFreeBSD())
+            {
+                Directory.CreateDirectory(modernDir, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            }
+            else
+            {
+                Directory.CreateDirectory(modernDir);
+            }
+
+            File.Copy(legacy, modern, overwrite: false);
+            Vice.Persistence.FileAccessControl.RestrictToCurrentUser(modern);
+            return File.Exists(modern);
+        }
+        catch (Exception ex) when (ex is IOException
+            || ex is UnauthorizedAccessException
+            || ex is NotSupportedException)
+        {
+            return File.Exists(modern);
+        }
     }
 }

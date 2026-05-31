@@ -60,11 +60,11 @@ public class NetworkOptionsTests
     }
 
     [Theory]
-    [InlineData(null, NetworkOutputFormat.Text)]
-    [InlineData("text", NetworkOutputFormat.Text)]
-    [InlineData("HEX", NetworkOutputFormat.Hex)]
-    [InlineData("json", NetworkOutputFormat.Json)]
-    public void GetFormat_accepts_known(string? raw, NetworkOutputFormat expected)
+    [InlineData(null, OutputFormatKind.Text)]
+    [InlineData("text", OutputFormatKind.Text)]
+    [InlineData("HEX", OutputFormatKind.Hex)]
+    [InlineData("json", OutputFormatKind.Json)]
+    public void GetFormat_accepts_known(string? raw, OutputFormatKind expected)
     {
         var ctx = raw is null ? CtxWith() : CtxWith(("format", raw));
         Assert.Equal(expected, NetworkOptions.GetFormat(ctx));

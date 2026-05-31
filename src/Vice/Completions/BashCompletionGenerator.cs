@@ -89,7 +89,9 @@ internal static class BashCompletionGenerator
     }
 
     private static string BashEscape(string s)
-        => string.Concat(s.Select(c => (c == '\\' || c == '"' || c == '$' || c == '`') ? $"\\{c}" : $"{c}"));
+        => string.Concat(s.Select(c => (c == '\\' || c == '"'
+                                        || c == '$'
+                                        || c == '`') ? $"\\{c}" : $"{c}"));
 
     private static string SanitizeIdentifier(string name)
         => string.Concat(name.Select(c => char.IsLetterOrDigit(c) || c == '_' ? c : '_'));

@@ -50,7 +50,7 @@ public class CommandResolverTests
         => new TestDescriptor(name, ChainNodeKind.Word, null, synonyms, targets, next);
 
     private static IChainDescriptor Conj(string name, ITargetDescriptor[]? targets = null, IChainDescriptor? next = null)
-        => new TestDescriptor(name, ChainNodeKind.Conjunctive, Parser.ConjunctiveKind.Relational, null, targets, next);
+        => new TestDescriptor(name, ChainNodeKind.Conjunctive, Parser.ConjunctiveKind.Preposition, null, targets, next);
 
     private static ITargetDescriptor Target(string name, bool required = true)
         => new TestTarget(name, required);
@@ -120,7 +120,7 @@ public class CommandResolverTests
     {
 
         var conj = new TestDescriptor("to", ChainNodeKind.Conjunctive,
-            Parser.ConjunctiveKind.Relational, null, [Target("groupname")], null);
+            Parser.ConjunctiveKind.Preposition, null, [Target("groupname")], null);
         var reg = new[] { Word("add", targets: [Target("username")], next: conj) };
 
         var result = CommandResolver.Resolve(["add", "jeff", "to", "admins"], reg);

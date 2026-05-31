@@ -26,7 +26,7 @@ Apache-2.0 · targets .NET 10 · current release `0.1.0` (see [CHANGELOG.md](CHA
 The fastest way to try the `vice` tool is to build and install it from this repo:
 
 ```bash
-./scripts/install-local.sh    # packs Vice.Net and installs it as a global `vice` tool
+./scripts/install-local.sh    # packs Vice.Cli and installs it as a global `vice` tool
 vice                          # opens the interactive REPL
 ```
 
@@ -90,6 +90,18 @@ vice test ./tests/MyLib.Tests/
 ```bash
 vice search "graph" on source arxiv --limit 50 then write to file ./graph-papers.txt
 vice read ./large.bin.gz then stream to count
+```
+
+---
+
+## The `vice-mux` companion tool
+
+`vice-mux` is a separate stream-plumbing tool for inspecting, splitting, routing, and tee-ing byte streams — installed on its own (`dotnet tool install --global Vice.Mux.Cli`) and invoked as `vice-mux`. It reads stdin and fans chunks out to files, TCP endpoints, child processes, or named pipes, choosing a destination per chunk with pluggable strategies (round-robin, hash, sticky-key, weighted, random, broadcast). ([docs/mux-commands.md](docs/mux-commands.md))
+
+```bash
+cat ./events.ndjson | vice-mux tee to file:./copy.ndjson,tcp:collector:9000 > ./out.ndjson
+cat ./requests.log | vice-mux route by hash to file:./shard-a.log,file:./shard-b.log
+vice-mux strategies
 ```
 
 ---
@@ -171,13 +183,17 @@ The framework API is summarized in [src/Vice/README.md](src/Vice/README.md); the
 
 | Path | What it is |
 |---|---|
-| `src/Vice` | The framework. NuGet package `Vice` — lexer/parser, the command DSL, streaming channels, REPL, jobs, plugins, configuration. |
+| `src/Vice.Parser` | The command-line lexer and resolver. NuGet package `Vice.Parser` — BCL-only, no dependency on the rest of the framework; `Vice` references it transitively. |
+| `src/Vice` | The framework. NuGet package `Vice` — the command DSL, streaming channels, REPL, jobs, plugins, configuration; references `Vice.Parser` for lexing and resolution. |
 | `src/Vice.Generators` | Roslyn source generators that wire `[ViceCommandPack]` classes into the host at compile time. |
-| `src/Vice.Net` | The `vice` reference CLI tool, built entirely on the framework. |
-| `src/Vice.Mux` | `vice-mux`, a companion tool for inspecting, splitting, routing, and tee-ing Vice pipeline streams. |
+| `src/Vice.Net` | Network command library (TCP, UDP, gRPC) for the `vice` tool, built on the framework. A library, not a tool — `IsPackable=false`. |
+| `src/Vice.Cli` | The `vice` reference CLI tool. NuGet package `Vice.Cli`, `ToolCommandName` `vice` — `dotnet tool install --global Vice.Cli`. |
+| `src/Vice.Mux` | The mux library for inspecting, splitting, routing, and tee-ing Vice pipeline streams. A library, not a tool. |
+| `src/Vice.Mux.Cli` | The `vice-mux` companion CLI tool. NuGet package `Vice.Mux.Cli`, `ToolCommandName` `vice-mux` — `dotnet tool install --global Vice.Mux.Cli` ([docs/mux-commands.md](docs/mux-commands.md)). |
 | `docs/` | User and configuration guides. |
 | `scripts/` | Build, test, and local-install helpers ([scripts/README.md](scripts/README.md)). |
 | `tests/` | Unit tests for the framework, generators, parser, network layer, and mux tool. |
+| `bench/Vice.Benchmarks` | BenchmarkDotNet harness for the hot paths — lexer, streaming channel throughput, pipeline stage execution, mux route/broadcast strategies, and buffered I/O. |
 
 ---
 
@@ -187,15 +203,30 @@ Vice is configured through environment variables, XDG-standard directories, and 
 
 ---
 
+## Accessibility
+
+Vice is usable without color, motion, or Unicode, and conveys every outcome textually.
+
+- **Disable motion.** `--no-status` turns off the animated status spinner; progress is still reported in plain text.
+- **Disable color.** `--no-color`, or the standard `NO_COLOR` environment variable, drops all ANSI color. `FORCE_COLOR` and `CLICOLOR_FORCE` opt color back in for redirected output, and `NO_COLOR` always wins (see [docs/env-and-config.md](docs/env-and-config.md)).
+- **Unicode / ASCII fallback.** When the terminal does not advertise Unicode support, table borders and decorations fall back to ASCII automatically; no flag is required.
+- **No color-only signals.** Status and error semantics are always carried in the text itself — error messages, `hint:` lines, and POSIX exit codes — not by color alone, so screen readers and color-blind users lose no information.
+
+---
+
 ## Documentation
 
+- [Architecture](docs/architecture.md) — assembly graph, core internal layering, and extraction boundaries
 - [Getting started](docs/getting-started.md) — install, verify, first commands, one-shot vs. session mode
 - [Network commands](docs/network-commands.md) — TCP, UDP, gRPC
 - [Research commands](docs/research-commands.md) — search, fetch, download, archive
 - [Research sources](docs/sources.md) — per-source query syntax, aliases, formats
 - [File commands](docs/file-commands.md) — read, write, stream, archives, filesystem search
 - [Build commands](docs/build-commands.md) — `dotnet` wrappers and build deduplication
+- [vice-mux commands](docs/mux-commands.md) — the companion stream inspect/route/split/tee tool and its strategies and sinks
 - [Environment and configuration](docs/env-and-config.md) — env vars, XDG paths, plugins, services, exit codes
+- [Releasing](docs/releasing.md) — versioning policy, tagging, publishing, rollback
+- [Licensing](docs/licensing.md) — Apache-2.0 coverage, SPDX provenance, third-party notices
 - [Known issues](docs/known-issues.md) · [Troubleshooting](docs/troubleshooting.md)
 
 ---
@@ -206,12 +237,36 @@ Vice is configured through environment variables, XDG-standard directories, and 
 ./scripts/build.sh    # restore and build the solution
 ./scripts/test.sh     # run all tests
 ./scripts/demo.sh     # build, install, exercise a few commands, then uninstall
+./scripts/bench.sh    # run the BenchmarkDotNet hot-path harness
 ```
 
 Requires the .NET 10 SDK.
+
+`scripts/bench.sh` runs every benchmark by default and writes BenchmarkDotNet JSON, Markdown, and log artifacts under `BenchmarkDotNet.Artifacts/` in the repository root (override the location with `VICE_BENCH_ARTIFACTS`). Persist those JSON files as a baseline to compare throughput run-over-run. Pass BenchmarkDotNet arguments through, e.g. `./scripts/bench.sh --filter '*RouteStrategy*'`.
+
+---
+
+## Releasing
+
+The two tool projects — `Vice.Cli` (the `vice` tool) and `Vice.Mux.Cli` (the `vice-mux` tool) — are packable; `Vice.Net` and the other libraries are not. The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); the shipped version is `<Version>` in `Directory.Build.props`, and each release is an annotated git tag `v<version>`.
+
+To cut a release: bump `<Version>`, update [CHANGELOG.md](CHANGELOG.md), tag the commit (`git tag -a v<version> -m "v<version>"`), then pack and publish:
+
+```bash
+scripts/release.sh --verify-tag                       # pack both tools into artifacts/release/<version>/
+NUGET_API_KEY=<key> scripts/release.sh --verify-tag --push   # publish to $VICE_NUGET_FEED (default nuget.org)
+```
+
+Roll a tool back to a prior published version (every prior version stays on the feed):
+
+```bash
+scripts/rollback.sh <previous-version> all            # dotnet tool update --version <previous-version>
+```
+
+The full process — versioning policy, tagging, publishing, and rollback — is documented in **[docs/releasing.md](docs/releasing.md)**. To try the tools locally without publishing, run `./scripts/install-local.sh`.
 
 ---
 
 ## License
 
-Apache-2.0. Copyright 2026 Infalligence Labs LLC. See [LICENSE](LICENSE) and [THIRD_PARTY_NOTICE](THIRD_PARTY_NOTICE).
+Apache-2.0. Copyright 2026 Infalligence Labs LLC. The root [LICENSE](LICENSE) governs every file in the tree; the SPDX identifier `Apache-2.0` is carried as package and assembly metadata rather than per-file comment headers. See [docs/licensing.md](docs/licensing.md) for the file-level provenance policy and [THIRD_PARTY_NOTICE](THIRD_PARTY_NOTICE) for redistributed dependencies.

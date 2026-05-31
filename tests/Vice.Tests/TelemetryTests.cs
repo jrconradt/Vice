@@ -6,11 +6,9 @@ using Xunit;
 
 namespace Vice.Tests;
 
+[Collection("EnvVarSerial")]
 public class TelemetryTests
 {
-    static TelemetryTests()
-        => Environment.SetEnvironmentVariable(FileTelemetrySink.ConsentEnvVar, "1");
-
     [Fact]
     public void NullTelemetry_NeverThrows()
     {
@@ -18,12 +16,14 @@ public class TelemetryTests
         t.Track("event");
         t.Track("event", new Dictionary<string, string> { ["k"] = "v" });
         t.TrackException(new InvalidOperationException("boom"));
+        Assert.True(true, "NullTelemetrySink contract: Track/TrackException complete without throwing.");
     }
 
     [Fact]
     public async Task FileTelemetry_AppendsEvent()
     {
         using var tmp = new TempDir();
+        using var env = new EnvScope((FileTelemetrySink.ConsentEnvVar, "1"));
         var dirs = ViceDirectories.UnifiedAt("vice-test", tmp.Path);
         var t = new FileTelemetrySink(dirs);
 
@@ -42,6 +42,7 @@ public class TelemetryTests
     public async Task FileTelemetry_AppendsException()
     {
         using var tmp = new TempDir();
+        using var env = new EnvScope((FileTelemetrySink.ConsentEnvVar, "1"));
         var dirs = ViceDirectories.UnifiedAt("vice-test", tmp.Path);
         var t = new FileTelemetrySink(dirs);
 
@@ -59,6 +60,7 @@ public class TelemetryTests
     public async Task FileTelemetry_MultipleEventsAreSeparateLines()
     {
         using var tmp = new TempDir();
+        using var env = new EnvScope((FileTelemetrySink.ConsentEnvVar, "1"));
         var dirs = ViceDirectories.UnifiedAt("vice-test", tmp.Path);
         var t = new FileTelemetrySink(dirs);
 

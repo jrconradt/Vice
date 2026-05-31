@@ -4,6 +4,12 @@ namespace Vice.Jobs;
 
 public sealed record JobState
 {
+    public const int CurrentSchemaVersion = 1;
+
+    [JsonInclude]
+    [JsonPropertyName("schemaVersion")]
+    public int SchemaVersion { get; init; } = CurrentSchemaVersion;
+
     [JsonInclude]
     [JsonPropertyName("id")]
     public int Id { get; init; }
@@ -55,6 +61,14 @@ public sealed record JobState
     [JsonInclude]
     [JsonPropertyName("createdAt")]
     public DateTime CreatedAt { get; init; } = DateTime.UtcNow;
+
+    [JsonInclude]
+    [JsonPropertyName("startedAt")]
+    public DateTime? StartedAt { get; init; }
+
+    [JsonInclude]
+    [JsonPropertyName("lastProgressAt")]
+    public DateTime? LastProgressAt { get; init; }
 
     [JsonInclude]
     [JsonPropertyName("completedAt")]

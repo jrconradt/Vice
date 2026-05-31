@@ -111,6 +111,7 @@ internal sealed class CommandExecutor : ICommandExecutor
         }
         finally
         {
+            FlushOutput();
             if (localeApplied)
             {
                 System.Globalization.CultureInfo.CurrentCulture = originalCulture;
@@ -184,7 +185,8 @@ internal sealed class CommandExecutor : ICommandExecutor
         var ctx = new CommandContext(targetValues, result.GlobalOptions, handle.Writer, null, statusUpdater, renderCtx2, progressReporter, _session, _logger, result.Chain!.Nodes) { CancellationToken = ct };
 
         if (_builtins is not null && result.Chain is not null
-            && _builtins.TryGetHandler(ExtractChainWords(result.Chain), out var builtinHandler) && builtinHandler is not null)
+            && _builtins.TryGetHandler(ExtractChainWords(result.Chain), out var builtinHandler)
+            && builtinHandler is not null)
         {
             var builtinExit = await InvokeWithObservabilityAsync(
                 $"session-builtin {registration.Description}", builtinHandler, ctx, ct, handle).ConfigureAwait(false);
@@ -214,6 +216,14 @@ internal sealed class CommandExecutor : ICommandExecutor
         return exitCode;
     }
 
+    private static void FlushOutput()
+    {
+        if (Vice.Output.Current is ConsoleOutputSink sink)
+        {
+            sink.Flush();
+        }
+    }
+
     private static async Task<int> InvokeWithObservabilityAsync(
         string commandName,
         Func<CommandContext, CancellationToken, Task<int>> handler,
@@ -222,21 +232,39 @@ internal sealed class CommandExecutor : ICommandExecutor
         IStatusHandle handle)
     {
         Vice.Log.Emit(new CommandStarted(commandName));
+        Vice.Telemetry.Track(
+            "command.started",
+            new Dictionary<string, string>
+            {
+                ["command"] = commandName,
+            });
         var sw = Stopwatch.StartNew();
         try
         {
             var result = await handler(ctx, ct).ConfigureAwait(false);
             sw.Stop();
             Vice.Log.Emit(new CommandCompleted(commandName, result, sw.Elapsed));
+            Vice.Telemetry.Track(
+                "command.completed",
+                new Dictionary<string, string>
+                {
+                    ["command"] = commandName,
+                    ["exitCode"] = result.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["durationMs"] = sw.Elapsed.TotalMilliseconds.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture),
+                });
             return result;
         }
         catch (Exception ex)
         {
             sw.Stop();
-            if (ex is not ViceError)
-            {
-                Vice.Log.Emit(new CommandFailed(commandName, ex, sw.Elapsed));
-            }
+            Vice.Log.Emit(new CommandFailed(commandName, ex, sw.Elapsed));
+            Vice.Telemetry.TrackException(
+                ex,
+                new Dictionary<string, string>
+                {
+                    ["command"] = commandName,
+                    ["durationMs"] = sw.Elapsed.TotalMilliseconds.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture),
+                });
             handle.Fail();
             throw;
         }

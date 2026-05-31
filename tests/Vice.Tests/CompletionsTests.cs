@@ -176,6 +176,28 @@ public class CompletionsTests
         Assert.Contains("Unsupported shell", console.Error);
     }
 
+    [Fact]
+    public async Task Bash_FullScriptMatchesGolden()
+    {
+        var (app, console) = Build();
+
+        var exit = await app.RunAsync(new[] { "completions", "bash" });
+
+        Assert.Equal(0, exit);
+        GoldenFile.Verify("completions_bash.golden", console.Output);
+    }
+
+    [Fact]
+    public async Task Zsh_FullScriptMatchesGolden()
+    {
+        var (app, console) = Build();
+
+        var exit = await app.RunAsync(new[] { "completions", "zsh" });
+
+        Assert.Equal(0, exit);
+        GoldenFile.Verify("completions_zsh.golden", console.Output);
+    }
+
     private static CompletionTrie BuildTrie(params ChainNode[] chains)
     {
         var registrations = new List<CommandRegistration>();

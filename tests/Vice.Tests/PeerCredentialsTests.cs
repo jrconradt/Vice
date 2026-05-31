@@ -28,7 +28,8 @@ public class PeerCredentialsTests
     [Fact]
     public void TryGetEuid_ReturnsNonNegativeValueOnUnix()
     {
-        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS() && !OperatingSystem.IsFreeBSD())
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS()
+            && !OperatingSystem.IsFreeBSD())
         {
             return;
         }

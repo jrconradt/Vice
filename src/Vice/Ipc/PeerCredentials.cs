@@ -28,7 +28,8 @@ internal static class PeerCredentials
     public static bool TryGetPeerUid(SafeHandle handle, out int peerUid)
     {
         peerUid = -1;
-        if (handle is null || handle.IsInvalid || handle.IsClosed)
+        if (handle is null || handle.IsInvalid
+            || handle.IsClosed)
         {
             return false;
         }
@@ -36,6 +37,29 @@ internal static class PeerCredentials
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
         {
             return TryGetPeerUidLinux(handle, out peerUid);
+        }
+
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+        {
+            return TryGetPeerUidMac(handle, out peerUid);
+        }
+
+        return false;
+    }
+
+    public static bool TryGetPeerCredentials(SafeHandle handle, out int peerUid, out int peerPid)
+    {
+        peerUid = -1;
+        peerPid = -1;
+        if (handle is null || handle.IsInvalid
+            || handle.IsClosed)
+        {
+            return false;
+        }
+
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+        {
+            return TryGetPeerCredentialsLinux(handle, out peerUid, out peerPid);
         }
 
         if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
@@ -101,6 +125,30 @@ internal static class PeerCredentials
         }
 
         peerUid = unchecked((int)euid);
+        return true;
+    }
+
+    [SupportedOSPlatform("linux")]
+    private static bool TryGetPeerCredentialsLinux(SafeHandle handle, out int peerUid, out int peerPid)
+    {
+        peerUid = -1;
+        peerPid = -1;
+        var fd = handle.DangerousGetHandle().ToInt32();
+        if (fd < 0)
+        {
+            return false;
+        }
+
+        var cred = default(Ucred);
+        var len = Marshal.SizeOf<Ucred>();
+        var rc = LinuxGetSockOpt(fd, SOL_SOCKET, SO_PEERCRED, ref cred, ref len);
+        if (rc != 0)
+        {
+            return false;
+        }
+
+        peerUid = cred.Uid;
+        peerPid = cred.Pid;
         return true;
     }
 }

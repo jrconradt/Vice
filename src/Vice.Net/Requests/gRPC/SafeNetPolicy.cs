@@ -2,6 +2,8 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Vice.Configuration;
+using Vice.Logging;
 
 namespace Vice.Network.gRPC;
 
@@ -79,32 +81,32 @@ public sealed record SafeNetPolicy(
         return new SafeNetPolicy(allowIps, denyIps, allowHosts, denyHosts);
     }
 
+    private sealed record DefaultCacheEntry(string Key, SafeNetPolicy Policy);
+
     private static readonly object _defaultCacheLock = new();
-    private static SafeNetPolicy? _defaultCachedPolicy;
-    private static string? _defaultCachedKey;
+    private static DefaultCacheEntry? _defaultCacheEntry;
 
     public static SafeNetPolicy LoadDefault()
     {
         var path = ResolveSettingsPath();
         var key = ComputeDefaultCacheKey(path);
 
-        var cached = Volatile.Read(ref _defaultCachedPolicy);
-        var cachedKey = Volatile.Read(ref _defaultCachedKey);
-        if (cached is not null && string.Equals(cachedKey, key, StringComparison.Ordinal))
+        var cached = Volatile.Read(ref _defaultCacheEntry);
+        if (cached is not null && string.Equals(cached.Key, key, StringComparison.Ordinal))
         {
-            return cached;
+            return cached.Policy;
         }
 
         lock (_defaultCacheLock)
         {
-            if (_defaultCachedPolicy is not null && string.Equals(_defaultCachedKey, key, StringComparison.Ordinal))
+            var current = Volatile.Read(ref _defaultCacheEntry);
+            if (current is not null && string.Equals(current.Key, key, StringComparison.Ordinal))
             {
-                return _defaultCachedPolicy;
+                return current.Policy;
             }
 
             var fresh = Combine(FromEnvironment(), FromFile(path));
-            Volatile.Write(ref _defaultCachedKey, key);
-            Volatile.Write(ref _defaultCachedPolicy, fresh);
+            Volatile.Write(ref _defaultCacheEntry, new DefaultCacheEntry(key, fresh));
             return fresh;
         }
     }
@@ -141,10 +143,10 @@ public sealed record SafeNetPolicy(
 
     public static SafeNetPolicy FromEnvironment()
         => new(
-            ParseIpList(Environment.GetEnvironmentVariable(AllowIpsEnvVar)),
-            ParseIpList(Environment.GetEnvironmentVariable(DenyIpsEnvVar)),
-            ParseHostList(Environment.GetEnvironmentVariable(AllowHostsEnvVar)),
-            ParseHostList(Environment.GetEnvironmentVariable(DenyHostsEnvVar)));
+            ParseIpList(Environment.GetEnvironmentVariable(AllowIpsEnvVar), AllowIpsEnvVar),
+            ParseIpList(Environment.GetEnvironmentVariable(DenyIpsEnvVar), DenyIpsEnvVar),
+            ParseHostList(Environment.GetEnvironmentVariable(AllowHostsEnvVar), AllowHostsEnvVar),
+            ParseHostList(Environment.GetEnvironmentVariable(DenyHostsEnvVar), DenyHostsEnvVar));
 
     public static SafeNetPolicy FromFile(string? path)
     {
@@ -162,11 +164,20 @@ public sealed record SafeNetPolicy(
                 return Empty;
             }
 
-            return new SafeNetPolicy(
-                ParseIpList(doc.AllowIps),
-                ParseIpList(doc.DenyIps),
-                ParseHostList(doc.AllowHosts),
-                ParseHostList(doc.DenyHosts));
+            var rejected = new List<string>();
+            var policy = new SafeNetPolicy(
+                ParseIpList(doc.AllowIps, "allow", rejected),
+                ParseIpList(doc.DenyIps, "deny", rejected),
+                ParseHostList(doc.AllowHosts, "allow_hosts", rejected),
+                ParseHostList(doc.DenyHosts, "deny_hosts", rejected));
+
+            if (rejected.Count > 0)
+            {
+                throw new InvalidOperationException(
+                    $"SafeNet policy file '{path}' contains {rejected.Count} unparsable entr{(rejected.Count == 1 ? "y" : "ies")}: {string.Join(", ", rejected)}; refusing to proceed with a partially-applied network policy.");
+            }
+
+            return policy;
         }
         catch (JsonException ex)
         {
@@ -182,27 +193,16 @@ public sealed record SafeNetPolicy(
 
     public static string? ResolveSettingsPath()
     {
-        var configHome = Environment.GetEnvironmentVariable("VICE_CONFIG_HOME")
-                      ?? Environment.GetEnvironmentVariable("XDG_CONFIG_HOME");
-        string baseDir;
-        if (!string.IsNullOrEmpty(configHome))
+        var configDir = new ViceDirectories("vice").ConfigDir;
+        if (string.IsNullOrEmpty(configDir))
         {
-            baseDir = configHome;
+            return null;
         }
-        else
-        {
-            var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-            if (string.IsNullOrEmpty(home))
-            {
-                return null;
-            }
 
-            baseDir = Path.Combine(home, ".config");
-        }
-        return Path.Combine(baseDir, "vice", SettingsFileName);
+        return Path.Combine(configDir, SettingsFileName);
     }
 
-    private static List<IpRange> ParseIpList(string? raw)
+    private static List<IpRange> ParseIpList(string? raw, string envVar)
     {
         var result = new List<IpRange>();
         if (string.IsNullOrWhiteSpace(raw))
@@ -212,15 +212,22 @@ public sealed record SafeNetPolicy(
 
         foreach (var part in raw.Split(new[] { ',', ' ', ';' }, StringSplitOptions.RemoveEmptyEntries))
         {
-            if (IpRange.TryParse(part.Trim(), out var range))
+            var token = part.Trim();
+            if (IpRange.TryParse(token, out var range))
             {
                 result.Add(range);
+            }
+            else
+            {
+                Vice.Log.Emit(
+                    ViceLogLevel.Warn,
+                    $"SafeNet: ignoring unparsable IP range '{token}' from {envVar}; this entry will not be enforced.");
             }
         }
         return result;
     }
 
-    private static List<IpRange> ParseIpList(IReadOnlyList<string>? items)
+    private static List<IpRange> ParseIpList(IReadOnlyList<string>? items, string field, List<string> rejected)
     {
         var result = new List<IpRange>();
         if (items is null)
@@ -235,15 +242,20 @@ public sealed record SafeNetPolicy(
                 continue;
             }
 
-            if (IpRange.TryParse(item.Trim(), out var range))
+            var token = item.Trim();
+            if (IpRange.TryParse(token, out var range))
             {
                 result.Add(range);
+            }
+            else
+            {
+                rejected.Add($"{field}: '{token}'");
             }
         }
         return result;
     }
 
-    private static List<HostPattern> ParseHostList(string? raw)
+    private static List<HostPattern> ParseHostList(string? raw, string envVar)
     {
         var result = new List<HostPattern>();
         if (string.IsNullOrWhiteSpace(raw))
@@ -253,15 +265,22 @@ public sealed record SafeNetPolicy(
 
         foreach (var part in raw.Split(new[] { ',', ' ', ';' }, StringSplitOptions.RemoveEmptyEntries))
         {
-            if (HostPattern.TryParse(part.Trim(), out var pat))
+            var token = part.Trim();
+            if (HostPattern.TryParse(token, out var pat))
             {
                 result.Add(pat);
+            }
+            else
+            {
+                Vice.Log.Emit(
+                    ViceLogLevel.Warn,
+                    $"SafeNet: ignoring unparsable host pattern '{token}' from {envVar}; this entry will not be enforced.");
             }
         }
         return result;
     }
 
-    private static List<HostPattern> ParseHostList(IReadOnlyList<string>? items)
+    private static List<HostPattern> ParseHostList(IReadOnlyList<string>? items, string field, List<string> rejected)
     {
         var result = new List<HostPattern>();
         if (items is null)
@@ -276,9 +295,14 @@ public sealed record SafeNetPolicy(
                 continue;
             }
 
-            if (HostPattern.TryParse(item.Trim(), out var pat))
+            var token = item.Trim();
+            if (HostPattern.TryParse(token, out var pat))
             {
                 result.Add(pat);
+            }
+            else
+            {
+                rejected.Add($"{field}: '{token}'");
             }
         }
         return result;
@@ -405,7 +429,10 @@ public sealed record HostPattern(string Value, bool IsWildcard)
         if (text.StartsWith("*.", StringComparison.Ordinal))
         {
             var suffix = text[1..];
-            if (suffix.Length < 2 || suffix.Contains('*'))
+            var domain = text[2..];
+            if (suffix.Contains('*')
+                || domain.Length == 0
+                || !domain.Contains('.'))
             {
                 return false;
             }

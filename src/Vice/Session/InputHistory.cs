@@ -134,6 +134,7 @@ internal sealed class InputHistory : IInputHistory
         command = Redact(command);
 
         bool rewrite;
+        ImmutableList<string> committed;
         while (true)
         {
             var current = Volatile.Read(ref _entries);
@@ -157,18 +158,16 @@ internal sealed class InputHistory : IInputHistory
 
             if (Interlocked.CompareExchange(ref _entries, next, current) == current)
             {
+                committed = next;
                 break;
             }
         }
 
         if (rewrite)
         {
-            return _fileQueue.EnqueueAsync(async c =>
-            {
-                var snapshot = Volatile.Read(ref _entries);
-                var payload = string.Join(Environment.NewLine, snapshot) + Environment.NewLine;
-                await AtomicFile.WriteAllTextAsync(_filePath, payload, c).ConfigureAwait(false);
-            }, ct);
+            var payload = string.Join(Environment.NewLine, committed) + Environment.NewLine;
+            return _fileQueue.EnqueueAsync(c =>
+                AtomicFile.WriteAllTextAsync(_filePath, payload, c), ct);
         }
 
         return _fileQueue.EnqueueAsync(c =>

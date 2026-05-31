@@ -19,15 +19,15 @@ internal static class ProtobufJsonTranscoder
             [FieldType.String] = (cos, v) => cos.WriteString(v.GetString() ?? string.Empty),
             [FieldType.Bool] = (cos, v) => cos.WriteBool(v.GetBoolean()),
             [FieldType.Int32] = (cos, v) => cos.WriteInt32(v.GetInt32()),
-            [FieldType.SInt32] = (cos, v) => cos.WriteInt32(v.GetInt32()),
-            [FieldType.SFixed32] = (cos, v) => cos.WriteInt32(v.GetInt32()),
+            [FieldType.SInt32] = (cos, v) => cos.WriteSInt32(v.GetInt32()),
+            [FieldType.SFixed32] = (cos, v) => cos.WriteSFixed32(v.GetInt32()),
             [FieldType.UInt32] = (cos, v) => cos.WriteUInt32(v.GetUInt32()),
-            [FieldType.Fixed32] = (cos, v) => cos.WriteUInt32(v.GetUInt32()),
+            [FieldType.Fixed32] = (cos, v) => cos.WriteFixed32(v.GetUInt32()),
             [FieldType.Int64] = (cos, v) => cos.WriteInt64(v.GetInt64()),
-            [FieldType.SInt64] = (cos, v) => cos.WriteInt64(v.GetInt64()),
-            [FieldType.SFixed64] = (cos, v) => cos.WriteInt64(v.GetInt64()),
+            [FieldType.SInt64] = (cos, v) => cos.WriteSInt64(v.GetInt64()),
+            [FieldType.SFixed64] = (cos, v) => cos.WriteSFixed64(v.GetInt64()),
             [FieldType.UInt64] = (cos, v) => cos.WriteUInt64(v.GetUInt64()),
-            [FieldType.Fixed64] = (cos, v) => cos.WriteUInt64(v.GetUInt64()),
+            [FieldType.Fixed64] = (cos, v) => cos.WriteFixed64(v.GetUInt64()),
             [FieldType.Float] = (cos, v) => cos.WriteFloat(v.GetSingle()),
             [FieldType.Double] = (cos, v) => cos.WriteDouble(v.GetDouble()),
             [FieldType.Bytes] = (cos, v) => cos.WriteBytes(ByteString.FromBase64(v.GetString() ?? string.Empty)),
@@ -118,6 +118,16 @@ internal static class ProtobufJsonTranscoder
 
     private static void EncodeField(CodedOutputStream cos, FieldDescriptor field, JsonElement value, int depth)
     {
+        if (field.IsMap)
+        {
+            if (value.ValueKind != JsonValueKind.Object)
+            {
+                return;
+            }
+
+            EncodeMap(cos, field, value, depth);
+            return;
+        }
         if (field.IsRepeated)
         {
             if (value.ValueKind != JsonValueKind.Array)
@@ -133,6 +143,69 @@ internal static class ProtobufJsonTranscoder
             return;
         }
         EncodeSingle(cos, field, value, depth);
+    }
+
+    private static void EncodeMap(CodedOutputStream cos, FieldDescriptor field, JsonElement value, int depth)
+    {
+        var keyField = field.MessageType.FindFieldByNumber(1);
+        var valueField = field.MessageType.FindFieldByNumber(2);
+        foreach (var prop in value.EnumerateObject())
+        {
+            using var ms = new MemoryStream(64);
+            var entryCos = new CodedOutputStream(ms);
+            EncodeMapKey(entryCos, keyField, prop.Name);
+            EncodeSingle(entryCos, valueField, prop.Value, depth);
+            entryCos.Flush();
+            cos.WriteTag(field.FieldNumber, WireFormat.WireType.LengthDelimited);
+            cos.WriteBytes(ByteString.CopyFrom(ms.ToArray()));
+        }
+    }
+
+    private static void EncodeMapKey(CodedOutputStream cos, FieldDescriptor keyField, string key)
+    {
+        cos.WriteTag(keyField.FieldNumber, WireTypeFor(keyField.FieldType));
+        switch (keyField.FieldType)
+        {
+            case FieldType.String:
+                cos.WriteString(key);
+                break;
+            case FieldType.Bool:
+                cos.WriteBool(bool.Parse(key));
+                break;
+            case FieldType.Int32:
+                cos.WriteInt32(int.Parse(key, CultureInfo.InvariantCulture));
+                break;
+            case FieldType.SInt32:
+                cos.WriteSInt32(int.Parse(key, CultureInfo.InvariantCulture));
+                break;
+            case FieldType.SFixed32:
+                cos.WriteSFixed32(int.Parse(key, CultureInfo.InvariantCulture));
+                break;
+            case FieldType.UInt32:
+                cos.WriteUInt32(uint.Parse(key, CultureInfo.InvariantCulture));
+                break;
+            case FieldType.Fixed32:
+                cos.WriteFixed32(uint.Parse(key, CultureInfo.InvariantCulture));
+                break;
+            case FieldType.Int64:
+                cos.WriteInt64(long.Parse(key, CultureInfo.InvariantCulture));
+                break;
+            case FieldType.SInt64:
+                cos.WriteSInt64(long.Parse(key, CultureInfo.InvariantCulture));
+                break;
+            case FieldType.SFixed64:
+                cos.WriteSFixed64(long.Parse(key, CultureInfo.InvariantCulture));
+                break;
+            case FieldType.UInt64:
+                cos.WriteUInt64(ulong.Parse(key, CultureInfo.InvariantCulture));
+                break;
+            case FieldType.Fixed64:
+                cos.WriteFixed64(ulong.Parse(key, CultureInfo.InvariantCulture));
+                break;
+            default:
+                throw new NotSupportedException(
+                    $"Map key type {keyField.FieldType} (field '{keyField.FullName}') not supported by the JSON transcoder.");
+        }
     }
 
     private static void EncodeSingle(CodedOutputStream cos, FieldDescriptor field, JsonElement value, int depth)
@@ -201,7 +274,9 @@ internal static class ProtobufJsonTranscoder
                 SkipField(cis, wireType);
                 continue;
             }
-            var entry = DecodeFieldValue(cis, field, depth);
+            var entry = field.IsMap
+                ? DecodeMapEntry(cis, field, depth)
+                : DecodeFieldValue(cis, field, depth);
             if (!collected.TryGetValue(fieldNumber, out var bucket))
             {
                 collected[fieldNumber] = bucket = (field, new List<string>());
@@ -209,38 +284,80 @@ internal static class ProtobufJsonTranscoder
             bucket.Values.Add(entry);
         }
 
-        var parts = new List<string> { "{" };
-        var first = true;
+        var members = new List<string>(collected.Count);
         foreach (var (_, bucket) in collected)
         {
-            if (!first)
+            var name = $"\"{JsonEscape(bucket.Field.JsonName)}\":";
+            if (bucket.Field.IsMap)
             {
-                parts.Add(",");
+                members.Add($"{name}{{{string.Join(",", bucket.Values)}}}");
             }
-
-            first = false;
-            parts.Add($"\"{JsonEscape(bucket.Field.JsonName)}\":");
-            if (bucket.Field.IsRepeated)
+            else if (bucket.Field.IsRepeated)
             {
-                parts.Add("[");
-                for (var i = 0; i < bucket.Values.Count; i++)
-                {
-                    if (i > 0)
-                    {
-                        parts.Add(",");
-                    }
-
-                    parts.Add(bucket.Values[i]);
-                }
-                parts.Add("]");
+                members.Add($"{name}[{string.Join(",", bucket.Values)}]");
             }
             else
             {
-                parts.Add(bucket.Values[^1]);
+                members.Add($"{name}{bucket.Values[^1]}");
             }
         }
-        parts.Add("}");
-        return string.Concat(parts);
+        return $"{{{string.Join(",", members)}}}";
+    }
+
+    private static string DecodeMapEntry(CodedInputStream cis, FieldDescriptor field, int depth)
+    {
+        var keyField = field.MessageType.FindFieldByNumber(1);
+        var valueField = field.MessageType.FindFieldByNumber(2);
+        var entryBytes = cis.ReadBytes().ToByteArray();
+        var entryCis = new CodedInputStream(entryBytes);
+        var key = DefaultMapKey(keyField);
+        var valueJson = DefaultMapValue(valueField);
+        uint tag;
+        while ((tag = entryCis.ReadTag()) != 0)
+        {
+            var fieldNumber = WireFormat.GetTagFieldNumber(tag);
+            var wireType = WireFormat.GetTagWireType(tag);
+            if (fieldNumber == keyField.FieldNumber)
+            {
+                key = DecodeFieldValue(entryCis, keyField, depth);
+            }
+            else if (fieldNumber == valueField.FieldNumber)
+            {
+                valueJson = DecodeFieldValue(entryCis, valueField, depth);
+            }
+            else
+            {
+                SkipField(entryCis, wireType);
+            }
+        }
+        return $"{MapKeyToJsonName(key)}:{valueJson}";
+    }
+
+    private static string DefaultMapKey(FieldDescriptor keyField)
+    {
+        return keyField.FieldType == FieldType.Bool ? "false" : "0";
+    }
+
+    private static string DefaultMapValue(FieldDescriptor valueField)
+    {
+        return valueField.FieldType switch
+        {
+            FieldType.String or FieldType.Bytes => "\"\"",
+            FieldType.Bool => "false",
+            FieldType.Int64 or FieldType.SInt64 or FieldType.SFixed64
+                or FieldType.UInt64 or FieldType.Fixed64 => "\"0\"",
+            FieldType.Message => "{}",
+            _ => "0",
+        };
+    }
+
+    private static string MapKeyToJsonName(string decodedKey)
+    {
+        if (decodedKey.Length > 0 && decodedKey[0] == '"')
+        {
+            return decodedKey;
+        }
+        return $"\"{decodedKey}\"";
     }
 
     private static string DecodeFieldValue(CodedInputStream cis, FieldDescriptor field, int depth)
@@ -289,23 +406,72 @@ internal static class ProtobufJsonTranscoder
         }
     }
 
-    private static string JsonEscape(string s)
+    private static bool NeedsEscaping(string s)
     {
-        var parts = new List<string>(s.Length);
         foreach (var c in s)
         {
-            parts.Add(c switch
+            if (c == '"'
+                || c == '\\'
+                || c < 0x20)
             {
-                '"' => "\\\"",
-                '\\' => "\\\\",
-                '\b' => "\\b",
-                '\f' => "\\f",
-                '\n' => "\\n",
-                '\r' => "\\r",
-                '\t' => "\\t",
-                _ => c < 0x20 ? $"\\u{(int)c:X4}" : $"{c}",
-            });
+                return true;
+            }
         }
-        return string.Concat(parts);
+        return false;
+    }
+
+    private static string JsonEscape(string s)
+    {
+        if (!NeedsEscaping(s))
+        {
+            return s;
+        }
+
+        var buffer = new List<char>(s.Length + 8);
+        foreach (var c in s)
+        {
+            switch (c)
+            {
+                case '"':
+                    buffer.Add('\\');
+                    buffer.Add('"');
+                    break;
+                case '\\':
+                    buffer.Add('\\');
+                    buffer.Add('\\');
+                    break;
+                case '\b':
+                    buffer.Add('\\');
+                    buffer.Add('b');
+                    break;
+                case '\f':
+                    buffer.Add('\\');
+                    buffer.Add('f');
+                    break;
+                case '\n':
+                    buffer.Add('\\');
+                    buffer.Add('n');
+                    break;
+                case '\r':
+                    buffer.Add('\\');
+                    buffer.Add('r');
+                    break;
+                case '\t':
+                    buffer.Add('\\');
+                    buffer.Add('t');
+                    break;
+                default:
+                    if (c < 0x20)
+                    {
+                        buffer.AddRange($"\\u{(int)c:X4}");
+                    }
+                    else
+                    {
+                        buffer.Add(c);
+                    }
+                    break;
+            }
+        }
+        return new string(buffer.ToArray());
     }
 }

@@ -29,5 +29,4 @@ public static class Nouns
     public static ChainNode Folder() => new WordNode("folder");
     public static ChainNode Folders() => new WordNode("folders");
     public static ChainNode List() => new WordNode("list");
-    public static ChainNode ClearAction() => new WordNode("clear");
 }

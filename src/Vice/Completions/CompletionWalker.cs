@@ -29,7 +29,7 @@ internal static class CompletionWalker
 
     private static void EmitTransitions(CompletionNode node, List<CompletionTransition> sink)
     {
-        foreach (var child in node.Children.Values)
+        foreach (var child in node.Children.Values.OrderBy(c => c.Token, StringComparer.Ordinal))
         {
             sink.Add(new CompletionTransition(
                 node.StateId,
@@ -46,7 +46,7 @@ internal static class CompletionWalker
         {
             var candidates = new List<CompletionCandidate>(node.Children.Count);
             var allTokens = new List<string>();
-            foreach (var child in node.Children.Values)
+            foreach (var child in node.Children.Values.OrderBy(c => c.Token, StringComparer.Ordinal))
             {
                 candidates.Add(new CompletionCandidate(
                     child.Token,
@@ -60,7 +60,7 @@ internal static class CompletionWalker
             }
             sink.Add(new CompletionSuggestion(node.StateId, allTokens, candidates));
         }
-        foreach (var child in node.Children.Values)
+        foreach (var child in node.Children.Values.OrderBy(c => c.Token, StringComparer.Ordinal))
         {
             EmitSuggestions(child, sink);
         }

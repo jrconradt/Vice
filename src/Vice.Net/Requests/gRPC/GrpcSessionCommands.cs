@@ -6,9 +6,9 @@ using static Vice.Dsl;
 namespace Vice.Network.gRPC;
 
 [ViceCommandPack]
-internal static class GrpcSessionCommands
+public static class GrpcSessionCommands
 {
-    internal static void Register(IViceApp app, GrpcConnectionManager connections)
+    public static void Register(IViceApp app, GrpcConnectionManager connections)
     {
 
         app.Register(

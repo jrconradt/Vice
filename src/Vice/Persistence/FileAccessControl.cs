@@ -13,7 +13,8 @@ public static class FileAccessControl
             return;
         }
 
-        if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS() || OperatingSystem.IsFreeBSD())
+        if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS()
+            || OperatingSystem.IsFreeBSD())
         {
             var mode = Directory.Exists(path)
                 ? UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute

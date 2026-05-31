@@ -17,12 +17,11 @@
 
 ## Pluggable framework services
 
-Three abstractions for consumer-specific concerns. Each has a `Null` default that does nothing; consumers wire their own implementations when needed.
+Abstractions for consumer-specific concerns. Each has a `Null` default that does nothing; consumers wire their own implementations when needed.
 
 | Abstraction | Default | Provided alternative | When to plug your own |
 |---|---|---|---|
 | `IKeyring` (`Vice.Configuration`) | `NullKeyring` | `FileKeyring` — plaintext JSON at `$XDG_DATA_HOME/<app>/keyring.json`; dev/local-only, refuses to construct unless `VICE_ALLOW_PLAINTEXT_KEYRING=1` | Production secret storage needs platform keychain (libsecret, Keychain, Credential Manager) — out of framework scope |
-| `IUpdateChecker` (`Vice.Configuration`) | `NullUpdateChecker` | (none) | Wire your own to poll NuGet, GitHub releases, or a custom feed; framework intentionally doesn't pick a feed |
 | Telemetry sink (`Vice.Logging`) | `NullTelemetrySink` | `FileTelemetrySink` — JSONL at `$XDG_STATE_HOME/<app>/telemetry.jsonl`; no-ops unless `VICE_TELEMETRY_CONSENT=1` is set | Real analytics backend (PostHog, Sentry, custom). MUST surface user consent before enabling. |
 
 Wiring these into the host is consumer-side. The framework doesn't auto-instantiate them.
@@ -132,10 +131,8 @@ Framework-level global options that any command can honor via `CommandContext`:
 | `--verbose` (`-v` reserved) | `ctx.Verbose` | Show extra diagnostic output (method type, request bodies, timing). |
 | `--quiet` | `ctx.Quiet` | Suppress non-error output. Errors still print. |
 | `--dry-run` | `ctx.DryRun` | Show what would happen without making changes (no file writes, no network mutations). |
-| `--force` | `ctx.Force` | Skip confirmation prompts and overwrite checks. |
 | `--non-interactive` | `ctx.NonInteractive` | Refuse to prompt; fail fast if input is missing. CI-friendly. |
 | `--no-pager` | `ctx.NoPager` | Suppress PAGER wrapping for long output. Commands that opt into pager behavior should consult this. |
-| `--clipboard` | `ctx.Clipboard` | Copy primary command output to the system clipboard. Commands opt in by emitting through `ctx.Clipboard ? clipboard : console`. |
 | `--locale <bcp47>` | `ctx.Locale` | Applied to `CurrentCulture` and `CurrentUICulture` for the invocation. Affects all .NET formatting (dates, numbers, strings). Invalid tags log to stderr and continue with system default. |
 
 Commands opt in by checking the property — the framework never auto-suppresses output or short-circuits behavior, so the contract is consistent across consumers. `--verbose` is already honored by every Vice.Net command; the others are framework-side ready and consumer commands can adopt them incrementally.
@@ -161,7 +158,7 @@ All outbound HTTP requests carry:
 User-Agent: Vice/1.0 (+https://github.com/vice-cli)
 ```
 
-This header is set on the shared `HttpClient` and applies to every research source.
+This header is set on the research `HttpClient` in `src/Vice.Net/Requests/Research/ResearchHttp.cs` and applies to every research source.
 
 ## State directories (XDG-compliant)
 
@@ -214,4 +211,4 @@ The HTTP handler wrapping every research-source request enforces:
 | Retry count on `429 Too Many Requests` or `503 Service Unavailable` | 3 retries (so 4 total attempts). |
 | Retry delay | Honors the upstream `Retry-After` header if present; otherwise exponential backoff of `2^(attempt+1)` seconds (2, 4, 8, ...). |
 
-These are wired in `src/Vice.Net/Program.cs` with no environment override; tightening or loosening them requires a code change.
+These are wired in `src/Vice.Net/Requests/Research/ResearchHttp.cs` with no environment override; tightening or loosening them requires a code change.

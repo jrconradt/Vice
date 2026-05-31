@@ -1,25 +1,45 @@
+using System.Diagnostics;
 using System.Text;
 using Grpc.Core;
 using Vice.Jobs;
+using Vice.Net.Http;
 using Vice.Persistence;
 namespace Vice.Network.gRPC;
 
 internal sealed class GrpcStreamJobRunner : IJobRunner
 {
+    internal const int DefaultMaxRetries = 5;
+    internal static readonly TimeSpan DefaultBaseRetryBackoff = TimeSpan.FromMilliseconds(500);
+    internal static readonly TimeSpan DefaultMaxRetryBackoff = TimeSpan.FromSeconds(30);
+
     private readonly GrpcConnectionManager _connectionManager;
+    private readonly int _maxRetries;
+    private readonly TimeSpan _baseRetryBackoff;
+    private readonly TimeSpan _maxRetryBackoff;
 
     public GrpcStreamJobRunner(GrpcConnectionManager connectionManager)
+        : this(connectionManager,
+               DefaultMaxRetries,
+               DefaultBaseRetryBackoff,
+               DefaultMaxRetryBackoff)
+    {
+    }
+
+    internal GrpcStreamJobRunner(GrpcConnectionManager connectionManager,
+                                 int maxRetries,
+                                 TimeSpan baseRetryBackoff,
+                                 TimeSpan maxRetryBackoff)
     {
         _connectionManager = connectionManager;
+        _maxRetries = maxRetries;
+        _baseRetryBackoff = baseRetryBackoff;
+        _maxRetryBackoff = maxRetryBackoff;
     }
 
     public bool CanHandle(JobKind kind) => kind == JobKind.GrpcStream;
 
     public async Task RunAsync(JobState job, IProgress<JobProgress> progress, CancellationToken ct)
     {
-        var channel = _connectionManager.GetChannel(job.Endpoint!);
-        var invoker = channel.CreateCallInvoker();
-
         var method = job.Method!;
         var slashIndex = method.LastIndexOf('/');
         if (slashIndex < 0)
@@ -63,75 +83,149 @@ internal sealed class GrpcStreamJobRunner : IJobRunner
         }
 
         var partialPath = outputPath + ".partial";
+        var label = $"Streaming {job.Method} -> {outputPath}";
 
-        StreamWriter? writer = null;
-        try
+        long messagesReceived = 0;
+        var attempt = 0;
+        while (true)
         {
-            var callOptions = new CallOptions(cancellationToken: ct);
-
-            using var streamingCall = invoker.AsyncServerStreamingCall(
-                grpcMethod, null, callOptions, requestBytes);
-
-            writer = new StreamWriter(partialPath, append: false, Encoding.UTF8);
-
-            long messagesReceived = 0;
+            var append = attempt > 0;
             try
             {
-                while (await streamingCall.ResponseStream.MoveNext(ct))
+                messagesReceived = await StreamOnceAsync(
+                    job,
+                    grpcMethod,
+                    requestBytes,
+                    partialPath,
+                    label,
+                    append,
+                    messagesReceived,
+                    progress,
+                    ct).ConfigureAwait(false);
+
+                progress.Report(new JobProgress(
+                    MessagesReceived: messagesReceived,
+                    Label: label));
+
+                File.Move(partialPath, outputPath, overwrite: true);
+                return;
+            }
+            catch (OperationCanceledException)
+            {
+                TryDeletePartial(partialPath);
+                throw;
+            }
+            catch (RpcException ex)
+            {
+                if (IsRecoverable(ex.StatusCode)
+                    && attempt < _maxRetries
+                    && !ct.IsCancellationRequested)
                 {
-                    var responseBytes = streamingCall.ResponseStream.Current;
-                    var responseLine = Encoding.UTF8.GetString(responseBytes);
-
-                    await writer.WriteLineAsync(responseLine);
-                    await writer.FlushAsync(ct);
-
-                    messagesReceived++;
-
+                    attempt++;
+                    var backoff = ComputeBackoff(attempt);
                     progress.Report(new JobProgress(
                         MessagesReceived: messagesReceived,
-                        Label: $"Streaming {job.Method} -> {outputPath}"));
+                        Label: $"{label} (retry {attempt}/{_maxRetries} after {ex.StatusCode})"));
+
+                    try
+                    {
+                        await Task.Delay(backoff, ct).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        TryDeletePartial(partialPath);
+                        throw;
+                    }
+
+                    continue;
+                }
+
+                if (!IsRecoverable(ex.StatusCode))
+                {
+                    TryDeletePartial(partialPath);
+                }
+
+                throw new InvalidOperationException(
+                    $"gRPC error ({ex.StatusCode}): {ex.Status.Detail}", ex);
+            }
+            catch
+            {
+                TryDeletePartial(partialPath);
+                throw;
+            }
+        }
+    }
+
+    private async Task<long> StreamOnceAsync(
+        JobState job,
+        Method<byte[], byte[]> grpcMethod,
+        byte[] requestBytes,
+        string partialPath,
+        string label,
+        bool append,
+        long alreadyWritten,
+        IProgress<JobProgress> progress,
+        CancellationToken ct)
+    {
+        var channel = _connectionManager.GetChannel(job.Endpoint!);
+        var invoker = channel.CreateCallInvoker();
+
+        var callOptions = new CallOptions(cancellationToken: ct);
+
+        using var streamingCall = invoker.AsyncServerStreamingCall(
+            grpcMethod, null, callOptions, requestBytes);
+
+        var writer = new StreamWriter(partialPath, append: append, Encoding.UTF8);
+        try
+        {
+            var messagesReceived = alreadyWritten;
+            var skipRemaining = alreadyWritten;
+            var lastReport = Stopwatch.GetTimestamp();
+            while (await streamingCall.ResponseStream.MoveNext(ct).ConfigureAwait(false))
+            {
+                if (skipRemaining > 0)
+                {
+                    skipRemaining--;
+                    continue;
+                }
+
+                var responseBytes = streamingCall.ResponseStream.Current;
+                var responseLine = Encoding.UTF8.GetString(responseBytes);
+
+                await writer.WriteLineAsync(responseLine).ConfigureAwait(false);
+
+                messagesReceived++;
+
+                var elapsed = Stopwatch.GetElapsedTime(lastReport);
+                if (elapsed >= HttpStreamHelper.ProgressThrottle)
+                {
+                    progress.Report(new JobProgress(
+                        MessagesReceived: messagesReceived,
+                        Label: label));
+                    lastReport = Stopwatch.GetTimestamp();
                 }
             }
-            finally
-            {
-                await writer.FlushAsync(CancellationToken.None);
-                await writer.DisposeAsync();
-                writer = null;
-            }
 
-            File.Move(partialPath, outputPath, overwrite: true);
+            return messagesReceived;
         }
-        catch (OperationCanceledException)
+        finally
         {
-            if (writer is not null)
-            {
-                await writer.DisposeAsync();
-            }
-
-            TryDeletePartial(partialPath);
-            throw;
+            await writer.FlushAsync(CancellationToken.None).ConfigureAwait(false);
+            await writer.DisposeAsync().ConfigureAwait(false);
         }
-        catch (RpcException ex)
-        {
-            if (writer is not null)
-            {
-                await writer.DisposeAsync();
-            }
+    }
 
-            TryDeletePartial(partialPath);
-            throw new InvalidOperationException(
-                $"gRPC error ({ex.StatusCode}): {ex.Status.Detail}", ex);
-        }
-        catch
-        {
-            if (writer is not null)
-            {
-                await writer.DisposeAsync();
-            }
+    private TimeSpan ComputeBackoff(int attempt)
+    {
+        var scaled = _baseRetryBackoff.TotalMilliseconds * Math.Pow(2, attempt - 1);
+        var capped = Math.Min(scaled, _maxRetryBackoff.TotalMilliseconds);
+        return TimeSpan.FromMilliseconds(capped);
+    }
 
-            TryDeletePartial(partialPath);
-            throw;
-        }
+    private static bool IsRecoverable(StatusCode status)
+    {
+        return status == StatusCode.Unavailable
+            || status == StatusCode.DeadlineExceeded;
     }
 
     private static void TryDeletePartial(string partialPath)
@@ -143,8 +237,9 @@ internal sealed class GrpcStreamJobRunner : IJobRunner
                 File.Delete(partialPath);
             }
         }
-        catch
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
+            System.Diagnostics.Trace.WriteLine(ex);
         }
     }
 }

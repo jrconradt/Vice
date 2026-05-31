@@ -1,15 +1,17 @@
+using Vice.Composition;
 using Vice.Lexicon;
 using Vice.Mux.Strategies;
 
 namespace Vice.Mux.Commands;
 
-internal static class SplitVerb
+[ViceCommandPack]
+public static class SplitCommands
 {
-    public static void Register(IViceApp app, StrategyRegistry strategies)
+    public static void Register(IViceApp app)
     {
         app.Register(
             Verbs.Split() > Connectors.Into() * Targets.N > Connectors.By() * Targets.Strategy > Connectors.To() * Targets.Sinks,
             "Read stdin, route each chunk to one of {n} sinks selected by {strategy}",
-            (ctx, ct) => MuxRunner.RunAsync(ctx, ct, strategies, requireN: true));
+            (ctx, ct) => MuxRunner.RunAsync(ctx, ct, MuxStrategies.Registry, requireN: true));
     }
 }
