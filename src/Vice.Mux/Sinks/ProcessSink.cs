@@ -1,19 +1,51 @@
 using System.Diagnostics;
+using Vice.Logging;
 
 namespace Vice.Mux.Sinks;
 
-internal sealed class ProcessSink : SinkBase
+internal sealed class ProcessSink : ISink
 {
     private readonly Process _process;
+    private readonly Stream _stream;
 
     public ProcessSink(Process process, string label)
-        : base(process.StandardInput.BaseStream, label)
     {
         _process = process;
+        _stream = process.StandardInput.BaseStream;
+        Label = label;
     }
 
-    protected override async ValueTask DisposeCoreAsync()
+    public string Label { get; }
+
+    public ValueTask WriteAsync(ReadOnlyMemory<byte> chunk, CancellationToken ct)
+        => _stream.WriteAsync(chunk, ct);
+
+    public ValueTask FlushAsync(CancellationToken ct)
+        => new(_stream.FlushAsync(ct));
+
+    public async ValueTask DisposeAsync()
     {
+        try
+        {
+            await _stream.FlushAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is IOException or ObjectDisposedException)
+        {
+            Log.Emit(ViceLogLevel.Warn,
+                     $"Sink '{Label}' final flush failed during dispose.",
+                     ex);
+        }
+        try
+        {
+            await _stream.DisposeAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is IOException or ObjectDisposedException)
+        {
+            Log.Emit(ViceLogLevel.Warn,
+                     $"Sink '{Label}' stream dispose failed.",
+                     ex);
+        }
+
         var gracefulExited = false;
         try
         {
@@ -23,7 +55,7 @@ internal sealed class ProcessSink : SinkBase
         }
         catch (Exception ex) when (ex is OperationCanceledException or InvalidOperationException)
         {
-            System.Diagnostics.Debug.WriteLine(ex);
+            Debug.WriteLine(ex);
         }
 
         if (!gracefulExited)
@@ -34,7 +66,7 @@ internal sealed class ProcessSink : SinkBase
             }
             catch (Exception killEx) when (killEx is InvalidOperationException or NotSupportedException or System.ComponentModel.Win32Exception)
             {
-                System.Diagnostics.Debug.WriteLine(killEx);
+                Debug.WriteLine(killEx);
             }
 
             try
@@ -43,7 +75,7 @@ internal sealed class ProcessSink : SinkBase
             }
             catch (Exception waitEx) when (waitEx is TimeoutException or InvalidOperationException or OperationCanceledException)
             {
-                System.Diagnostics.Debug.WriteLine(waitEx);
+                Debug.WriteLine(waitEx);
             }
         }
 
