@@ -226,7 +226,7 @@ Vice is usable without color, motion, or Unicode, and conveys every outcome text
 - [Environment and configuration](docs/env-and-config.md) — env vars, XDG paths, plugins, services, exit codes
 - [Releasing](docs/releasing.md) — versioning policy, tagging, publishing, rollback
 - [Licensing](docs/licensing.md) — Apache-2.0 coverage, SPDX provenance, third-party notices
-- [Known issues](docs/known-issues.md) · [Troubleshooting](docs/troubleshooting.md)
+- [Troubleshooting](docs/troubleshooting.md)
 
 ---
 
