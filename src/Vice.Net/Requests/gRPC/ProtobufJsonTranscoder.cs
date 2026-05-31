@@ -23,11 +23,11 @@ internal static class ProtobufJsonTranscoder
             [FieldType.SFixed32] = (cos, v) => cos.WriteSFixed32(v.GetInt32()),
             [FieldType.UInt32] = (cos, v) => cos.WriteUInt32(v.GetUInt32()),
             [FieldType.Fixed32] = (cos, v) => cos.WriteFixed32(v.GetUInt32()),
-            [FieldType.Int64] = (cos, v) => cos.WriteInt64(v.GetInt64()),
-            [FieldType.SInt64] = (cos, v) => cos.WriteSInt64(v.GetInt64()),
-            [FieldType.SFixed64] = (cos, v) => cos.WriteSFixed64(v.GetInt64()),
-            [FieldType.UInt64] = (cos, v) => cos.WriteUInt64(v.GetUInt64()),
-            [FieldType.Fixed64] = (cos, v) => cos.WriteFixed64(v.GetUInt64()),
+            [FieldType.Int64] = (cos, v) => cos.WriteInt64(ReadInt64(v)),
+            [FieldType.SInt64] = (cos, v) => cos.WriteSInt64(ReadInt64(v)),
+            [FieldType.SFixed64] = (cos, v) => cos.WriteSFixed64(ReadInt64(v)),
+            [FieldType.UInt64] = (cos, v) => cos.WriteUInt64(ReadUInt64(v)),
+            [FieldType.Fixed64] = (cos, v) => cos.WriteFixed64(ReadUInt64(v)),
             [FieldType.Float] = (cos, v) => cos.WriteFloat(v.GetSingle()),
             [FieldType.Double] = (cos, v) => cos.WriteDouble(v.GetDouble()),
             [FieldType.Bytes] = (cos, v) => cos.WriteBytes(ByteString.FromBase64(v.GetString() ?? string.Empty)),
@@ -52,6 +52,26 @@ internal static class ProtobufJsonTranscoder
             [FieldType.Double] = cis => cis.ReadDouble().ToString("R", CultureInfo.InvariantCulture),
             [FieldType.Bytes] = cis => $"\"{Convert.ToBase64String(cis.ReadBytes().ToByteArray())}\"",
         }.ToFrozenDictionary();
+
+    private static long ReadInt64(JsonElement v)
+    {
+        if (v.ValueKind == JsonValueKind.String)
+        {
+            return long.Parse(v.GetString() ?? string.Empty, CultureInfo.InvariantCulture);
+        }
+
+        return v.GetInt64();
+    }
+
+    private static ulong ReadUInt64(JsonElement v)
+    {
+        if (v.ValueKind == JsonValueKind.String)
+        {
+            return ulong.Parse(v.GetString() ?? string.Empty, CultureInfo.InvariantCulture);
+        }
+
+        return v.GetUInt64();
+    }
 
     public static byte[] JsonToProtobuf(string json, MessageDescriptor descriptor)
     {

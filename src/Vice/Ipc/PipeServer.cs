@@ -10,7 +10,6 @@ namespace Vice.Ipc;
 internal sealed class PipeServer : IPipeServer
 {
     private const int MaxConcurrentClients = 64;
-    private const int SingleServerInstance = 1;
     private static readonly TimeSpan ClientDisposeTimeout = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan AcceptIterationBackoff = TimeSpan.FromMilliseconds(250);
 
@@ -217,7 +216,7 @@ internal sealed class PipeServer : IPipeServer
             var stream = new NamedPipeServerStream(
                 _pipeName,
                 PipeDirection.InOut,
-                SingleServerInstance,
+                MaxConcurrentClients,
                 PipeTransmissionMode.Byte,
                 PipeOptions.Asynchronous);
             TryRestrictUnixPipePermissions();
@@ -341,7 +340,7 @@ internal sealed class PipeServer : IPipeServer
         return NamedPipeServerStreamAcl.Create(
             _pipeName,
             PipeDirection.InOut,
-            SingleServerInstance,
+            MaxConcurrentClients,
             PipeTransmissionMode.Byte,
             PipeOptions.Asynchronous,
             inBufferSize: 0,

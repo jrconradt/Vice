@@ -166,7 +166,7 @@ public static class TcpUdpCommands
             return exitCode;
         }
 
-        var noReply = ctx.GetGlobalOption("no-reply") is not null;
+        var noReply = ctx.HasGlobalOption("no-reply");
 
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeoutCts.CancelAfter(timeoutMs);

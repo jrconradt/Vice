@@ -7,6 +7,7 @@ public sealed class DotnetBuildQueue : IAsyncDisposable
 {
     private readonly ConcurrentDictionary<string, Lazy<Task<int>>> _inflight =
         new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<Task<int>, byte> _observed = new();
     private readonly IViceLogger _logger;
     private int _disposed;
 
@@ -43,25 +44,42 @@ public sealed class DotnetBuildQueue : IAsyncDisposable
 
     private Task<int> RunBuild(string key, Func<Task<int>> factory)
     {
-        return Task.Run(async () =>
+        var task = RunBuildCore(key, factory);
+        _observed.TryAdd(task, 0);
+
+        task.ContinueWith(
+            static (completed, state) =>
+            {
+                var queue = (DotnetBuildQueue)state!;
+                queue._observed.TryRemove(completed, out _);
+                _ = completed.Exception;
+            },
+            this,
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+
+        return task;
+    }
+
+    private async Task<int> RunBuildCore(string key, Func<Task<int>> factory)
+    {
+        try
         {
-            try
+            return await factory().ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.Log(ViceLogLevel.Warn, $"build queue: '{key}' faulted", ex);
+            throw;
+        }
+        finally
+        {
+            if (_inflight.TryGetValue(key, out var stored))
             {
-                return await factory().ConfigureAwait(false);
+                _inflight.TryRemove(new KeyValuePair<string, Lazy<Task<int>>>(key, stored));
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                _logger.Log(ViceLogLevel.Warn, $"build queue: '{key}' faulted", ex);
-                throw;
-            }
-            finally
-            {
-                if (_inflight.TryGetValue(key, out var stored))
-                {
-                    _inflight.TryRemove(new KeyValuePair<string, Lazy<Task<int>>>(key, stored));
-                }
-            }
-        });
+        }
     }
 
     public async ValueTask DisposeAsync()
@@ -71,13 +89,13 @@ public sealed class DotnetBuildQueue : IAsyncDisposable
             return;
         }
 
-        var snapshot = _inflight.Values.ToArray();
+        var snapshot = _observed.Keys.ToArray();
 
-        foreach (var lazy in snapshot)
+        foreach (var task in snapshot)
         {
             try
             {
-                await lazy.Value.ConfigureAwait(false);
+                await task.ConfigureAwait(false);
             }
             catch (Exception ex)
             {

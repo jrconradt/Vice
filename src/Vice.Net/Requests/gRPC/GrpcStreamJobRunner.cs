@@ -100,6 +100,7 @@ internal sealed class GrpcStreamJobRunner : IJobRunner
                     label,
                     append,
                     messagesReceived,
+                    written => messagesReceived = written,
                     progress,
                     ct).ConfigureAwait(false);
 
@@ -164,6 +165,7 @@ internal sealed class GrpcStreamJobRunner : IJobRunner
         string label,
         bool append,
         long alreadyWritten,
+        Action<long> onMessageWritten,
         IProgress<JobProgress> progress,
         CancellationToken ct)
     {
@@ -195,6 +197,7 @@ internal sealed class GrpcStreamJobRunner : IJobRunner
                 await writer.WriteLineAsync(responseLine).ConfigureAwait(false);
 
                 messagesReceived++;
+                onMessageWritten(messagesReceived);
 
                 var elapsed = Stopwatch.GetElapsedTime(lastReport);
                 if (elapsed >= HttpStreamHelper.ProgressThrottle)

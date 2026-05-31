@@ -52,37 +52,39 @@ internal static class DotnetRunner
 
         using var proc = started;
 
-        await using var cancelReg = ct.Register(() =>
-        {
-            try
-            {
-                if (!proc.HasExited)
-                {
-                    proc.Kill(entireProcessTree: true);
-                }
-            }
-            catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException or Win32Exception)
-            {
-                System.Diagnostics.Debug.WriteLine(ex);
-            }
-        });
+        await using var killOnCancel = ct.Register(() => KillTree(proc));
 
-        var stdoutTask = StreamLinesAsync(proc.StandardOutput, line => Vice.Output.Line(line), ct);
-        var stderrTask = StreamLinesAsync(proc.StandardError, line => Vice.Output.Error(line), ct);
+        var stdoutTask = StreamLinesAsync(proc.StandardOutput, line => Vice.Output.Line(line));
+        var stderrTask = StreamLinesAsync(proc.StandardError, line => Vice.Output.Error(line));
 
-        await Task.WhenAll(stdoutTask, stderrTask);
-        await proc.WaitForExitAsync(ct);
+        await stdoutTask.ConfigureAwait(false);
+        await stderrTask.ConfigureAwait(false);
+        await proc.WaitForExitAsync().ConfigureAwait(false);
+
+        ct.ThrowIfCancellationRequested();
 
         return proc.ExitCode;
     }
 
-    private static async Task StreamLinesAsync(
-        System.IO.StreamReader reader,
-        Action<string> write,
-        CancellationToken ct)
+    private static void KillTree(Process proc)
+    {
+        try
+        {
+            if (!proc.HasExited)
+            {
+                proc.Kill(entireProcessTree: true);
+            }
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException or Win32Exception)
+        {
+            System.Diagnostics.Debug.WriteLine(ex);
+        }
+    }
+
+    private static async Task StreamLinesAsync(System.IO.StreamReader reader, Action<string> write)
     {
         string? line;
-        while ((line = await reader.ReadLineAsync(ct)) is not null)
+        while ((line = await reader.ReadLineAsync().ConfigureAwait(false)) is not null)
         {
             write(line);
         }

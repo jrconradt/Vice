@@ -558,7 +558,8 @@ public sealed partial class ViceCompositionGenerator : IIncrementalGenerator
         }
 
         if (!t.IsAbstract
-            && HasAttr(t, OPTION_ATTR))
+            && HasAttr(t, OPTION_ATTR)
+            && t.Locations.Any(static l => l.IsInSource))
         {
             sink.GlobalOptions.Add(t);
         }

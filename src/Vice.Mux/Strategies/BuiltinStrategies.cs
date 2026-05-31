@@ -44,8 +44,8 @@ internal static class BuiltinStrategies
                     return 0;
                 }
 
-                var off = Math.Min(s.KeyOffset, chunk.Length - 1);
-                var len = Math.Min(s.KeyLength, chunk.Length - off);
+                var off = Math.Clamp(s.KeyOffset, 0, chunk.Length - 1);
+                var len = Math.Clamp(s.KeyLength, 0, chunk.Length - off);
                 var slice = chunk.Slice(off, len);
                 var h = Fnv1a64(slice, s.Seed);
                 return (int)(h % (uint)n);

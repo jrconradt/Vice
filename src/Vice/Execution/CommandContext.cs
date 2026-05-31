@@ -23,7 +23,7 @@ public sealed class CommandContext : ICommandContext
     public bool NonInteractive => _globalOptions.ContainsKey(new NonInteractiveOption().Name);
     public bool NoPager => _globalOptions.ContainsKey(new NoPagerOption().Name);
     public OutputFormatKind OutputFormat { get; }
-    public bool WantsJson => OutputFormat is OutputFormatKind.Json or OutputFormatKind.Ndjson;
+    public bool WantsJson => OutputFormat is OutputFormatKind.Json or OutputFormatKind.Jsonl or OutputFormatKind.Ndjson;
     public string? Locale =>
         _globalOptions.TryGetValue(new LocaleOption().Name, out var l) && !string.IsNullOrEmpty(l) ? l : null;
     public string? PipelineInput { get; }

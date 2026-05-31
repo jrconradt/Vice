@@ -39,7 +39,7 @@ public sealed class ResearchCacheSearchTests : IDisposable
 
     private string SearchFile(string source, string key)
     {
-        return Path.Combine(_cacheHome, "vice", "research", source, "search", $"{key}.json");
+        return Path.Combine(_cacheHome, "research", source, "search", $"{key}.json");
     }
 
     [Fact]
