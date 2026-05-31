@@ -1,6 +1,6 @@
 # vice-mux commands
 
-`vice-mux` is the companion tool for inspecting, splitting, routing, and tee-ing byte streams on a Vice pipeline. It reads stdin and writes to stdout and to one or more **sinks** (files, TCP endpoints, child processes, named pipes). It is a separate tool from `vice`, with its own package and command name.
+`vice-mux` is the companion tool for inspecting, routing, and tee-ing byte streams on a Vice pipeline. It reads stdin and writes to stdout and to one or more **sinks** (files, TCP endpoints, child processes, named pipes). It is a separate tool from `vice`, with its own package and command name.
 
 ## Install
 
@@ -13,13 +13,12 @@ The installed command is `vice-mux`. Requires .NET 10 on the host. To install fr
 Run `vice-mux` with no arguments to open the REPL, or pass a verb to run one command and exit:
 
 ```bash
-vice-mux strategies
 vice-mux help
 ```
 
 ## How it works
 
-Every verb consumes stdin as a stream of byte chunks (default 65536 bytes per chunk) and forwards each chunk to its destinations. `inspect` is a metering passthrough; `tee` broadcasts; `route` and `split` send each chunk to one sink chosen by a routing **strategy**. Sinks are addressed by a `scheme:rest` **sink spec** (see [Sinks](#sinks)).
+Every verb consumes stdin as a stream of byte chunks (default 65536 bytes per chunk) and forwards each chunk to its destinations. `inspect` is a metering passthrough; `tee` broadcasts to every sink; `route` forwards stdin to the destinations whose **condition** matches the upstream exit code. Sinks are addressed by a `scheme:rest` **sink spec** (see [Sinks](#sinks)).
 
 ## inspect
 
@@ -57,60 +56,35 @@ cat ./events.ndjson | vice-mux tee to file:./copy.ndjson,tcp:collector:9000 > ./
 
 ## route
 
-Read stdin and send each chunk to exactly one of the named sinks, chosen per chunk by `<strategy>`. At least one sink is required.
+Read stdin and forward it to the destinations whose **condition** matches the upstream exit code. A command is one or more `on <condition> to <destination>` clauses. Every clause whose condition matches receives the full stream; a stream that matches no clause is dropped.
+
+The exit code to match against comes from `--code` (default `0`).
+
+### Condition syntax
+
+| Condition | Matches |
+|---|---|
+| `0` | Exactly that exit code. |
+| `1,2,130` | Any code in the comma-separated list. |
+| `*` or `all` | Every exit code. |
 
 ### Synopsis
 
 ```
-vice-mux route by <strategy> to <sink>[,<sink>...]
+vice-mux route on <condition> to <sink> [on <condition> to <sink>]...
 ```
 
 ### Example
 
 ```bash
-cat ./requests.log | vice-mux route by hash to file:./shard-a.log,file:./shard-b.log
+some-stage | vice-mux route \
+  on 0   to file:./ok.log \
+  on 1,2 to exec:notify-failure \
+  on *   to file:./all.log \
+  --code 1
 ```
 
-## split
-
-Read stdin and route each chunk to one of `<n>` sinks chosen by `<strategy>`. If you provide explicit sinks, their count must equal `<n>`; if you omit them, `<n>` files named `./mux-0.out` … `./mux-{n-1}.out` are created.
-
-### Synopsis
-
-```
-vice-mux split into <n> by <strategy> to <sink>[,<sink>...]
-vice-mux split into <n> by <strategy>
-```
-
-### Examples
-
-```bash
-cat ./stream.bin | vice-mux split into 4 by roundrobin
-cat ./stream.bin | vice-mux split into 2 by sticky-key to file:./a.bin,file:./b.bin --key-offset 0 --key-length 8
-```
-
-## strategies
-
-List the registered routing strategies, one per line as `name kind description`.
-
-### Synopsis
-
-```
-vice-mux strategies
-```
-
-## Strategies
-
-`route` and `split` select a sink per chunk with one of these built-in strategies:
-
-| Name | Kind | Selection |
-|---|---|---|
-| `roundrobin` | unicast | Cycle sinks in order, one chunk per sink. |
-| `hash` | unicast | FNV-1a 64 of the chunk, modulo sink count. Seeded by `--seed`. |
-| `random` | unicast | Uniform random sink per chunk (xorshift seeded by `--seed`). |
-| `broadcast` | broadcast | Write every chunk to every sink. |
-| `sticky-key` | unicast | FNV-1a over a fixed byte slice (`--key-offset` / `--key-length`) modulo sink count, so chunks sharing that key land on the same sink. |
-| `weighted` | unicast | Deterministic interleave by integer weights from `--strategy-arg` (colon-separated, e.g. `3:1`); falls back to round-robin when no weights are given. |
+With `--code 1`, the `1,2` clause and the `*` clause both fire; the `0` clause does not.
 
 ## Sinks
 
@@ -131,10 +105,7 @@ A sink spec is `scheme:rest`. A spec with no `scheme:` prefix is treated as a `f
 |---|---|---|---|
 | `--chunk-size <n>` | 65536 | all verbs | Byte-stream chunk size in bytes. |
 | `--peek <n>` | 0 | inspect | Emit the first `<n>` bytes of each chunk as hex on stderr. |
-| `--seed <uint64>` | 0 | hash, random, sticky-key | Hash / random seed. |
-| `--key-offset <n>` | 0 | sticky-key | Byte offset into each chunk for the key slice. |
-| `--key-length <n>` | 4 | sticky-key | Byte length of the key slice. |
-| `--strategy-arg <s>` | (none) | weighted | Strategy-specific configuration; for `weighted`, colon-separated integer weights such as `3:1`. |
+| `--code <n>` | 0 | route | Upstream exit code that conditions are matched against. |
 
 ## Environment
 

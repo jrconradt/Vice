@@ -96,12 +96,11 @@ vice read ./large.bin.gz then stream to count
 
 ## The `vice-mux` companion tool
 
-`vice-mux` is a separate stream-plumbing tool for inspecting, splitting, routing, and tee-ing byte streams — installed on its own (`dotnet tool install --global Vice.Mux.Cli`) and invoked as `vice-mux`. It reads stdin and fans chunks out to files, TCP endpoints, child processes, or named pipes, choosing a destination per chunk with pluggable strategies (round-robin, hash, sticky-key, weighted, random, broadcast). ([docs/mux-commands.md](docs/mux-commands.md))
+`vice-mux` is a separate stream-plumbing tool for inspecting, routing, and tee-ing byte streams — installed on its own (`dotnet tool install --global Vice.Mux.Cli`) and invoked as `vice-mux`. It reads stdin and fans bytes out to files, TCP endpoints, child processes, or named pipes; `route` forwards the stream to the destinations whose condition matches the upstream exit code. ([docs/mux-commands.md](docs/mux-commands.md))
 
 ```bash
 cat ./events.ndjson | vice-mux tee to file:./copy.ndjson,tcp:collector:9000 > ./out.ndjson
-cat ./requests.log | vice-mux route by hash to file:./shard-a.log,file:./shard-b.log
-vice-mux strategies
+some-stage | vice-mux route on 0 to file:./ok.log on 1,2 to exec:notify on '*' to file:./all.log --code 1
 ```
 
 ---
@@ -188,12 +187,12 @@ The framework API is summarized in [src/Vice/README.md](src/Vice/README.md); the
 | `src/Vice.Generators` | Roslyn source generators that wire `[ViceCommandPack]` classes into the host at compile time. |
 | `src/Vice.Net` | Network command library (TCP, UDP, gRPC) for the `vice` tool, built on the framework. A library, not a tool — `IsPackable=false`. |
 | `src/Vice.Cli` | The `vice` reference CLI tool. NuGet package `Vice.Cli`, `ToolCommandName` `vice` — `dotnet tool install --global Vice.Cli`. |
-| `src/Vice.Mux` | The mux library for inspecting, splitting, routing, and tee-ing Vice pipeline streams. A library, not a tool. |
+| `src/Vice.Mux` | The mux library for inspecting, routing, and tee-ing Vice pipeline streams. A library, not a tool. |
 | `src/Vice.Mux.Cli` | The `vice-mux` companion CLI tool. NuGet package `Vice.Mux.Cli`, `ToolCommandName` `vice-mux` — `dotnet tool install --global Vice.Mux.Cli` ([docs/mux-commands.md](docs/mux-commands.md)). |
 | `docs/` | User and configuration guides. |
 | `scripts/` | Build, test, and local-install helpers ([scripts/README.md](scripts/README.md)). |
 | `tests/` | Unit tests for the framework, generators, parser, network layer, and mux tool. |
-| `bench/Vice.Benchmarks` | BenchmarkDotNet harness for the hot paths — lexer, streaming channel throughput, pipeline stage execution, mux route/broadcast strategies, and buffered I/O. |
+| `bench/Vice.Benchmarks` | BenchmarkDotNet harness for the hot paths — lexer, streaming channel throughput, pipeline stage execution, mux routing, and buffered I/O. |
 
 ---
 
@@ -223,7 +222,7 @@ Vice is usable without color, motion, or Unicode, and conveys every outcome text
 - [Research sources](docs/sources.md) — per-source query syntax, aliases, formats
 - [File commands](docs/file-commands.md) — read, write, stream, archives, filesystem search
 - [Build commands](docs/build-commands.md) — `dotnet` wrappers and build deduplication
-- [vice-mux commands](docs/mux-commands.md) — the companion stream inspect/route/split/tee tool and its strategies and sinks
+- [vice-mux commands](docs/mux-commands.md) — the companion stream inspect/route/tee tool, its exit-code conditions and sinks
 - [Environment and configuration](docs/env-and-config.md) — env vars, XDG paths, plugins, services, exit codes
 - [Releasing](docs/releasing.md) — versioning policy, tagging, publishing, rollback
 - [Licensing](docs/licensing.md) — Apache-2.0 coverage, SPDX provenance, third-party notices

@@ -1,15 +1,12 @@
 using System.Buffers;
 using BenchmarkDotNet.Attributes;
-using Vice.Mux.Sinks;
-using Vice.Mux.Strategies;
+using Vice.Mux.Routing;
 
 namespace Vice.Benchmarks;
 
 [MemoryDiagnoser]
 public class BufferedIoBenchmarks
 {
-    private const int SinkCount = 4;
-
     private const int FileBufferSize = 81920;
 
     [Params(1 << 20, 8 << 20)]
@@ -21,7 +18,6 @@ public class BufferedIoBenchmarks
     private byte[] _payload = Array.Empty<byte>();
     private string _sourcePath = "";
     private string _destPath = "";
-    private StrategyEntry _route = null!;
 
     [GlobalSetup]
     public void Setup()
@@ -32,11 +28,6 @@ public class BufferedIoBenchmarks
         {
             seed = unchecked((seed * 1664525U) + 1013904223U);
             _payload[i] = (byte)(seed >> 24);
-        }
-
-        if (!StrategyRegistry.Default().TryGet("roundrobin", out _route))
-        {
-            throw new InvalidOperationException("strategy 'roundrobin' not registered");
         }
 
         _sourcePath = Path.Combine(Path.GetTempPath(), $"vice-bench-src-{Guid.NewGuid():N}.bin");
@@ -52,49 +43,15 @@ public class BufferedIoBenchmarks
     }
 
     [Benchmark]
-    public async Task<long> SplitRouteOverMemoryStream()
+    public async Task<int> RouteOverMemoryStream()
     {
         using var input = new MemoryStream(_payload, writable: false);
-        var sinks = new ISink[SinkCount];
-        for (var i = 0; i < SinkCount; i++)
+        var clauses = new[]
         {
-            sinks[i] = new CountingSink();
-        }
+            new RouteClause(Condition.Any, $"file:{_destPath}"),
+        };
 
-        var pool = ArrayPool<byte>.Shared;
-        var buffer = pool.Rent(ChunkSize);
-        var state = new RouteState();
-        var route = _route.Route
-            ?? throw new InvalidOperationException("roundrobin has no route delegate");
-        long routed = 0;
-        try
-        {
-            int read;
-            while ((read = await input.ReadAsync(buffer.AsMemory(0, ChunkSize)).ConfigureAwait(false)) > 0)
-            {
-                state.ChunkIndex++;
-                state.ByteCount += read;
-                var idx = route(buffer.AsSpan(0, read), SinkCount, state);
-                await sinks[idx].WriteAsync(buffer.AsMemory(0, read), CancellationToken.None)
-                    .ConfigureAwait(false);
-                routed += read;
-            }
-
-            for (var i = 0; i < SinkCount; i++)
-            {
-                await sinks[i].FlushAsync(CancellationToken.None).ConfigureAwait(false);
-            }
-        }
-        finally
-        {
-            pool.Return(buffer);
-            for (var i = 0; i < SinkCount; i++)
-            {
-                await sinks[i].DisposeAsync().ConfigureAwait(false);
-            }
-        }
-
-        return routed;
+        return await Router.RouteAsync(0, clauses, input, ChunkSize, CancellationToken.None).ConfigureAwait(false);
     }
 
     [Benchmark]
@@ -153,31 +110,6 @@ public class BufferedIoBenchmarks
         }
         catch (IOException)
         {
-        }
-    }
-
-    private sealed class CountingSink : ISink
-    {
-        private long _bytes;
-
-        public string Label => "count:";
-
-        public long Bytes => _bytes;
-
-        public ValueTask WriteAsync(ReadOnlyMemory<byte> chunk, CancellationToken ct)
-        {
-            _bytes += chunk.Length;
-            return ValueTask.CompletedTask;
-        }
-
-        public ValueTask FlushAsync(CancellationToken ct)
-        {
-            return ValueTask.CompletedTask;
-        }
-
-        public ValueTask DisposeAsync()
-        {
-            return ValueTask.CompletedTask;
         }
     }
 }

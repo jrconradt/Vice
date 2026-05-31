@@ -18,8 +18,6 @@ public static class Targets
     public static readonly TargetDef Pattern = new("pattern");
     public static readonly TargetDef Root = new("root");
     public static readonly TargetDef Dest = new("dest");
-    public static readonly TargetDef N = new("n");
-    public static readonly TargetDef Strategy = new("strategy");
     public static readonly TargetDef Sinks = new("sinks", Required: true, Variadic: true);
     public static readonly TargetDef Key = new("key");
     public static readonly TargetDef Value = new("value");
