@@ -2,7 +2,7 @@ using System.Net;
 using System.Net.Sockets;
 using Vice.Logging;
 
-namespace Vice.Network.gRPC;
+namespace Vice.Net.Requests.Grpc;
 
 public sealed record SafeNetPolicy(
     IReadOnlyList<IpRange> AllowIps,
@@ -84,12 +84,14 @@ public sealed record SafeNetPolicy(
 
     public static SafeNetPolicy FromEnvironment()
         => new(
-            ParseIpList(Environment.GetEnvironmentVariable(AllowIpsEnvVar), AllowIpsEnvVar),
-            ParseIpList(Environment.GetEnvironmentVariable(DenyIpsEnvVar), DenyIpsEnvVar),
-            ParseHostList(Environment.GetEnvironmentVariable(AllowHostsEnvVar), AllowHostsEnvVar),
-            ParseHostList(Environment.GetEnvironmentVariable(DenyHostsEnvVar), DenyHostsEnvVar));
+            ParseIpList(Environment.GetEnvironmentVariable(AllowIpsEnvVar), AllowIpsEnvVar, strictDeny: false),
+            ParseIpList(Environment.GetEnvironmentVariable(DenyIpsEnvVar), DenyIpsEnvVar, strictDeny: true),
+            ParseHostList(Environment.GetEnvironmentVariable(AllowHostsEnvVar), AllowHostsEnvVar, strictDeny: false),
+            ParseHostList(Environment.GetEnvironmentVariable(DenyHostsEnvVar), DenyHostsEnvVar, strictDeny: true));
 
-    private static List<IpRange> ParseIpList(string? raw, string envVar)
+    private static List<IpRange> ParseIpList(string? raw,
+                                             string envVar,
+                                             bool strictDeny)
     {
         var result = new List<IpRange>();
         if (string.IsNullOrWhiteSpace(raw))
@@ -104,6 +106,11 @@ public sealed record SafeNetPolicy(
             {
                 result.Add(range);
             }
+            else if (strictDeny)
+            {
+                throw new SafeNetPolicyException(
+                    $"SafeNet: unparsable IP range '{token}' in deny list {envVar}; refusing to load policy because a discarded deny rule would fail open.");
+            }
             else
             {
                 Vice.Log.Emit(
@@ -114,7 +121,9 @@ public sealed record SafeNetPolicy(
         return result;
     }
 
-    private static List<HostPattern> ParseHostList(string? raw, string envVar)
+    private static List<HostPattern> ParseHostList(string? raw,
+                                                   string envVar,
+                                                   bool strictDeny)
     {
         var result = new List<HostPattern>();
         if (string.IsNullOrWhiteSpace(raw))
@@ -129,6 +138,11 @@ public sealed record SafeNetPolicy(
             {
                 result.Add(pat);
             }
+            else if (strictDeny)
+            {
+                throw new SafeNetPolicyException(
+                    $"SafeNet: unparsable host pattern '{token}' in deny list {envVar}; refusing to load policy because a discarded deny rule would fail open.");
+            }
             else
             {
                 Vice.Log.Emit(
@@ -139,6 +153,11 @@ public sealed record SafeNetPolicy(
         return result;
     }
 
+}
+
+public sealed class SafeNetPolicyException : Exception
+{
+    public SafeNetPolicyException(string message) : base(message) { }
 }
 
 public enum SafeNetDecision

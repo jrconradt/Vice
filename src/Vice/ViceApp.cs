@@ -1,11 +1,11 @@
 using Vice.Commands;
+using Vice.Display;
+using Vice.Display.Rendering;
 using Vice.Execution;
 using Vice.Ipc;
 using Vice.Jobs;
 using Vice.Logging;
 using Vice.Nodes;
-using Vice.Display;
-using Vice.Display.Rendering;
 using Vice.Options;
 using Vice.Plugins;
 using Vice.Session;
@@ -32,6 +32,7 @@ public sealed class ViceApp : IViceApp, IAsyncDisposable
     private readonly IOutputSink _priorOutputSink;
     private readonly IStatusSink _priorStatusSink;
     private readonly ILogSink _priorLogSink;
+    private readonly IDisposable? _ownedOutputSink;
     private bool _disposed;
 
     private static readonly GlobalOption[] FrameworkGlobalOptions =
@@ -59,7 +60,9 @@ public sealed class ViceApp : IViceApp, IAsyncDisposable
     };
 
     internal ViceApp(string name, string version, string? description,
-        IConsoleWriter? console = null, IStatusDisplay? status = null,
+        IConsoleWriter? console = null,
+        IOutputSink? outputSink = null,
+        IStatusDisplay? status = null,
         TerminalCapabilities? capabilities = null,
         int concurrency = 3,
         IReadOnlyList<IJobRunner>? jobRunners = null,
@@ -96,9 +99,15 @@ public sealed class ViceApp : IViceApp, IAsyncDisposable
 
         try
         {
-            if (console is null)
+            if (outputSink is not null)
             {
-                Vice.Output.Configure(new ConsoleOutputSink());
+                Vice.Output.Configure(outputSink);
+            }
+            else if (console is null)
+            {
+                var ownedSink = new ConsoleOutputSink();
+                _ownedOutputSink = ownedSink;
+                Vice.Output.Configure(ownedSink);
             }
             _console = console ?? new ConsoleWriter();
             _capabilities = capabilities ?? TerminalCapabilities.Detect();
@@ -126,6 +135,7 @@ public sealed class ViceApp : IViceApp, IAsyncDisposable
             Vice.Output.Configure(_priorOutputSink);
             Vice.Status.Configure(_priorStatusSink);
             Vice.Log.Configure(_priorLogSink);
+            _ownedOutputSink?.Dispose();
             throw;
         }
     }
@@ -313,11 +323,23 @@ public sealed class ViceApp : IViceApp, IAsyncDisposable
             return ViceExitCode.SUCCESS;
         }
 
-        var handler = new DaemonMessageHandler(this, jobManager, sessionCtx, NullConsoleWriter.Instance);
+        var handler = new DaemonMessageHandler(
+            this,
+            jobManager,
+            sessionCtx,
+            NullConsoleWriter.Instance,
+            DaemonMessageHandler.DaemonControlVerbs);
 
         await using var server = new PipeServer(state.PipeName, handler.HandleAsync);
 
+        handler.BindLiveness(() => new DaemonLiveness(
+            server.IsListening,
+            server.AcceptLoopCrashed,
+            server.Faulted?.Message));
+
         await server.StartAsync(ct);
+
+        Vice.Log.Emit(ViceLogLevel.Info, $"{_name} daemon listening on '{state.PipeName}'");
 
         return await SuperviseAcceptLoopAsync(server, ct).ConfigureAwait(false);
     }
@@ -379,6 +401,7 @@ public sealed class ViceApp : IViceApp, IAsyncDisposable
         Vice.Output.Configure(_priorOutputSink);
         Vice.Status.Configure(_priorStatusSink);
         Vice.Log.Configure(_priorLogSink);
+        _ownedOutputSink?.Dispose();
     }
 
     internal CommandRegistry Registry => _registry;

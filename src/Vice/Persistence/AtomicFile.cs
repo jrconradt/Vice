@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Text;
 using Vice.Logging;
 
@@ -6,11 +5,10 @@ namespace Vice.Persistence;
 
 public static class AtomicFile
 {
-    private const int LockAcquireTimeoutMs = 10_000;
-    private const int LockRetryInitialDelayMs = 1;
-    private const int LockRetryMaxDelayMs = 25;
-
-    private static readonly ConcurrentDictionary<string, PathGate> Gates = new(StringComparer.Ordinal);
+    private const int LOCK_ACQUIRE_TIMEOUT_MS = 10_000;
+    private const int LOCK_RETRY_INITIAL_DELAY_MS = 1;
+    private const int LOCK_RETRY_MAX_DELAY_MS = 25;
+    private const long MAX_READ_BYTES = 256L * 1024 * 1024;
 
     public static Task WriteAllTextAsync(string path, string payload, CancellationToken ct)
         => WriteAllBytesAsync(path, Encoding.UTF8.GetBytes(payload), ct);
@@ -19,48 +17,39 @@ public static class AtomicFile
     {
         EnsureDirectory(path);
 
-        var gate = GateFor(path);
-        await gate.EnterWriteAsync(ct).ConfigureAwait(false);
+        await using var pathLock = await AcquireFileLockAsync(path, ct).ConfigureAwait(false);
+
+        var dir = Path.GetDirectoryName(path)!;
+        SweepStaleTemp(dir, Path.GetFileName(path));
+        var tmp = Path.Combine(dir, $"{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
+
         try
         {
-            await using var pathLock = await AcquireFileLockAsync(path, ct).ConfigureAwait(false);
+            await using (var fs = new FileStream(tmp, CreateWriteOptions()))
+            {
+                await fs.WriteAsync(payload, ct).ConfigureAwait(false);
+                await fs.FlushAsync(ct).ConfigureAwait(false);
+                RandomAccess.FlushToDisk(fs.SafeFileHandle);
+            }
 
-            var dir = Path.GetDirectoryName(path)!;
-            SweepStaleTemp(dir, Path.GetFileName(path));
-            var tmp = Path.Combine(dir, $"{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
-
+            File.Move(tmp, path, overwrite: true);
+            FileAccessControl.RestrictToCurrentUser(path);
+            SafeFile.FlushDirectory(dir);
+        }
+        catch
+        {
             try
             {
-                await using (var fs = new FileStream(tmp, CreateWriteOptions()))
+                if (File.Exists(tmp))
                 {
-                    await fs.WriteAsync(payload, ct).ConfigureAwait(false);
-                    await fs.FlushAsync(ct).ConfigureAwait(false);
-                    RandomAccess.FlushToDisk(fs.SafeFileHandle);
+                    File.Delete(tmp);
                 }
-
-                File.Move(tmp, path, overwrite: true);
-                FileAccessControl.RestrictToCurrentUser(path);
-                FlushDirectory(dir);
             }
-            catch
+            catch (Exception cleanupEx) when (cleanupEx is IOException or UnauthorizedAccessException)
             {
-                try
-                {
-                    if (File.Exists(tmp))
-                    {
-                        File.Delete(tmp);
-                    }
-                }
-                catch (Exception cleanupEx) when (cleanupEx is IOException or UnauthorizedAccessException)
-                {
-                    System.Diagnostics.Debug.WriteLine(cleanupEx);
-                }
-                throw;
+                Quietly.Swallow(cleanupEx);
             }
-        }
-        finally
-        {
-            gate.ExitWrite();
+            throw;
         }
     }
 
@@ -77,11 +66,16 @@ public static class AtomicFile
             return null;
         }
 
-        var gate = GateFor(path);
-        await gate.EnterReadAsync(ct).ConfigureAwait(false);
         try
         {
             await using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            if (fs.Length > MAX_READ_BYTES)
+            {
+                Vice.Log.Emit(ViceLogLevel.Warn,
+                              $"AtomicFile read rejected: {path} is {fs.Length} bytes, exceeds cap {MAX_READ_BYTES}");
+                return null;
+            }
+
             using var ms = new MemoryStream();
             await fs.CopyToAsync(ms, ct).ConfigureAwait(false);
             return ms.ToArray();
@@ -104,38 +98,24 @@ public static class AtomicFile
             Vice.Log.Emit(ViceLogLevel.Warn, $"AtomicFile read failed: {path}", ex);
             return null;
         }
-        finally
-        {
-            gate.ExitRead();
-        }
     }
 
     public static async Task AppendTextAsync(string path, string line, CancellationToken ct)
     {
         EnsureDirectory(path);
 
-        var gate = GateFor(path);
-        await gate.EnterWriteAsync(ct).ConfigureAwait(false);
-        try
-        {
-            await using var pathLock = await AcquireFileLockAsync(path, ct).ConfigureAwait(false);
+        await using var pathLock = await AcquireFileLockAsync(path, ct).ConfigureAwait(false);
 
-            await using var fs = new FileStream(path, CreateAppendOptions());
+        await using (var fs = new FileStream(path, CreateAppendOptions()))
+        {
             var bytes = Encoding.UTF8.GetBytes(line);
             await fs.WriteAsync(bytes, ct).ConfigureAwait(false);
             await fs.FlushAsync(ct).ConfigureAwait(false);
             RandomAccess.FlushToDisk(fs.SafeFileHandle);
         }
-        finally
-        {
-            gate.ExitWrite();
-        }
-    }
 
-    private static PathGate GateFor(string path)
-    {
-        var key = Path.GetFullPath(path);
-        return Gates.GetOrAdd(key, static _ => new PathGate());
+        FileAccessControl.RestrictToCurrentUser(path);
+        SafeFile.FlushDirectory(Path.GetDirectoryName(path)!);
     }
 
     private static void SweepStaleTemp(string dir, string fileName)
@@ -150,32 +130,13 @@ public static class AtomicFile
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
-                    System.Diagnostics.Debug.WriteLine(ex);
+                    Quietly.Swallow(ex);
                 }
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or DirectoryNotFoundException)
         {
-            System.Diagnostics.Debug.WriteLine(ex);
-        }
-    }
-
-    private static void FlushDirectory(string dir)
-    {
-        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS()
-            && !OperatingSystem.IsFreeBSD())
-        {
-            return;
-        }
-
-        try
-        {
-            using var handle = File.OpenHandle(dir, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-            RandomAccess.FlushToDisk(handle);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or DirectoryNotFoundException)
-        {
-            System.Diagnostics.Debug.WriteLine(ex);
+            Quietly.Swallow(ex);
         }
     }
 
@@ -259,8 +220,8 @@ public static class AtomicFile
         var lockPath = path + ".lock";
         EnsureDirectory(lockPath);
 
-        var deadline = Environment.TickCount64 + LockAcquireTimeoutMs;
-        var delay = LockRetryInitialDelayMs;
+        var deadline = Environment.TickCount64 + LOCK_ACQUIRE_TIMEOUT_MS;
+        var delay = LOCK_RETRY_INITIAL_DELAY_MS;
 
         while (true)
         {
@@ -268,83 +229,20 @@ public static class AtomicFile
             try
             {
                 var fs = new FileStream(lockPath, CreateLockOptions());
-                return new PathLock(fs, lockPath);
+                return new PathLock(fs);
             }
             catch (IOException)
             {
                 if (Environment.TickCount64 >= deadline)
                 {
                     throw new TimeoutException(
-                        $"AtomicFile: could not acquire lock on {lockPath} within {LockAcquireTimeoutMs}ms; another writer holds it.");
+                        $"AtomicFile: could not acquire lock on {lockPath} within {LOCK_ACQUIRE_TIMEOUT_MS}ms; another writer holds it.");
                 }
 
                 var jitter = Random.Shared.Next(0, delay + 1);
-                try
-                {
-                    await Task.Delay(delay + jitter, ct).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException)
-                {
-                    throw;
-                }
+                await Task.Delay(delay + jitter, ct).ConfigureAwait(false);
 
-                delay = Math.Min(delay * 2, LockRetryMaxDelayMs);
-            }
-        }
-    }
-
-    private sealed class PathGate
-    {
-        private readonly SemaphoreSlim _write = new(1, 1);
-        private readonly SemaphoreSlim _readerMutex = new(1, 1);
-        private int _readers;
-
-        public Task EnterWriteAsync(CancellationToken ct)
-        {
-            return _write.WaitAsync(ct);
-        }
-
-        public void ExitWrite()
-        {
-            _write.Release();
-        }
-
-        public async Task EnterReadAsync(CancellationToken ct)
-        {
-            await _readerMutex.WaitAsync(ct).ConfigureAwait(false);
-            try
-            {
-                _readers++;
-                if (_readers == 1)
-                {
-                    await _write.WaitAsync(ct).ConfigureAwait(false);
-                }
-            }
-            catch
-            {
-                _readers--;
-                throw;
-            }
-            finally
-            {
-                _readerMutex.Release();
-            }
-        }
-
-        public void ExitRead()
-        {
-            _readerMutex.Wait();
-            try
-            {
-                _readers--;
-                if (_readers == 0)
-                {
-                    _write.Release();
-                }
-            }
-            finally
-            {
-                _readerMutex.Release();
+                delay = Math.Min(delay * 2, LOCK_RETRY_MAX_DELAY_MS);
             }
         }
     }
@@ -352,21 +250,21 @@ public static class AtomicFile
     private sealed class PathLock : IAsyncDisposable
     {
         private readonly FileStream _fs;
-        private readonly string _lockPath;
-        private int _disposed;
+        private bool _disposed;
 
-        public PathLock(FileStream fs, string lockPath)
+        public PathLock(FileStream fs)
         {
             _fs = fs;
-            _lockPath = lockPath;
         }
 
         public async ValueTask DisposeAsync()
         {
-            if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            if (_disposed)
             {
                 return;
             }
+
+            _disposed = true;
 
             try
             {
@@ -374,7 +272,7 @@ public static class AtomicFile
             }
             catch (Exception ex) when (ex is IOException or ObjectDisposedException)
             {
-                System.Diagnostics.Debug.WriteLine(ex);
+                Quietly.Swallow(ex);
             }
         }
     }

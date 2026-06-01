@@ -4,18 +4,22 @@ using Grpc.Core;
 using Vice.Jobs;
 using Vice.Net.Http;
 using Vice.Persistence;
-namespace Vice.Network.gRPC;
+namespace Vice.Net.Requests.Grpc;
 
 internal sealed class GrpcStreamJobRunner : IJobRunner
 {
     internal const int DefaultMaxRetries = 5;
     internal static readonly TimeSpan DefaultBaseRetryBackoff = TimeSpan.FromMilliseconds(500);
     internal static readonly TimeSpan DefaultMaxRetryBackoff = TimeSpan.FromSeconds(30);
+    internal static readonly TimeSpan DefaultCallDeadline = TimeSpan.FromMinutes(30);
+    internal static readonly TimeSpan DefaultIdleTimeout = TimeSpan.FromMinutes(2);
 
     private readonly GrpcConnectionManager _connectionManager;
     private readonly int _maxRetries;
     private readonly TimeSpan _baseRetryBackoff;
     private readonly TimeSpan _maxRetryBackoff;
+    private readonly TimeSpan _callDeadline;
+    private readonly TimeSpan _idleTimeout;
 
     public GrpcStreamJobRunner(GrpcConnectionManager connectionManager)
         : this(connectionManager,
@@ -29,11 +33,28 @@ internal sealed class GrpcStreamJobRunner : IJobRunner
                                  int maxRetries,
                                  TimeSpan baseRetryBackoff,
                                  TimeSpan maxRetryBackoff)
+        : this(connectionManager,
+               maxRetries,
+               baseRetryBackoff,
+               maxRetryBackoff,
+               DefaultCallDeadline,
+               DefaultIdleTimeout)
+    {
+    }
+
+    internal GrpcStreamJobRunner(GrpcConnectionManager connectionManager,
+                                 int maxRetries,
+                                 TimeSpan baseRetryBackoff,
+                                 TimeSpan maxRetryBackoff,
+                                 TimeSpan callDeadline,
+                                 TimeSpan idleTimeout)
     {
         _connectionManager = connectionManager;
         _maxRetries = maxRetries;
         _baseRetryBackoff = baseRetryBackoff;
         _maxRetryBackoff = maxRetryBackoff;
+        _callDeadline = callDeadline;
+        _idleTimeout = idleTimeout;
     }
 
     public bool CanHandle(JobKind kind) => kind == JobKind.GrpcStream;
@@ -41,15 +62,14 @@ internal sealed class GrpcStreamJobRunner : IJobRunner
     public async Task RunAsync(JobState job, IProgress<JobProgress> progress, CancellationToken ct)
     {
         var method = job.Method!;
-        var slashIndex = method.LastIndexOf('/');
-        if (slashIndex < 0)
+        if (!GrpcMethodPath.TryParse(method, out var path))
         {
             throw new InvalidOperationException(
                 $"Invalid method format: '{method}'. Expected: package.Service/Method");
         }
 
-        var serviceName = method[..slashIndex];
-        var methodName = method[(slashIndex + 1)..];
+        var serviceName = path.ServiceName;
+        var methodName = path.MethodName;
 
         var requestMarshaller = Marshallers.Create(
             serializer: bytes => bytes,
@@ -89,7 +109,6 @@ internal sealed class GrpcStreamJobRunner : IJobRunner
         var attempt = 0;
         while (true)
         {
-            var append = attempt > 0;
             try
             {
                 messagesReceived = await StreamOnceAsync(
@@ -98,8 +117,6 @@ internal sealed class GrpcStreamJobRunner : IJobRunner
                     requestBytes,
                     partialPath,
                     label,
-                    append,
-                    messagesReceived,
                     written => messagesReceived = written,
                     progress,
                     ct).ConfigureAwait(false);
@@ -113,7 +130,7 @@ internal sealed class GrpcStreamJobRunner : IJobRunner
             }
             catch (OperationCanceledException)
             {
-                TryDeletePartial(partialPath);
+                SafeFile.TryDelete(partialPath);
                 throw;
             }
             catch (RpcException ex)
@@ -134,7 +151,7 @@ internal sealed class GrpcStreamJobRunner : IJobRunner
                     }
                     catch (OperationCanceledException)
                     {
-                        TryDeletePartial(partialPath);
+                        SafeFile.TryDelete(partialPath);
                         throw;
                     }
 
@@ -143,7 +160,7 @@ internal sealed class GrpcStreamJobRunner : IJobRunner
 
                 if (!IsRecoverable(ex.StatusCode))
                 {
-                    TryDeletePartial(partialPath);
+                    SafeFile.TryDelete(partialPath);
                 }
 
                 throw new InvalidOperationException(
@@ -151,7 +168,7 @@ internal sealed class GrpcStreamJobRunner : IJobRunner
             }
             catch
             {
-                TryDeletePartial(partialPath);
+                SafeFile.TryDelete(partialPath);
                 throw;
             }
         }
@@ -163,34 +180,28 @@ internal sealed class GrpcStreamJobRunner : IJobRunner
         byte[] requestBytes,
         string partialPath,
         string label,
-        bool append,
-        long alreadyWritten,
         Action<long> onMessageWritten,
         IProgress<JobProgress> progress,
         CancellationToken ct)
     {
-        var channel = _connectionManager.GetChannel(job.Endpoint!);
-        var invoker = channel.CreateCallInvoker();
+        using var lease = _connectionManager.LeaseChannel(job.Endpoint!);
+        var invoker = lease.Channel.CreateCallInvoker();
 
-        var callOptions = new CallOptions(cancellationToken: ct);
+        var callOptions = new CallOptions(cancellationToken: ct)
+            .WithDeadline(DateTime.UtcNow.Add(_callDeadline));
 
         using var streamingCall = invoker.AsyncServerStreamingCall(
             grpcMethod, null, callOptions, requestBytes);
 
-        var writer = new StreamWriter(partialPath, append: append, Encoding.UTF8);
+        var writer = new StreamWriter(partialPath, append: false, Encoding.UTF8);
         try
         {
-            var messagesReceived = alreadyWritten;
-            var skipRemaining = alreadyWritten;
+            var messagesReceived = 0L;
+            onMessageWritten(messagesReceived);
             var lastReport = Stopwatch.GetTimestamp();
-            while (await streamingCall.ResponseStream.MoveNext(ct).ConfigureAwait(false))
+            while (await MoveNextWithIdleTimeoutAsync(streamingCall.ResponseStream, ct).ConfigureAwait(false))
             {
-                if (skipRemaining > 0)
-                {
-                    skipRemaining--;
-                    continue;
-                }
-
+                lease.Renew();
                 var responseBytes = streamingCall.ResponseStream.Current;
                 var responseLine = Encoding.UTF8.GetString(responseBytes);
 
@@ -218,11 +229,30 @@ internal sealed class GrpcStreamJobRunner : IJobRunner
         }
     }
 
+    private async Task<bool> MoveNextWithIdleTimeoutAsync(
+        IAsyncStreamReader<byte[]> responseStream,
+        CancellationToken ct)
+    {
+        using var idleCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        idleCts.CancelAfter(_idleTimeout);
+        try
+        {
+            return await responseStream.MoveNext(idleCts.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested && idleCts.IsCancellationRequested)
+        {
+            throw new RpcException(new global::Grpc.Core.Status(
+                StatusCode.DeadlineExceeded,
+                $"gRPC stream idle for longer than {_idleTimeout.TotalSeconds:0}s"));
+        }
+    }
+
     private TimeSpan ComputeBackoff(int attempt)
     {
         var scaled = _baseRetryBackoff.TotalMilliseconds * Math.Pow(2, attempt - 1);
         var capped = Math.Min(scaled, _maxRetryBackoff.TotalMilliseconds);
-        return TimeSpan.FromMilliseconds(capped);
+        var jittered = capped * (0.5 + Random.Shared.NextDouble() * 0.5);
+        return TimeSpan.FromMilliseconds(jittered);
     }
 
     private static bool IsRecoverable(StatusCode status)
@@ -231,18 +261,4 @@ internal sealed class GrpcStreamJobRunner : IJobRunner
             || status == StatusCode.DeadlineExceeded;
     }
 
-    private static void TryDeletePartial(string partialPath)
-    {
-        try
-        {
-            if (File.Exists(partialPath))
-            {
-                File.Delete(partialPath);
-            }
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            System.Diagnostics.Trace.WriteLine(ex);
-        }
-    }
 }

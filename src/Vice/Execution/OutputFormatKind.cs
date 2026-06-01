@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+
 namespace Vice.Execution;
 
 public enum OutputFormatKind
@@ -12,42 +14,43 @@ public enum OutputFormatKind
 
 public static class OutputFormatKindParser
 {
-    public static OutputFormatKind Parse(string? raw) => raw?.Trim().ToLowerInvariant() switch
+    private static readonly ConcurrentDictionary<string, OutputFormatKind> _byName =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    static OutputFormatKindParser()
     {
-        null or "" or "auto" => OutputFormatKind.Auto,
-        "text" => OutputFormatKind.Text,
-        "hex" => OutputFormatKind.Hex,
-        "json" => OutputFormatKind.Json,
-        "jsonl" => OutputFormatKind.Jsonl,
-        "ndjson" => OutputFormatKind.Ndjson,
-        _ => OutputFormatKind.Auto,
-    };
+        Register("auto", OutputFormatKind.Auto);
+        Register("text", OutputFormatKind.Text);
+        Register("hex", OutputFormatKind.Hex);
+        Register("json", OutputFormatKind.Json);
+        Register("jsonl", OutputFormatKind.Jsonl);
+        Register("ndjson", OutputFormatKind.Ndjson);
+    }
+
+    public static void Register(string name, OutputFormatKind kind)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            throw new ArgumentException("Format name must be non-empty.", nameof(name));
+        }
+
+        _byName[name.Trim()] = kind;
+    }
+
+    public static OutputFormatKind Parse(string? raw)
+    {
+        return TryParse(raw, out var kind) ? kind : OutputFormatKind.Auto;
+    }
 
     public static bool TryParse(string? raw, out OutputFormatKind kind)
     {
-        switch (raw?.Trim().ToLowerInvariant())
+        var normalized = raw?.Trim();
+        if (string.IsNullOrEmpty(normalized))
         {
-            case null or "" or "auto":
-                kind = OutputFormatKind.Auto;
-                return true;
-            case "text":
-                kind = OutputFormatKind.Text;
-                return true;
-            case "hex":
-                kind = OutputFormatKind.Hex;
-                return true;
-            case "json":
-                kind = OutputFormatKind.Json;
-                return true;
-            case "jsonl":
-                kind = OutputFormatKind.Jsonl;
-                return true;
-            case "ndjson":
-                kind = OutputFormatKind.Ndjson;
-                return true;
-            default:
-                kind = OutputFormatKind.Auto;
-                return false;
+            kind = OutputFormatKind.Auto;
+            return true;
         }
+
+        return _byName.TryGetValue(normalized, out kind);
     }
 }

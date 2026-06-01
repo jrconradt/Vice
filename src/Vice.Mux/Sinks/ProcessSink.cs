@@ -3,49 +3,18 @@ using Vice.Logging;
 
 namespace Vice.Mux.Sinks;
 
-internal sealed class ProcessSink : ISink
+internal sealed class ProcessSink : StreamBackedSink
 {
     private readonly Process _process;
-    private readonly Stream _stream;
 
     public ProcessSink(Process process, string label)
+        : base(process.StandardInput.BaseStream, label)
     {
         _process = process;
-        _stream = process.StandardInput.BaseStream;
-        Label = label;
     }
 
-    public string Label { get; }
-
-    public ValueTask WriteAsync(ReadOnlyMemory<byte> chunk, CancellationToken ct)
-        => _stream.WriteAsync(chunk, ct);
-
-    public ValueTask FlushAsync(CancellationToken ct)
-        => new(_stream.FlushAsync(ct));
-
-    public async ValueTask DisposeAsync()
+    protected override async ValueTask DisposeUnderlyingAsync()
     {
-        try
-        {
-            await _stream.FlushAsync().ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is IOException or ObjectDisposedException)
-        {
-            Log.Emit(ViceLogLevel.Warn,
-                     $"Sink '{Label}' final flush failed during dispose.",
-                     ex);
-        }
-        try
-        {
-            await _stream.DisposeAsync().ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is IOException or ObjectDisposedException)
-        {
-            Log.Emit(ViceLogLevel.Warn,
-                     $"Sink '{Label}' stream dispose failed.",
-                     ex);
-        }
-
         var gracefulExited = false;
         try
         {
@@ -55,7 +24,7 @@ internal sealed class ProcessSink : ISink
         }
         catch (Exception ex) when (ex is OperationCanceledException or InvalidOperationException)
         {
-            Debug.WriteLine(ex);
+            Vice.Quietly.Swallow(ex);
         }
 
         if (!gracefulExited)
@@ -66,7 +35,7 @@ internal sealed class ProcessSink : ISink
             }
             catch (Exception killEx) when (killEx is InvalidOperationException or NotSupportedException or System.ComponentModel.Win32Exception)
             {
-                Debug.WriteLine(killEx);
+                Vice.Quietly.Swallow(killEx);
             }
 
             try
@@ -75,10 +44,38 @@ internal sealed class ProcessSink : ISink
             }
             catch (Exception waitEx) when (waitEx is TimeoutException or InvalidOperationException or OperationCanceledException)
             {
-                Debug.WriteLine(waitEx);
+                Vice.Quietly.Swallow(waitEx);
             }
         }
 
+        ReportExit(gracefulExited);
         _process.Dispose();
+    }
+
+    private void ReportExit(bool gracefulExited)
+    {
+        if (!gracefulExited)
+        {
+            Log.Emit(ViceLogLevel.Warn,
+                     $"Sink '{Label}' downstream process did not exit within the grace period and was killed.");
+            return;
+        }
+
+        int exitCode;
+        try
+        {
+            exitCode = _process.ExitCode;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException)
+        {
+            Vice.Quietly.Swallow(ex);
+            return;
+        }
+
+        if (exitCode != 0)
+        {
+            Log.Emit(ViceLogLevel.Warn,
+                     $"Sink '{Label}' downstream process exited with code {exitCode}.");
+        }
     }
 }

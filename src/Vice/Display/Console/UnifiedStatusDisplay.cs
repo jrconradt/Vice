@@ -84,9 +84,11 @@ internal sealed class UnifiedStatusDisplay : IStatusDisplay
 
     private sealed class UnifiedHandle : IStatusHandle
     {
-        private const int MinBarWidth = 10;
-        private const int DefaultTerminalWidth = 80;
-        private const int ReducedMotionStepPercent = 10;
+        private const int MIN_BAR_WIDTH = 10;
+        private const int DEFAULT_TERMINAL_WIDTH = 80;
+        private const int REDUCED_MOTION_STEP_PERCENT = 10;
+        private const string HIDE_CURSOR = "\u001b[?25l";
+        private const string SHOW_CURSOR = "\u001b[?25h";
 
         private Snapshot _state;
         private int _completedFlag;
@@ -113,7 +115,7 @@ internal sealed class UnifiedStatusDisplay : IStatusDisplay
                              bool stderrIsTty,
                              bool reducedMotion)
         {
-            _state = new Snapshot(label, null);
+            _state = new Snapshot(AnsiStripper.Strip(label), null);
             _buffered = new BufferingConsoleWriter(console);
             _caps = caps;
             _reducedMotion = reducedMotion;
@@ -136,7 +138,7 @@ internal sealed class UnifiedStatusDisplay : IStatusDisplay
 
             if (_useAnsi)
             {
-                Console.Error.Write("[?25l");
+                Console.Error.Write(HIDE_CURSOR);
             }
 
             if (!_useAnsi)
@@ -186,11 +188,12 @@ internal sealed class UnifiedStatusDisplay : IStatusDisplay
 
         public void UpdateLabel(string label)
         {
+            var sanitized = AnsiStripper.Strip(label);
             Snapshot current, next;
             do
             {
                 current = Volatile.Read(ref _state);
-                next = current with { Label = label };
+                next = current with { Label = sanitized };
             }
             while (!ReferenceEquals(Interlocked.CompareExchange(ref _state, next, current), current));
         }
@@ -223,7 +226,7 @@ internal sealed class UnifiedStatusDisplay : IStatusDisplay
             {
                 previous = Volatile.Read(ref _lastAnnouncedPercent);
                 if (previous >= 0
-                    && percent < previous + ReducedMotionStepPercent
+                    && percent < previous + REDUCED_MOTION_STEP_PERCENT
                     && percent != 100)
                 {
                     return;
@@ -259,14 +262,14 @@ internal sealed class UnifiedStatusDisplay : IStatusDisplay
             var pctStr = $"{frac * 100:F0}%";
             var elapsed = FormatDuration();
             var fixedWidth = frame.Length + 1 + snap.Label.Length + 1 + pctStr.Length + 2 + elapsed.Length + 1;
-            var termWidth = _caps.Width > 0 ? _caps.Width : DefaultTerminalWidth;
+            var termWidth = _caps.Width > 0 ? _caps.Width : DEFAULT_TERMINAL_WIDTH;
             var barWidth = termWidth - fixedWidth;
             return new ProgressLayout(
                 pctStr,
                 elapsed,
                 fixedWidth,
                 barWidth,
-                barWidth >= MinBarWidth);
+                barWidth >= MIN_BAR_WIDTH);
         }
 
         private string RenderLine(string frame, Snapshot snap)
@@ -358,8 +361,8 @@ internal sealed class UnifiedStatusDisplay : IStatusDisplay
                 if (_useAnsi)
                 {
                     Console.Error.Write(padding == 0
-                        ? $"\r{line}\n[?25h"
-                        : $"\r{line}{new string(' ', padding)}\n[?25h");
+                        ? $"\r{line}\n{SHOW_CURSOR}"
+                        : $"\r{line}{new string(' ', padding)}\n{SHOW_CURSOR}");
                 }
                 else
                 {

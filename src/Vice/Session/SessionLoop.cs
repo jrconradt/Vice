@@ -1,7 +1,7 @@
 using System.Threading.Channels;
+using Vice.Display;
 using Vice.Jobs;
 using Vice.Logging;
-using Vice.Display;
 
 namespace Vice.Session;
 
@@ -65,7 +65,10 @@ internal sealed class SessionLoop : ISessionLoop, IDisposable
                 string? line;
                 try
                 {
-                    line = await Task.Run(() => _reader.ReadLine(), ct).WaitAsync(ct).ConfigureAwait(false);
+                    line = await Task.Factory.StartNew(() => _reader.ReadLine(),
+                                                       ct,
+                                                       TaskCreationOptions.LongRunning,
+                                                       TaskScheduler.Default).WaitAsync(ct).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException)
                 {

@@ -1,26 +1,39 @@
-using System.Collections.Frozen;
+using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json;
 using Vice.Execution;
 
 namespace Vice.Display;
 
+public delegate void OutputRenderer(byte[] data, Encoding encoding);
+
 public static class OutputFormatter
 {
-    private static readonly FrozenDictionary<OutputFormatKind, Action<byte[], Encoding>> Renderers =
-        new Dictionary<OutputFormatKind, Action<byte[], Encoding>>
+    private static readonly ConcurrentDictionary<OutputFormatKind, OutputRenderer> _renderers = new();
+
+    static OutputFormatter()
+    {
+        Register(OutputFormatKind.Auto, WriteText);
+        Register(OutputFormatKind.Text, WriteText);
+        Register(OutputFormatKind.Hex, static (data, _) => WriteHexDump(data));
+        Register(OutputFormatKind.Json, WriteJson);
+        Register(OutputFormatKind.Jsonl, WriteJson);
+        Register(OutputFormatKind.Ndjson, WriteJson);
+    }
+
+    public static void Register(OutputFormatKind format, OutputRenderer renderer)
+    {
+        if (renderer is null)
         {
-            [OutputFormatKind.Auto] = WriteText,
-            [OutputFormatKind.Text] = WriteText,
-            [OutputFormatKind.Hex] = (data, _) => WriteHexDump(data),
-            [OutputFormatKind.Json] = WriteJson,
-            [OutputFormatKind.Jsonl] = WriteJson,
-            [OutputFormatKind.Ndjson] = WriteJson,
-        }.ToFrozenDictionary();
+            throw new ArgumentNullException(nameof(renderer));
+        }
+
+        _renderers[format] = renderer;
+    }
 
     public static void WriteResponse(byte[] data, OutputFormatKind format, Encoding encoding)
     {
-        if (!Renderers.TryGetValue(format, out var render))
+        if (!_renderers.TryGetValue(format, out var render))
         {
             render = WriteText;
         }

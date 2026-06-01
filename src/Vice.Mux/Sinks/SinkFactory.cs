@@ -7,20 +7,7 @@ public static class SinkFactory
 {
     public static ISink Open(string spec)
     {
-        if (string.IsNullOrWhiteSpace(spec))
-        {
-            throw new ArgumentException("sink spec is empty");
-        }
-
-        var colon = spec.IndexOf(':');
-        var scheme = "file";
-        var rest = spec;
-        if (colon >= 0)
-        {
-            scheme = spec[..colon].ToLowerInvariant();
-            rest = spec[(colon + 1)..];
-        }
-
+        var (scheme, rest) = Split(spec);
         return scheme switch
         {
             "file" => OpenFile(rest, append: false),
@@ -31,6 +18,37 @@ public static class SinkFactory
             "null" => new NullSink(),
             _ => throw new ArgumentException($"unknown sink scheme '{scheme}' in '{spec}'"),
         };
+    }
+
+    public static async ValueTask<ISink> OpenAsync(string spec, CancellationToken ct)
+    {
+        var (scheme, rest) = Split(spec);
+        return scheme switch
+        {
+            "file" => OpenFile(rest, append: false),
+            "append" => OpenFile(rest, append: true),
+            "tcp" => await OpenTcpAsync(rest, ct),
+            "exec" => OpenExec(rest),
+            "pipe" => OpenPipe(rest),
+            "null" => new NullSink(),
+            _ => throw new ArgumentException($"unknown sink scheme '{scheme}' in '{spec}'"),
+        };
+    }
+
+    private static (string scheme, string rest) Split(string spec)
+    {
+        if (string.IsNullOrWhiteSpace(spec))
+        {
+            throw new ArgumentException("sink spec is empty");
+        }
+
+        var colon = spec.IndexOf(':');
+        if (colon < 0)
+        {
+            return ("file", spec);
+        }
+
+        return (spec[..colon].ToLowerInvariant(), spec[(colon + 1)..]);
     }
 
     private static ISink OpenFile(string path, bool append)
@@ -44,31 +62,69 @@ public static class SinkFactory
 
     private static ISink OpenTcp(string hostPort)
     {
-        var bang = hostPort.LastIndexOf(':');
-        if (bang < 0)
-        {
-            throw new ArgumentException($"tcp sink expects host:port, got '{hostPort}'");
-        }
-
-        var host = hostPort[..bang];
-        if (!int.TryParse(hostPort[(bang + 1)..], out var port))
-        {
-            throw new ArgumentException($"tcp sink port not an int in '{hostPort}'");
-        }
-
+        var (host, port) = ParseEndpoint(hostPort);
         var client = new TcpClient();
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         try
         {
-            client.ConnectAsync(host, port, cts.Token).AsTask().GetAwaiter().GetResult();
+            client.ConnectAsync(host,
+                                port,
+                                cts.Token).AsTask().GetAwaiter().GetResult();
         }
         catch (OperationCanceledException)
         {
             client.Dispose();
             throw new TimeoutException($"tcp sink connect to {host}:{port} timed out");
         }
+
         client.NoDelay = true;
         return new TcpSink(client, $"tcp:{host}:{port}");
+    }
+
+    private static async ValueTask<ISink> OpenTcpAsync(string hostPort, CancellationToken ct)
+    {
+        var (host, port) = ParseEndpoint(hostPort);
+        var client = new TcpClient();
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(TimeSpan.FromSeconds(5));
+        try
+        {
+            await client.ConnectAsync(host,
+                                      port,
+                                      cts.Token);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            client.Dispose();
+            throw new TimeoutException($"tcp sink connect to {host}:{port} timed out");
+        }
+        catch
+        {
+            client.Dispose();
+            throw;
+        }
+
+        client.NoDelay = true;
+        return new TcpSink(client, $"tcp:{host}:{port}");
+    }
+
+    private static (string host, int port) ParseEndpoint(string hostPort)
+    {
+        var bang = hostPort.LastIndexOf(':');
+        if (bang < 0)
+        {
+            throw new ArgumentException($"Invalid endpoint '{hostPort}'. Expected format: host:port");
+        }
+
+        var host = hostPort[..bang];
+        if (!int.TryParse(hostPort[(bang + 1)..], out var port)
+            || port < 1
+            || port > 65535)
+        {
+            throw new ArgumentException($"Invalid endpoint '{hostPort}'. Expected format: host:port");
+        }
+
+        return (host, port);
     }
 
     private static ISink OpenExec(string commandLine)

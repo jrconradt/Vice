@@ -36,11 +36,6 @@ internal static class TableRenderer
             lines.Add(BuildDataRow(columns, rows[r], colWidths, borders, isHeader: false, borderStyle, colorDepth));
         }
 
-        if (!borders.IsEmpty)
-        {
-            lines.Add(BuildHorizontalLine(borders.BottomLeft, borders.BottomHorizontal, borders.BottomJunction, borders.BottomRight, colWidths, borderStyle, colorDepth));
-        }
-
         return lines;
     }
 
@@ -144,12 +139,17 @@ internal static class TableRenderer
             var alignment = columns[c].Alignment;
             var style = isHeader ? columns[c].HeaderStyle : columns[c].CellStyle;
 
-            if (UnicodeWidth.GetWidth(text) > width)
+            var textWidth = UnicodeWidth.GetWidth(text);
+            if (textWidth > width)
             {
                 text = UnicodeWidth.Truncate(text, width);
+                textWidth = UnicodeWidth.GetWidth(text);
             }
 
-            var aligned = Align(text, width, alignment);
+            var aligned = Align(text,
+                                textWidth,
+                                width,
+                                alignment);
 
             if (hasBorders)
             {
@@ -191,9 +191,11 @@ internal static class TableRenderer
         return string.Concat(parts);
     }
 
-    private static string Align(string text, int width, Alignment alignment)
+    private static string Align(string text,
+                                int textWidth,
+                                int width,
+                                Alignment alignment)
     {
-        var textWidth = UnicodeWidth.GetWidth(text);
         var padding = width - textWidth;
         if (padding <= 0)
         {

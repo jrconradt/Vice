@@ -1,7 +1,7 @@
-using Vice.Execution;
-using Vice.Logging;
 using Vice.Display;
 using Vice.Display.Rendering;
+using Vice.Execution;
+using Vice.Logging;
 
 namespace Vice.Net.Tests;
 

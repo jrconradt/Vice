@@ -6,14 +6,9 @@ namespace Vice.Tests.Plugins;
 
 public class MultiProcessPipelineTests
 {
-    [Fact]
+    [UnixOnlyFact]
     public async Task MultiProcessPipeline_RejectsAllRegistrySegments()
     {
-        if (OperatingSystem.IsWindows())
-        {
-            return;
-        }
-
         var segments = RawArgsSplitter.Split(new[] { "nope", "then", "alsonope" });
 
         var registry = new CommandRegistry();

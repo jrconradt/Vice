@@ -1,7 +1,7 @@
-using Vice.Jobs;
-using Vice.Logging;
 using Vice.Display;
 using Vice.Display.Rendering;
+using Vice.Jobs;
+using Vice.Logging;
 using Vice.Options;
 
 namespace Vice;
@@ -12,6 +12,7 @@ public sealed class ViceAppBuilder
     private readonly string _version;
     private string? _description;
     private IConsoleWriter? _console;
+    private IOutputSink? _outputSink;
     private IStatusDisplay? _status;
     private TerminalCapabilities? _capabilities;
     private int _concurrency = 3;
@@ -41,6 +42,12 @@ public sealed class ViceAppBuilder
     public ViceAppBuilder WithConsoleWriter(IConsoleWriter writer)
     {
         _console = writer;
+        return this;
+    }
+
+    public ViceAppBuilder WithOutputSink(IOutputSink sink)
+    {
+        _outputSink = sink;
         return this;
     }
 
@@ -98,6 +105,7 @@ public sealed class ViceAppBuilder
     {
         return new ViceApp(_name, _version, _description,
             console: _console,
+            outputSink: _outputSink,
             status: _status, capabilities: _capabilities,
             concurrency: _concurrency,
             jobRunners: _jobRunners.ToArray(),

@@ -1,10 +1,10 @@
 using System.Threading.Tasks;
 using Vice;
 using Vice.Commands;
-using Vice.Jobs;
-using Vice.Logging;
 using Vice.Display;
 using Vice.Display.Rendering;
+using Vice.Jobs;
+using Vice.Logging;
 using Vice.Session;
 using Xunit;
 

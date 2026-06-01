@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Threading.Channels;
 using Vice.Logging;
 
@@ -6,12 +7,22 @@ namespace Vice.Jobs;
 internal sealed class JobWorkerPool
 {
     public const int MAX_QUEUED_JOBS = 1024;
+    public const int MAX_WORKER_RESTARTS = 64;
 
     private readonly Func<JobStateHolder, Task> _executeJob;
     private readonly CancellationToken _shutdownToken;
     private readonly TimeSpan _shutdownTimeout;
     private readonly Channel<JobStateHolder> _workChannel;
     private readonly Task[] _workers;
+    private readonly ConcurrentDictionary<int, byte> _liveWorkers = new();
+    private readonly ConcurrentQueue<byte> _restartTokens = new();
+    private readonly int _configuredConcurrency;
+
+    public int ConfiguredConcurrency => _configuredConcurrency;
+
+    public int LiveWorkerCount => _liveWorkers.Count;
+
+    public bool IsDegraded => _liveWorkers.Count < _configuredConcurrency;
 
     public JobWorkerPool(
         int maxConcurrency,
@@ -27,6 +38,11 @@ internal sealed class JobWorkerPool
         _executeJob = executeJob ?? throw new ArgumentNullException(nameof(executeJob));
         _shutdownToken = shutdownToken;
         _shutdownTimeout = shutdownTimeout;
+        _configuredConcurrency = maxConcurrency;
+        for (var i = 0; i < MAX_WORKER_RESTARTS; i++)
+        {
+            _restartTokens.Enqueue(0);
+        }
 
         _workChannel = Channel.CreateBounded<JobStateHolder>(new BoundedChannelOptions(MAX_QUEUED_JOBS)
         {
@@ -38,7 +54,9 @@ internal sealed class JobWorkerPool
         _workers = new Task[maxConcurrency];
         for (var i = 0; i < maxConcurrency; i++)
         {
-            _workers[i] = Task.Run(WorkerLoopAsync);
+            var slot = i;
+            _liveWorkers[slot] = 0;
+            _workers[slot] = Task.Run(() => WorkerLoopAsync(slot));
         }
     }
 
@@ -62,7 +80,7 @@ internal sealed class JobWorkerPool
         }
     }
 
-    private async Task WorkerLoopAsync()
+    private async Task WorkerLoopAsync(int slot)
     {
         try
         {
@@ -92,14 +110,46 @@ internal sealed class JobWorkerPool
                     Vice.Log.Emit(ViceLogLevel.Warn, $"job {jobId} worker observed unhandled exception", ex);
                 }
             }
+
+            _liveWorkers.TryRemove(slot, out _);
+            Vice.Log.Emit(ViceLogLevel.Trace, $"job worker slot {slot} completed; work channel closed");
         }
         catch (OperationCanceledException)
         {
-            Vice.Log.Emit(ViceLogLevel.Trace, "worker loop cancelled");
+            _liveWorkers.TryRemove(slot, out _);
+            Vice.Log.Emit(ViceLogLevel.Trace, $"job worker slot {slot} cancelled");
         }
         catch (Exception ex)
         {
-            Vice.Log.Emit(ViceLogLevel.Warn, "worker loop terminated with exception", ex);
+            _liveWorkers.TryRemove(slot, out _);
+            RecoverWorker(slot, ex);
         }
+    }
+
+    private void RecoverWorker(int slot, Exception ex)
+    {
+        if (_shutdownToken.IsCancellationRequested
+            || _workChannel.Reader.Completion.IsCompleted)
+        {
+            Vice.Log.Emit(ViceLogLevel.Warn,
+                          $"POOL_WORKER_TERMINATED job worker slot {slot} terminated during shutdown",
+                          ex);
+            return;
+        }
+
+        if (!_restartTokens.TryDequeue(out _))
+        {
+            Vice.Log.Emit(ViceLogLevel.Error,
+                          $"POOL_DEGRADED job worker slot {slot} terminated and restart budget of {MAX_WORKER_RESTARTS} is exhausted; {_liveWorkers.Count} of {_configuredConcurrency} workers live",
+                          ex);
+            return;
+        }
+
+        Vice.Log.Emit(ViceLogLevel.Error,
+                      $"POOL_WORKER_TERMINATED job worker slot {slot} terminated with exception; restarting; {_liveWorkers.Count} of {_configuredConcurrency} workers live before restart",
+                      ex);
+
+        _liveWorkers[slot] = 0;
+        _workers[slot] = Task.Run(() => WorkerLoopAsync(slot));
     }
 }

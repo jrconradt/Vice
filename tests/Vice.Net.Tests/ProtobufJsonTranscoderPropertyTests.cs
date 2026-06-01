@@ -4,7 +4,7 @@ using CsCheck;
 using Google.Protobuf;
 using Google.Protobuf.Reflection;
 using Vice.Logging;
-using Vice.Network.gRPC;
+using Vice.Net.Requests.Grpc;
 using Xunit;
 
 namespace Vice.Net.Tests;
@@ -274,23 +274,29 @@ public class ProtobufJsonTranscoderPropertyTests
                 var decoded = ProtobufJsonTranscoder.ProtobufToJson(bytes, desc);
                 using var output = JsonDocument.Parse(decoded);
 
-                if (input.RootElement.TryGetProperty("count", out var count)
-                    && count.GetInt32() != 0)
+                if (input.RootElement.TryGetProperty("count", out var count))
                 {
-                    Assert.Equal(count.GetInt32(), output.RootElement.GetProperty("count").GetInt32());
+                    var expectedCount = count.GetInt32();
+                    var actualCount = output.RootElement.TryGetProperty("count", out var outCount)
+                        ? outCount.GetInt32()
+                        : 0;
+                    Assert.Equal(expectedCount, actualCount);
                 }
 
-                if (input.RootElement.TryGetProperty("active", out var active)
-                    && active.GetBoolean())
+                if (input.RootElement.TryGetProperty("active", out var active))
                 {
-                    Assert.True(output.RootElement.GetProperty("active").GetBoolean());
+                    var expectedActive = active.GetBoolean();
+                    var actualActive = output.RootElement.TryGetProperty("active", out var outActive)
+                        && outActive.GetBoolean();
+                    Assert.Equal(expectedActive, actualActive);
                 }
 
-                if (input.RootElement.TryGetProperty("items", out var items)
-                    && items.GetArrayLength() > 0)
+                if (input.RootElement.TryGetProperty("items", out var items))
                 {
                     var expected = items.EnumerateArray().Select(e => e.GetInt32()).ToArray();
-                    var actual = output.RootElement.GetProperty("items").EnumerateArray().Select(e => e.GetInt32()).ToArray();
+                    var actual = output.RootElement.TryGetProperty("items", out var outItems)
+                        ? outItems.EnumerateArray().Select(e => e.GetInt32()).ToArray()
+                        : Array.Empty<int>();
                     Assert.Equal(expected, actual);
                 }
             },
@@ -318,7 +324,6 @@ public class ProtobufJsonTranscoderPropertyTests
                                            or FormatException
                                            or OverflowException)
                 {
-                    Assert.NotNull(ex);
                 }
             },
             iter: Iterations,
@@ -345,7 +350,6 @@ public class ProtobufJsonTranscoderPropertyTests
                                            or OverflowException
                                            or JsonException)
                 {
-                    Assert.NotNull(ex);
                 }
             },
             iter: Iterations,

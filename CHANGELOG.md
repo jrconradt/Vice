@@ -12,7 +12,6 @@ Initial public release.
 ### Added
 
 - `ViceError.Hint` virtual property with built-in remediation strings for `TimedOut`, `FileMissing`, `HttpFailure` (401/403/404/429/5xx), `SocketFailure`, and `Unhandled`. Rendered as a `hint:` line after the error message by `CommandErrorHandler`.
-- Built-in cache verbs: `vice cache info`, `vice cache clear`, `vice cache clear source <name>` (with `--dry-run`).
 - `ICommandRegistry.FindContaining(token)` powers `vice help <token>` fallback when no head verb matches.
 
 ### Changed
@@ -22,4 +21,4 @@ Initial public release.
 
 ### Fixed
 
-- `DownloadJobRunner` now routes source-aware downloads through `ResearchSourceRegistry`; raw-URL downloads still resume via `ResumableHttpStream` (previously source-aware jobs could throw `UriFormatException` on arxiv-style IDs).
+- `ResearchDownloadJobRunner` now routes source-aware downloads through `ResearchSourceRegistry`; raw-URL downloads still resume via `ResumableHttpStream` (previously source-aware jobs could throw `UriFormatException` on arxiv-style IDs).

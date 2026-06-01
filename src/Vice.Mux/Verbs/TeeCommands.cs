@@ -29,11 +29,13 @@ public static class TeeCommands
         var sinks = new List<ISink>(specs.Count + 1);
         try
         {
-            foreach (var s in specs)
+            var opens = new Task<ISink>[specs.Count];
+            for (int i = 0; i < specs.Count; i++)
             {
-                sinks.Add(SinkFactory.Open(s));
+                opens[i] = SinkFactory.OpenAsync(specs[i], ct).AsTask();
             }
 
+            sinks.AddRange(await Task.WhenAll(opens));
             sinks.Add(new StreamSink(Console.OpenStandardOutput(), "stdout"));
         }
         catch

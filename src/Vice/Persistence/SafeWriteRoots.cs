@@ -4,16 +4,19 @@ namespace Vice.Persistence;
 
 public static class SafeWriteRoots
 {
-    private const int CacheTtlSeconds = 30;
-    private static readonly object _rootsLock = new();
-    private static IReadOnlyList<string>? _rootsCache;
-    private static string? _rootsCacheKey;
-    private static DateTime _rootsExpiresAtUtc;
+    private const int CACHE_TTL_SECONDS = 30;
+
+    private sealed record RootsCache(IReadOnlyList<string> Roots, string Key, DateTime ExpiresAtUtc);
+
+    private static RootsCache? _rootsCache;
 
     public static bool IsAllowed(string fullPath, out string reason)
+        => IsAllowed(fullPath, out _, out reason);
+
+    public static bool IsAllowed(string fullPath, out string canonical, out string reason)
     {
         reason = "";
-        string canonical;
+        canonical = fullPath;
         try
         {
             canonical = CanonicalisePath(fullPath);
@@ -48,29 +51,18 @@ public static class SafeWriteRoots
         var key = ComputeRootsCacheKey();
         var nowUtc = DateTime.UtcNow;
         var cached = Volatile.Read(ref _rootsCache);
-        var cachedKey = Volatile.Read(ref _rootsCacheKey);
         if (cached is not null
-            && string.Equals(cachedKey, key, StringComparison.Ordinal)
-            && nowUtc < _rootsExpiresAtUtc)
+            && string.Equals(cached.Key, key, StringComparison.Ordinal)
+            && nowUtc < cached.ExpiresAtUtc)
         {
-            return cached;
+            return cached.Roots;
         }
 
-        lock (_rootsLock)
-        {
-            if (_rootsCache is not null
-                && string.Equals(_rootsCacheKey, key, StringComparison.Ordinal)
-                && DateTime.UtcNow < _rootsExpiresAtUtc)
-            {
-                return _rootsCache;
-            }
-
-            var fresh = CollectRoots();
-            _rootsExpiresAtUtc = DateTime.UtcNow.AddSeconds(CacheTtlSeconds);
-            Volatile.Write(ref _rootsCacheKey, key);
-            Volatile.Write(ref _rootsCache, fresh);
-            return fresh;
-        }
+        var fresh = new RootsCache(CollectRoots(),
+                                   key,
+                                   DateTime.UtcNow.AddSeconds(CACHE_TTL_SECONDS));
+        Volatile.Write(ref _rootsCache, fresh);
+        return fresh.Roots;
     }
 
     private static IEnumerable<string?> RootSources()
@@ -115,87 +107,95 @@ public static class SafeWriteRoots
             }
             catch (Exception ex) when (ex is ArgumentException or PathTooLongException or IOException or System.Security.SecurityException)
             {
-                System.Diagnostics.Debug.WriteLine(ex);
+                Quietly.Swallow(ex);
                 continue;
             }
 
             if (seen.Add(canonical))
             {
                 resolved.Add(canonical);
+                if (string.Equals(canonical, Path.GetPathRoot(canonical), StringComparison.Ordinal))
+                {
+                    Vice.Log.Emit(ViceLogLevel.Warn,
+                                  $"safe-write-root over-broad: root='{canonical}' grants write to the entire volume");
+                }
             }
         }
 
+        Vice.Log.Emit(ViceLogLevel.Info,
+                      $"safe-write-root active roots: {string.Join(", ", resolved)}");
         return resolved;
     }
+
+    private const int MAX_LINK_HOPS = 256;
 
     private static string CanonicalisePath(string raw)
     {
         var full = Path.GetFullPath(raw);
-        if (Directory.Exists(full))
+        var root = Path.GetPathRoot(full) ?? "";
+        if (string.IsNullOrEmpty(root))
         {
+            root = Path.DirectorySeparatorChar.ToString();
+        }
+
+        var pending = new Stack<string>();
+        PushComponents(pending, full, root);
+
+        var resolved = root;
+        var hops = 0;
+        while (pending.Count > 0)
+        {
+            var component = pending.Pop();
+            var candidate = Path.Combine(resolved, component);
+
+            FileSystemInfo? target;
             try
             {
-                var target = File.ResolveLinkTarget(full, returnFinalTarget: true);
-                if (target is not null && !string.IsNullOrEmpty(target.FullName))
-                {
-                    full = Path.GetFullPath(target.FullName);
-                }
+                target = File.ResolveLinkTarget(candidate, returnFinalTarget: false);
             }
             catch (IOException ex)
             {
-                System.Diagnostics.Debug.WriteLine(ex);
+                Quietly.Swallow(ex);
+                resolved = candidate;
+                continue;
             }
             catch (UnauthorizedAccessException ex)
             {
-                System.Diagnostics.Debug.WriteLine(ex);
+                Quietly.Swallow(ex);
+                resolved = candidate;
+                continue;
             }
 
-            return full;
+            if (target is null || string.IsNullOrEmpty(target.FullName))
+            {
+                resolved = candidate;
+                continue;
+            }
+
+            hops++;
+            if (hops > MAX_LINK_HOPS)
+            {
+                throw new IOException($"symlink chain exceeded {MAX_LINK_HOPS} hops resolving '{full}'");
+            }
+
+            var linkTarget = target.FullName;
+            var absolute = Path.IsPathRooted(linkTarget)
+                ? Path.GetFullPath(linkTarget)
+                : Path.GetFullPath(Path.Combine(resolved, linkTarget));
+            resolved = Path.GetPathRoot(absolute) ?? root;
+            PushComponents(pending, absolute, resolved);
         }
 
-        var parent = Path.GetDirectoryName(full);
-        if (!string.IsNullOrEmpty(parent)
-            && Directory.Exists(parent))
+        return Path.GetFullPath(resolved);
+    }
+
+    private static void PushComponents(Stack<string> pending, string path, string root)
+    {
+        var remainder = path.Substring(root.Length);
+        var components = remainder.Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries);
+        for (var i = components.Length - 1; i >= 0; i--)
         {
-            try
-            {
-                var target = File.ResolveLinkTarget(parent, returnFinalTarget: true);
-                if (target is not null && !string.IsNullOrEmpty(target.FullName))
-                {
-                    var resolvedParent = Path.GetFullPath(target.FullName);
-                    full = Path.Combine(resolvedParent, Path.GetFileName(full));
-                }
-            }
-            catch (IOException ex)
-            {
-                System.Diagnostics.Debug.WriteLine(ex);
-            }
-            catch (UnauthorizedAccessException ex)
-            {
-                System.Diagnostics.Debug.WriteLine(ex);
-            }
+            pending.Push(components[i]);
         }
-
-        if (File.Exists(full))
-        {
-            try
-            {
-                var target = File.ResolveLinkTarget(full, returnFinalTarget: true);
-                if (target is not null && !string.IsNullOrEmpty(target.FullName))
-                {
-                    full = Path.GetFullPath(target.FullName);
-                }
-            }
-            catch (IOException ex)
-            {
-                System.Diagnostics.Debug.WriteLine(ex);
-            }
-            catch (UnauthorizedAccessException ex)
-            {
-                System.Diagnostics.Debug.WriteLine(ex);
-            }
-        }
-
-        return full;
     }
 }

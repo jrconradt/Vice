@@ -1,7 +1,7 @@
 using System.Diagnostics;
-using Vice.Logging;
 using Vice.Display;
 using Vice.Display.Rendering;
+using Vice.Logging;
 using Vice.Session;
 using Vice.Streaming;
 
@@ -298,7 +298,8 @@ internal sealed class PipelineExecutor
                 producerProgress,
                 _session,
                 _logger,
-                producer.ResolvedNodes) { CancellationToken = context.Ct };
+                producer.ResolvedNodes)
+            { CancellationToken = context.Ct };
 
             var consumerLabel = context.TotalStages > 1 ? $"Stage {stageNumber + 1}/{context.TotalStages}" : "Consuming";
             await using var consumerHandle = context.Status.Start(consumerLabel, context.Console);
@@ -318,11 +319,25 @@ internal sealed class PipelineExecutor
                 consumerProgress,
                 _session,
                 _logger,
-                consumer.ResolvedNodes) { CancellationToken = context.Ct };
+                consumer.ResolvedNodes)
+            { CancellationToken = context.Ct };
+
+            var producerName = ResolveStageName(producer, producerLabel);
+            var consumerName = ResolveStageName(consumer, consumerLabel);
 
             using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(context.Ct);
-            var producerTask = RunProducerAsync(producerLauncher, producerCtx, channel, linkedCts.Token);
-            var consumerTask = RunConsumerAsync(consumerLauncher, consumerCtx, channel, linkedCts);
+            var producerTask = RunProducerAsync(
+                producerLauncher,
+                producerCtx,
+                channel,
+                producerName,
+                linkedCts.Token);
+            var consumerTask = RunConsumerAsync(
+                consumerLauncher,
+                consumerCtx,
+                channel,
+                consumerName,
+                linkedCts);
 
             var (consumerExit, consumerEx) = await AwaitCollectingAsync(consumerTask).ConfigureAwait(false);
 
@@ -335,7 +350,7 @@ internal sealed class PipelineExecutor
                 }
                 catch (ObjectDisposedException ode)
                 {
-                    System.Diagnostics.Debug.WriteLine(ode);
+                    Quietly.Swallow(ode);
                 }
             }
 
@@ -410,13 +425,7 @@ internal sealed class PipelineExecutor
         Exception? producerEx,
         Exception? consumerEx)
     {
-        if (producerEx is not null && consumerEx is not null)
-        {
-            Vice.Log.Emit(ViceLogLevel.Warn, "secondary stage exception (consumer)", consumerEx);
-            Apply(producerHandle, HandleDisposition.Fail);
-            Apply(consumerHandle, HandleDisposition.Fail);
-            throw producerEx;
-        }
+        var primary = StagePairReconciler.ResolvePrimary(producerEx, consumerEx);
 
         var producerDisposition = producerEx is not null
             ? HandleDisposition.Fail
@@ -428,30 +437,36 @@ internal sealed class PipelineExecutor
         Apply(producerHandle, producerDisposition);
         Apply(consumerHandle, consumerDisposition);
 
-        if (producerEx is not null)
+        if (primary is not null)
         {
-            throw producerEx;
-        }
-
-        if (consumerEx is not null)
-        {
-            throw consumerEx;
+            throw primary;
         }
     }
 
     private static Task<int> RunProducerAsync(
-        IStreamingLauncher launcher, CommandContext ctx, object channel, CancellationToken ct)
+        IStreamingLauncher launcher,
+        CommandContext ctx,
+        object channel,
+        string stageName,
+        CancellationToken ct)
     {
         return Task.Run(async () =>
         {
             Exception? failure = null;
+            Vice.Log.Emit(new CommandStarted(stageName));
+            var sw = Stopwatch.StartNew();
             try
             {
-                return await launcher.InvokeProducerAsync(ctx, channel, ct).ConfigureAwait(false);
+                var exitCode = await launcher.InvokeProducerAsync(ctx, channel, ct).ConfigureAwait(false);
+                sw.Stop();
+                Vice.Log.Emit(new CommandCompleted(stageName, exitCode, sw.Elapsed));
+                return exitCode;
             }
             catch (Exception ex)
             {
+                sw.Stop();
                 failure = ex;
+                Vice.Log.Emit(new CommandFailed(stageName, ex, sw.Elapsed));
                 throw;
             }
             finally
@@ -469,23 +484,34 @@ internal sealed class PipelineExecutor
     }
 
     private static Task<int> RunConsumerAsync(
-        IStreamingLauncher launcher, CommandContext ctx, object channel, CancellationTokenSource linkedCts)
+        IStreamingLauncher launcher,
+        CommandContext ctx,
+        object channel,
+        string stageName,
+        CancellationTokenSource linkedCts)
     {
         return Task.Run(async () =>
         {
+            Vice.Log.Emit(new CommandStarted(stageName));
+            var sw = Stopwatch.StartNew();
             try
             {
-                return await launcher.InvokeConsumerAsync(ctx, channel, linkedCts.Token).ConfigureAwait(false);
+                var exitCode = await launcher.InvokeConsumerAsync(ctx, channel, linkedCts.Token).ConfigureAwait(false);
+                sw.Stop();
+                Vice.Log.Emit(new CommandCompleted(stageName, exitCode, sw.Elapsed));
+                return exitCode;
             }
-            catch
+            catch (Exception ex)
             {
+                sw.Stop();
+                Vice.Log.Emit(new CommandFailed(stageName, ex, sw.Elapsed));
                 try
                 {
                     linkedCts.Cancel();
                 }
                 catch (ObjectDisposedException ode)
                 {
-                    System.Diagnostics.Debug.WriteLine(ode);
+                    Quietly.Swallow(ode);
                 }
 
                 throw;
@@ -518,7 +544,8 @@ internal sealed class PipelineExecutor
             progressReporter,
             _session,
             _logger,
-            stage.ResolvedNodes) { CancellationToken = context.Ct };
+            stage.ResolvedNodes)
+        { CancellationToken = context.Ct };
 
         var stageName = ResolveStageName(stage, label);
         Vice.Log.Emit(new CommandStarted(stageName));
@@ -533,10 +560,7 @@ internal sealed class PipelineExecutor
         catch (Exception ex)
         {
             sw.Stop();
-            if (ex is not ViceError)
-            {
-                Vice.Log.Emit(new CommandFailed(stageName, ex, sw.Elapsed));
-            }
+            Vice.Log.Emit(new CommandFailed(stageName, ex, sw.Elapsed));
             handle.Fail();
             throw;
         }

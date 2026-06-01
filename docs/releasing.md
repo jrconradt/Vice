@@ -1,13 +1,15 @@
 # Releasing, versioning, and rollback
 
-Vice ships two installable `dotnet tool` packages built from the same repository:
+Vice ships four NuGet packages built from the same repository — two installable `dotnet tool` packages and two framework library packages for downstream consumers:
 
-| Package | Tool command | Source project |
-|---|---|---|
-| `Vice.Cli` | `vice` | `src/Vice.Cli` |
-| `Vice.Mux.Cli` | `vice-mux` | `src/Vice.Mux.Cli` |
+| Package | Kind | Tool command | Source project |
+|---|---|---|---|
+| `Vice.Cli` | tool | `vice` | `src/Vice.Cli` |
+| `Vice.Mux.Cli` | tool | `vice-mux` | `src/Vice.Mux.Cli` |
+| `Vice` | framework library | — | `src/Vice` |
+| `Vice.Parser` | framework library | — | `src/Vice.Parser` |
 
-The framework library `Vice` (and `Vice.Net`, `Vice.Files`, `Vice.Build`, `Vice.Mux`, `Vice.Generators`) are not separately shipped as tools; the libraries are bundled inside the tool packages. `Vice` is published as a framework NuGet package for downstream consumers.
+`Vice` is the framework library downstream consumers reference with `dotnet add package Vice`; it bundles the command-composition source generator as an embedded analyzer and pulls in `Vice.Parser` transitively. `Vice.Parser` is the BCL-only lexer and resolver, publishable on its own for tools that need only lexing and resolution. The remaining libraries (`Vice.Net`, `Vice.Files`, `Vice.Build`, `Vice.Mux`, `Vice.Generators`) are not separately published; they are bundled inside the tool packages.
 
 ## Versioning policy
 
@@ -17,7 +19,7 @@ The project follows [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.h
 - **MINOR** — new commands, new framework API, or new opt-in behavior, all backward compatible.
 - **PATCH** — backward-compatible bug fixes and documentation.
 
-The single source of truth for the shipped version is `<Version>` in `Directory.Build.props`; every packable project inherits it, so the two tool packages always release in lockstep at the same version. Bump that one element before cutting a release, and record the change under a new heading in [CHANGELOG.md](../CHANGELOG.md), which is kept in [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
+The single source of truth for the shipped version is `<Version>` in `Directory.Build.props`; every packable project inherits it, so all four packages always release in lockstep at the same version. Bump that one element before cutting a release, and record the change under a new heading in [CHANGELOG.md](../CHANGELOG.md), which is kept in [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
 Each release corresponds to an annotated git tag `v<version>` (for example `v0.1.0`) on the commit that produced the artifacts. The tag is what ties a published `.nupkg` back to a reproducible source state.
 
@@ -28,7 +30,7 @@ Each release corresponds to an annotated git tag `v<version>` (for example `v0.1
 3. Commit, then tag the commit: `git tag -a v<version> -m "v<version>"`.
 4. Produce the packages: `scripts/release.sh --verify-tag`.
 
-   This reads `<Version>` from `Directory.Build.props`, confirms the matching `v<version>` tag is at `HEAD`, and packs both tool projects into `artifacts/release/<version>/`. Without `--verify-tag` it packs without the tag check (useful for a release dry run).
+   This reads `<Version>` from `Directory.Build.props`, confirms the matching `v<version>` tag is at `HEAD`, and packs all four packages — `Vice`, `Vice.Parser`, `Vice.Cli`, and `Vice.Mux.Cli` — into `artifacts/release/<version>/`. Without `--verify-tag` it packs without the tag check (useful for a release dry run).
 5. Publish: `NUGET_API_KEY=<key> scripts/release.sh --verify-tag --push`.
 
    `--push` uploads every `.nupkg` in `artifacts/release/<version>/` to the feed in `$VICE_NUGET_FEED` (default `https://api.nuget.org/v3/index.json`) with `--skip-duplicate`, so re-running an already-published version is a no-op rather than an error.
@@ -69,4 +71,4 @@ The solution builds entirely from `ProjectReference`s, so a normal restore never
 
 ## Local install (no feed)
 
-To try the current working tree as installed tools without publishing, use `scripts/install-local.sh`, which packs both tools into `artifacts/local-nupkg/` and installs them globally through the repo-root `nuget.config` so the `Vice.Cli` and `Vice.Mux.Cli` IDs resolve only from the mapped `vice-local` source; `scripts/uninstall-local.sh` removes them and clears the local cache. See [scripts/README.md](../scripts/README.md).
+To try the current working tree as installed tools without publishing, use `scripts/install-local.sh`, which packs the framework libraries (`Vice`, `Vice.Parser`) and both tools (`Vice.Cli`, `Vice.Mux.Cli`) into `artifacts/local-nupkg/` and installs the tools globally through the repo-root `nuget.config` so the `Vice*` IDs resolve only from the mapped `vice-local` source; `scripts/uninstall-local.sh` removes them and clears the local cache. See [scripts/README.md](../scripts/README.md).

@@ -1,6 +1,6 @@
-using Vice.Logging;
 using Vice.Display;
 using Vice.Display.Rendering;
+using Vice.Logging;
 using Vice.Options;
 using Vice.Parser;
 using Vice.Session;
@@ -9,11 +9,26 @@ namespace Vice.Execution;
 
 public sealed class CommandContext : ICommandContext
 {
+    private static readonly AsyncLocal<string?> AmbientInvocationId = new();
+
+    public static string? CurrentInvocationId => AmbientInvocationId.Value;
+
+    public static string MintInvocationId() => Guid.NewGuid().ToString("N").Substring(0, 12);
+
+    public static string BeginInvocationScope()
+    {
+        var id = MintInvocationId();
+        AmbientInvocationId.Value = id;
+        return id;
+    }
+
     private readonly IReadOnlyDictionary<string, string> _targetValues;
     private readonly IReadOnlyDictionary<string, string?> _globalOptions;
     private readonly IReadOnlyList<ResolvedCommand> _resolvedNodes;
 
     public IReadOnlyList<ResolvedCommand> ResolvedNodes => _resolvedNodes;
+
+    public string InvocationId { get; }
 
     public IConsoleWriter Console { get; }
     public RenderContext Render { get; }
@@ -48,6 +63,8 @@ public sealed class CommandContext : ICommandContext
         _targetValues = targetValues;
         _globalOptions = globalOptions;
         _resolvedNodes = resolvedNodes ?? Array.Empty<ResolvedCommand>();
+        InvocationId = AmbientInvocationId.Value ?? MintInvocationId();
+        AmbientInvocationId.Value = InvocationId;
         OutputFormat = OutputFormatKindParser.Parse(
             globalOptions.TryGetValue(new FormatOption().Name, out var rawFormat) ? rawFormat : null);
         Console = console;
@@ -104,12 +121,34 @@ public sealed class CommandContext : ICommandContext
         var values = new List<string>();
         foreach (var node in _resolvedNodes)
         {
-            if (node.TargetValues.TryGetValue(name, out var v))
+            if (!node.TargetValues.TryGetValue(name, out var v))
+            {
+                continue;
+            }
+
+            if (IsVariadicTarget(node, name))
+            {
+                values.AddRange(v.Split(','));
+            }
+            else
             {
                 values.Add(v);
             }
         }
         return values;
+    }
+
+    private static bool IsVariadicTarget(ResolvedCommand node, string name)
+    {
+        foreach (var target in node.Descriptor.Targets)
+        {
+            if (string.Equals(target.Name, name, StringComparison.OrdinalIgnoreCase))
+            {
+                return target.Variadic;
+            }
+        }
+
+        return false;
     }
 
     public string? GetGlobalOption(string name) =>

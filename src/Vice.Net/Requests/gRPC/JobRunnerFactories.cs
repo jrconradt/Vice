@@ -1,7 +1,7 @@
 using Vice.Composition;
 using Vice.Jobs;
 
-namespace Vice.Network.gRPC;
+namespace Vice.Net.Requests.Grpc;
 
 public static class JobFactory
 {

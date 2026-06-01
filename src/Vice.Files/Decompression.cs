@@ -94,21 +94,48 @@ public static class Decompression
 
         public override int Read(byte[] buffer, int offset, int count)
         {
-            var n = _inner.Read(buffer, offset, count);
+            int n;
+            try
+            {
+                n = _inner.Read(buffer, offset, count);
+            }
+            catch (InvalidOperationException ex)
+            {
+                throw new InvalidDataException("Compressed stream contained invalid data.", ex);
+            }
+
             Account(n);
             return n;
         }
 
         public override int Read(Span<byte> buffer)
         {
-            var n = _inner.Read(buffer);
+            int n;
+            try
+            {
+                n = _inner.Read(buffer);
+            }
+            catch (InvalidOperationException ex)
+            {
+                throw new InvalidDataException("Compressed stream contained invalid data.", ex);
+            }
+
             Account(n);
             return n;
         }
 
         public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default)
         {
-            var n = await _inner.ReadAsync(buffer, ct).ConfigureAwait(false);
+            int n;
+            try
+            {
+                n = await _inner.ReadAsync(buffer, ct).ConfigureAwait(false);
+            }
+            catch (InvalidOperationException ex)
+            {
+                throw new InvalidDataException("Compressed stream contained invalid data.", ex);
+            }
+
             Account(n);
             return n;
         }

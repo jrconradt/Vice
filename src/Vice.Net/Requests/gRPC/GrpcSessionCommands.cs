@@ -1,9 +1,9 @@
 using Vice.Composition;
 using Vice.Lexicon;
-using Vice.Network.gRPC;
+using Vice.Net.Requests.Grpc;
 using static Vice.Dsl;
 
-namespace Vice.Network.gRPC;
+namespace Vice.Net.Requests.Grpc;
 
 [ViceCommandPack]
 public static class GrpcSessionCommands

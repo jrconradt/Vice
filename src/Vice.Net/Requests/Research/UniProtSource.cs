@@ -6,8 +6,11 @@ namespace Vice.Net.Research;
 
 internal sealed class UniProtSource : IResearchSource
 {
-    private const string Base = "https://rest.uniprot.org/uniprotkb";
+    private const string DEFAULT_BASE = "https://rest.uniprot.org/uniprotkb";
+    private const string BASE_URL_ENV_VAR = "VICE_UNIPROT_BASE_URL";
     private const int MaxFetch = 500;
+
+    private static readonly string Base = ResolveBase();
 
     public string Name => "uniprot";
 
@@ -100,7 +103,20 @@ internal sealed class UniProtSource : IResearchSource
         };
 
         var uri = new Uri($"{Base}/{WebUtility.UrlEncode(id)}.{extension}");
+        Vice.Log.Emit(ViceLogLevel.Debug,
+                      $"research source {Name} resolved {id} to {uri}");
         return Task.FromResult(new DownloadTarget(uri, extension));
+    }
+
+    private static string ResolveBase()
+    {
+        var configured = Environment.GetEnvironmentVariable(BASE_URL_ENV_VAR);
+        if (!string.IsNullOrWhiteSpace(configured))
+        {
+            return configured.Trim().TrimEnd('/');
+        }
+
+        return DEFAULT_BASE;
     }
 
     private static string ProteinName(JsonElement entry)

@@ -32,20 +32,20 @@ internal sealed class CapturingConsoleWriter : IConsoleWriter
 
     public void Write(string text)
     {
-        _inner.Write(text);
         Capture(AnsiStripper.Strip(text));
+        _inner.Write(text);
     }
 
     public void WriteLine(string text)
     {
-        _inner.WriteLine(text);
         Capture(AnsiStripper.Strip(text) + Environment.NewLine);
+        _inner.WriteLine(text);
     }
 
     public void WriteLine()
     {
-        _inner.WriteLine();
         Capture(Environment.NewLine);
+        _inner.WriteLine();
     }
 
     public void WriteError(string text)

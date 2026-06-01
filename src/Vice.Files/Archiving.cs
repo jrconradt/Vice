@@ -7,19 +7,19 @@ namespace Vice.Files;
 
 public static class Archiving
 {
-    public const int MaxEntries = 10_000;
+    public const int MAX_ENTRIES = 10_000;
 
-    public const long MaxTotalExpandedBytes = 1L << 30;
+    public const long MAX_TOTAL_EXPANDED_BYTES = 1L << 30;
 
-    public const long MaxPerEntryBytes = 256L << 20;
+    public const long MAX_PER_ENTRY_BYTES = 256L << 20;
 
-    private const uint UnixSymlinkMode = 0xA000;
+    private const uint UNIX_SYMLINK_MODE = 0xA000;
 
     private static bool IsZipEntrySymlink(System.IO.Compression.ZipArchiveEntry entry)
     {
         var attr = (uint)entry.ExternalAttributes;
         var unixMode = (attr >> 16) & 0xF000;
-        return unixMode == UnixSymlinkMode;
+        return unixMode == UNIX_SYMLINK_MODE;
     }
 
     public static bool IsArchive(string path)
@@ -70,7 +70,7 @@ public static class Archiving
             {
                 await using var fs = new FileStream(srcPath, FileMode.Open, FileAccess.Read, FileShare.Read);
                 await using var gz = new GZipStream(fs, CompressionMode.Decompress);
-                await using var capped = Decompression.WithDecompressionCap(gz, MaxTotalExpandedBytes + (64L << 20));
+                await using var capped = Decompression.WithDecompressionCap(gz, MAX_TOTAL_EXPANDED_BYTES + (64L << 20));
                 await ExtractTarAsync(capped, destFullPath, destPrefix, log, ct).ConfigureAwait(false);
             }
             else if (name.EndsWith(".tar", StringComparison.Ordinal))
@@ -112,10 +112,10 @@ public static class Archiving
         await using var fs = new FileStream(srcPath, FileMode.Open, FileAccess.Read, FileShare.Read);
         using var archive = new ZipArchive(fs, ZipArchiveMode.Read);
 
-        if (archive.Entries.Count > MaxEntries)
+        if (archive.Entries.Count > MAX_ENTRIES)
         {
             throw new InvalidDataException(
-                $"Archive '{srcPath}' has {archive.Entries.Count} entries, exceeding cap {MaxEntries}.");
+                $"Archive '{srcPath}' has {archive.Entries.Count} entries, exceeding cap {MAX_ENTRIES}.");
         }
 
         var rootCanonical = CanonicalizePath(destFullPath);
@@ -130,10 +130,10 @@ public static class Archiving
             ct.ThrowIfCancellationRequested();
             count++;
 
-            if (count > MaxEntries)
+            if (count > MAX_ENTRIES)
             {
                 throw new InvalidDataException(
-                    $"Archive '{srcPath}' exceeded entry cap {MaxEntries}.");
+                    $"Archive '{srcPath}' exceeded entry cap {MAX_ENTRIES}.");
             }
 
             if (IsZipEntrySymlink(entry))
@@ -142,10 +142,10 @@ public static class Archiving
                     $"zip entry '{entry.FullName}' is a symlink; refused.");
             }
 
-            if (entry.Length > MaxPerEntryBytes)
+            if (entry.Length > MAX_PER_ENTRY_BYTES)
             {
                 throw new InvalidDataException(
-                    $"zip entry '{entry.FullName}' size {entry.Length} exceeds per-entry cap {MaxPerEntryBytes}.");
+                    $"zip entry '{entry.FullName}' size {entry.Length} exceeds per-entry cap {MAX_PER_ENTRY_BYTES}.");
             }
 
             var targetPath = Path.GetFullPath(Path.Combine(destFullPath, entry.FullName));
@@ -202,17 +202,17 @@ public static class Archiving
             ct.ThrowIfCancellationRequested();
             count++;
 
-            if (count > MaxEntries)
+            if (count > MAX_ENTRIES)
             {
                 throw new InvalidDataException(
-                    $"Tar archive exceeded entry cap {MaxEntries}.");
+                    $"Tar archive exceeded entry cap {MAX_ENTRIES}.");
             }
 
             var entrySize = entry.Length;
-            if (entrySize > MaxPerEntryBytes)
+            if (entrySize > MAX_PER_ENTRY_BYTES)
             {
                 throw new InvalidDataException(
-                    $"tar entry '{entry.Name}' size {entrySize} exceeds per-entry cap {MaxPerEntryBytes}.");
+                    $"tar entry '{entry.Name}' size {entrySize} exceeds per-entry cap {MAX_PER_ENTRY_BYTES}.");
             }
 
             var entryName = entry.Name.Replace('/', Path.DirectorySeparatorChar);
@@ -314,8 +314,8 @@ public static class Archiving
         return await CopyCappedAsync(
             data,
             dest,
-            MaxPerEntryBytes,
-            MaxTotalExpandedBytes - totalSoFar,
+            MAX_PER_ENTRY_BYTES,
+            MAX_TOTAL_EXPANDED_BYTES - totalSoFar,
             entryName,
             ct)
             .ConfigureAwait(false);

@@ -4,8 +4,28 @@ namespace Vice.Display;
 
 internal sealed class BufferingConsoleWriter : IConsoleWriter, IAsyncDisposable
 {
+    private enum BufferedOp
+    {
+        Write,
+        WriteLine,
+        WriteLineEmpty,
+        WriteError,
+    }
+
+    private readonly struct BufferedWrite
+    {
+        public BufferedWrite(BufferedOp op, string? text)
+        {
+            Op = op;
+            Text = text;
+        }
+
+        public BufferedOp Op { get; }
+        public string? Text { get; }
+    }
+
     private readonly IConsoleWriter _inner;
-    private readonly ConcurrentQueue<Action<IConsoleWriter>> _buffer = new();
+    private readonly ConcurrentQueue<BufferedWrite> _buffer = new();
 
     public BufferingConsoleWriter(IConsoleWriter inner)
     {
@@ -14,29 +34,51 @@ internal sealed class BufferingConsoleWriter : IConsoleWriter, IAsyncDisposable
 
     public void Write(string text)
     {
-        _buffer.Enqueue(w => w.Write(text));
+        _buffer.Enqueue(new BufferedWrite(BufferedOp.Write, text));
     }
 
     public void WriteLine(string text)
     {
-        _buffer.Enqueue(w => w.WriteLine(text));
+        _buffer.Enqueue(new BufferedWrite(BufferedOp.WriteLine, text));
     }
 
     public void WriteLine()
     {
-        _buffer.Enqueue(w => w.WriteLine());
+        _buffer.Enqueue(new BufferedWrite(BufferedOp.WriteLineEmpty, null));
     }
 
     public void WriteError(string text)
     {
-        _buffer.Enqueue(w => w.WriteError(text));
+        _buffer.Enqueue(new BufferedWrite(BufferedOp.WriteError, text));
     }
 
     public void Flush()
     {
-        while (_buffer.TryDequeue(out var action))
+        while (_buffer.TryDequeue(out var write))
         {
-            action(_inner);
+            switch (write.Op)
+            {
+                case BufferedOp.Write:
+                    {
+                        _inner.Write(write.Text!);
+                        break;
+                    }
+                case BufferedOp.WriteLine:
+                    {
+                        _inner.WriteLine(write.Text!);
+                        break;
+                    }
+                case BufferedOp.WriteLineEmpty:
+                    {
+                        _inner.WriteLine();
+                        break;
+                    }
+                case BufferedOp.WriteError:
+                    {
+                        _inner.WriteError(write.Text!);
+                        break;
+                    }
+            }
         }
     }
 

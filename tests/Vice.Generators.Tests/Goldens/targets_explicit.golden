@@ -1,0 +1,16 @@
+#nullable enable
+
+namespace MyApp;
+
+public static class Handle_9773ce53_Targets
+{
+    public static TargetSet Of(global::Vice.Execution.CommandContext ctx) => new(ctx);
+
+    public readonly struct TargetSet
+    {
+        private readonly global::Vice.Execution.CommandContext _ctx;
+        public TargetSet(global::Vice.Execution.CommandContext ctx) { _ctx = ctx; }
+        public string Alpha => _ctx["alpha"] ?? throw new global::System.InvalidOperationException("Target 'alpha' not bound for Handle.");
+        public string Beta => _ctx["beta"] ?? throw new global::System.InvalidOperationException("Target 'beta' not bound for Handle.");
+    }
+}

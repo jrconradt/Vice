@@ -127,15 +127,9 @@ public class ArchiveSymlinkHardeningTests
         }
     }
 
-    [Fact]
+    [UnixOnlyFact]
     public async Task ExtractZip_SymlinkedDestSubdir_Rejected()
     {
-        if (!OperatingSystem.IsLinux()
-            && !OperatingSystem.IsMacOS())
-        {
-            return;
-        }
-
         var scratch = NewScratchDir("zipslip-symlink");
         try
         {
@@ -181,15 +175,9 @@ public class ArchiveSymlinkHardeningTests
         }
     }
 
-    [Fact]
+    [UnixOnlyFact]
     public async Task ExtractTar_SymlinkedDestSubdir_Rejected()
     {
-        if (!OperatingSystem.IsLinux()
-            && !OperatingSystem.IsMacOS())
-        {
-            return;
-        }
-
         var scratch = NewScratchDir("tar-symlink");
         try
         {

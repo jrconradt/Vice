@@ -10,66 +10,45 @@ internal sealed class CommandRegistry : ICommandRegistry
 {
     private const int DefaultChannelCapacity = 100;
 
-    private readonly object _gate = new();
-    private IReadOnlyList<CommandRegistration> _registrations = Array.Empty<CommandRegistration>();
-    private IReadOnlyList<CommandRegistration>? _userRegistrationsCache;
-    private IReadOnlyList<CommandRegistration>? _helpVisibleCache;
-    private IReadOnlyList<IChainDescriptor>? _descriptorsCache;
-    private int _collisionsReported;
-
-    public IReadOnlyList<CommandRegistration> Registrations => Volatile.Read(ref _registrations);
-
-    public IReadOnlyList<CommandRegistration> UserRegistrations
+    private sealed class Snapshot
     {
-        get
+        public Snapshot(IReadOnlyList<CommandRegistration> registrations)
         {
-            var cached = _userRegistrationsCache;
-            if (cached is not null)
-            {
-                return cached;
-            }
-
-            var built = Volatile.Read(ref _registrations).Where(r => !r.IsBuiltin).ToList();
-            Interlocked.CompareExchange(ref _userRegistrationsCache, built, null);
-            return _userRegistrationsCache!;
+            Registrations = registrations;
+            UserRegistrations = registrations.Where(r => !r.IsBuiltin).ToList();
+            HelpVisibleRegistrations = registrations.Where(r => r.ShowInHelp).ToList();
+            Descriptors = registrations.Select(r => (IChainDescriptor)r.Chain).ToList();
         }
+
+        public IReadOnlyList<CommandRegistration> Registrations { get; }
+        public IReadOnlyList<CommandRegistration> UserRegistrations { get; }
+        public IReadOnlyList<CommandRegistration> HelpVisibleRegistrations { get; }
+        public IReadOnlyList<IChainDescriptor> Descriptors { get; }
+        public int CollisionsReported;
     }
 
-    public IReadOnlyList<CommandRegistration> HelpVisibleRegistrations
-    {
-        get
-        {
-            var cached = _helpVisibleCache;
-            if (cached is not null)
-            {
-                return cached;
-            }
+    private Snapshot _snapshot = new(Array.Empty<CommandRegistration>());
 
-            var built = Volatile.Read(ref _registrations).Where(r => r.ShowInHelp).ToList();
-            Interlocked.CompareExchange(ref _helpVisibleCache, built, null);
-            return _helpVisibleCache!;
-        }
-    }
+    public IReadOnlyList<CommandRegistration> Registrations => Volatile.Read(ref _snapshot).Registrations;
+
+    public IReadOnlyList<CommandRegistration> UserRegistrations => Volatile.Read(ref _snapshot).UserRegistrations;
+
+    public IReadOnlyList<CommandRegistration> HelpVisibleRegistrations => Volatile.Read(ref _snapshot).HelpVisibleRegistrations;
 
     private void Append(CommandRegistration registration)
     {
-        lock (_gate)
+        Snapshot current;
+        Snapshot next;
+        do
         {
-            var next = new List<CommandRegistration>(_registrations)
+            current = Volatile.Read(ref _snapshot);
+            var registrations = new List<CommandRegistration>(current.Registrations)
             {
                 registration,
             };
-            Volatile.Write(ref _registrations, next);
-            InvalidateCaches();
+            next = new Snapshot(registrations);
         }
-    }
-
-    private void InvalidateCaches()
-    {
-        _userRegistrationsCache = null;
-        _helpVisibleCache = null;
-        _descriptorsCache = null;
-        Interlocked.Exchange(ref _collisionsReported, 0);
+        while (!ReferenceEquals(Interlocked.CompareExchange(ref _snapshot, next, current), current));
     }
 
     public void Register(
@@ -257,8 +236,10 @@ internal sealed class CommandRegistry : ICommandRegistry
             var channel = new StreamChannel<T>(capacity);
             await using (channel)
             {
-                var producerCtx = new StreamingCommandContext<T>(ctx, channel);
-                var consumerCtx = new ConsumingCommandContext<T>(ctx, channel);
+                var producerBuffer = new Vice.Display.BufferingConsoleWriter(ctx.Console);
+                var consumerBuffer = new Vice.Display.BufferingConsoleWriter(ctx.Console);
+                var producerCtx = new StreamingCommandContext<T>(ctx, channel, producerBuffer);
+                var consumerCtx = new ConsumingCommandContext<T>(ctx, channel, consumerBuffer);
 
                 var producerTask = Task.Run(async () =>
                 {
@@ -297,37 +278,24 @@ internal sealed class CommandRegistry : ICommandRegistry
                     consumerEx = ex;
                 }
 
-                if (producerEx is not null && consumerEx is not null)
+                producerBuffer.Flush();
+                consumerBuffer.Flush();
+
+                var primary = StagePairReconciler.ResolvePrimary(producerEx, consumerEx);
+                if (primary is not null)
                 {
-                    Vice.Log.Emit(ViceLogLevel.Warn, "secondary stage exception (consumer)", consumerEx);
-                    throw producerEx;
-                }
-                if (producerEx is not null)
-                {
-                    throw producerEx;
+                    throw primary;
                 }
 
-                if (consumerEx is not null)
-                {
-                    throw consumerEx;
-                }
-
-                return producerExit != 0 ? producerExit : consumerExit;
+                return StagePairReconciler.ResolveExit(producerExit, consumerExit);
             }
         };
     }
 
     public IReadOnlyList<IChainDescriptor> GetDescriptors()
     {
-        var cached = _descriptorsCache;
-        if (cached is not null)
-        {
-            return cached;
-        }
-
-        var built = Volatile.Read(ref _registrations).Select(r => (IChainDescriptor)r.Chain).ToList();
-        Interlocked.CompareExchange(ref _descriptorsCache, built, null);
-        if (Interlocked.Exchange(ref _collisionsReported, 1) == 0)
+        var snapshot = Volatile.Read(ref _snapshot);
+        if (Interlocked.Exchange(ref snapshot.CollisionsReported, 1) == 0)
         {
             var collisions = ValidateCollisions();
             if (collisions.Count > 0)
@@ -338,12 +306,12 @@ internal sealed class CommandRegistry : ICommandRegistry
                 }
             }
         }
-        return _descriptorsCache!;
+        return snapshot.Descriptors;
     }
 
     public CommandRegistration? FindByVerb(string verb)
     {
-        return Volatile.Read(ref _registrations).FirstOrDefault(r =>
+        return Volatile.Read(ref _snapshot).Registrations.FirstOrDefault(r =>
         {
             if (r.IsBuiltin)
             {
@@ -369,9 +337,31 @@ internal sealed class CommandRegistry : ICommandRegistry
     }
 
     public IReadOnlyList<CommandRegistration> FindContaining(string token)
-        => Volatile.Read(ref _registrations)
+        => Volatile.Read(ref _snapshot).Registrations
             .Where(r => !r.IsBuiltin && ChainContains(r.Chain, token))
             .ToList();
+
+    public bool HasLeadingVerb(string verb)
+    {
+        foreach (var r in Volatile.Read(ref _snapshot).Registrations)
+        {
+            var chain = (IChainDescriptor)r.Chain;
+            if (string.Equals(chain.Name, verb, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            foreach (var synonym in chain.Synonyms)
+            {
+                if (string.Equals(synonym, verb, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
 
     private static bool ChainContains(Vice.Nodes.ChainNode? node, string token)
     {
@@ -407,7 +397,7 @@ internal sealed class CommandRegistry : ICommandRegistry
 
     public IReadOnlyList<string> ValidateCollisions()
     {
-        var registrations = Volatile.Read(ref _registrations);
+        var registrations = Volatile.Read(ref _snapshot).Registrations;
         var bySignature = new Dictionary<string, List<int>>(StringComparer.Ordinal);
         for (var i = 0; i < registrations.Count; i++)
         {

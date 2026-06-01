@@ -13,6 +13,18 @@ public static class Lexer
                 continue;
             }
 
+            if (arg == "--")
+            {
+                for (int j = i + 1; j < args.Length; j++)
+                {
+                    if (!string.IsNullOrEmpty(args[j]))
+                    {
+                        tokens.Add(new Token(TokenKind.Word, args[j], j));
+                    }
+                }
+                break;
+            }
+
             if (arg.StartsWith("--", StringComparison.Ordinal))
             {
                 EmitOption(tokens, arg[2..], i);

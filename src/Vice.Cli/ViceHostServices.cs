@@ -1,6 +1,6 @@
 using Vice.Build.Dotnet;
 using Vice.Composition;
-using Vice.Network.gRPC;
+using Vice.Net.Requests.Grpc;
 
 namespace Vice.Cli;
 

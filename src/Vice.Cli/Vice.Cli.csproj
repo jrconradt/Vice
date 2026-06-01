@@ -21,4 +21,14 @@
                       OutputItemType="Analyzer"
                       ReferenceOutputAssembly="false" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include="$(MSBuildThisFileDirectory)../../THIRD_PARTY_NOTICE"
+          Pack="true"
+          PackagePath="\"
+          Visible="false" />
+    <None Include="$(MSBuildThisFileDirectory)../../LICENSE"
+          Pack="true"
+          PackagePath="\"
+          Visible="false" />
+  </ItemGroup>
 </Project>

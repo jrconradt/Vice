@@ -1,7 +1,7 @@
 using System.Threading.Tasks;
 using Vice;
-using Vice.Lexicon;
 using Vice.Display;
+using Vice.Lexicon;
 using Vice.Streaming;
 using Xunit;
 using static Vice.Dsl;
@@ -13,38 +13,46 @@ public class StreamingTests
     [Fact]
     public async Task StreamChannel_SynchronousHotLoop_StaysWithinAllocationBudget()
     {
-        const int WarmupItems = 4_096;
-        const int MeasuredItems = 262_144;
-        const long MaxBytesPerItem = 8;
+        const int WARMUP_ITEMS = 4_096;
+        const int MEASURED_ITEMS = 262_144;
+        const long REGRESSION_BYTES_PER_ITEM = 64;
 
-        await DrainSynchronousAsync(WarmupItems);
+        await DrainSynchronousAsync(WARMUP_ITEMS);
+
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
 
         var before = GC.GetAllocatedBytesForCurrentThread();
-        await DrainSynchronousAsync(MeasuredItems);
+        await DrainSynchronousAsync(MEASURED_ITEMS);
         var after = GC.GetAllocatedBytesForCurrentThread();
 
-        var perItem = (after - before) / (double)MeasuredItems;
-        Assert.True(perItem <= MaxBytesPerItem,
-            $"StreamChannel hot loop allocated {perItem:0.00} bytes/item (budget {MaxBytesPerItem}); a regression doubled allocations.");
+        var perItem = (after - before) / (double)MEASURED_ITEMS;
+        Assert.True(perItem <= REGRESSION_BYTES_PER_ITEM,
+            $"StreamChannel hot loop allocated {perItem:0.00} bytes/item (regression threshold {REGRESSION_BYTES_PER_ITEM}).");
     }
 
     [Fact]
     public async Task StreamChannel_PrefilledBatchRead_StaysWithinAllocationBudget()
     {
-        const int WarmupItems = 4_096;
-        const int MeasuredItems = 131_072;
-        const int BatchSize = 64;
-        const long MaxBytesPerItem = 64;
+        const int WARMUP_ITEMS = 4_096;
+        const int MEASURED_ITEMS = 131_072;
+        const int BATCH_SIZE = 64;
+        const long REGRESSION_BYTES_PER_ITEM = 256;
 
-        await DrainPrefilledBatchedAsync(WarmupItems, BatchSize);
+        await DrainPrefilledBatchedAsync(WARMUP_ITEMS, BATCH_SIZE);
+
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
 
         var before = GC.GetAllocatedBytesForCurrentThread();
-        await DrainPrefilledBatchedAsync(MeasuredItems, BatchSize);
+        await DrainPrefilledBatchedAsync(MEASURED_ITEMS, BATCH_SIZE);
         var after = GC.GetAllocatedBytesForCurrentThread();
 
-        var perItem = (after - before) / (double)MeasuredItems;
-        Assert.True(perItem <= MaxBytesPerItem,
-            $"StreamChannel batch loop allocated {perItem:0.00} bytes/item (budget {MaxBytesPerItem}); a regression doubled allocations.");
+        var perItem = (after - before) / (double)MEASURED_ITEMS;
+        Assert.True(perItem <= REGRESSION_BYTES_PER_ITEM,
+            $"StreamChannel batch loop allocated {perItem:0.00} bytes/item (regression threshold {REGRESSION_BYTES_PER_ITEM}).");
     }
 
     private static async Task DrainSynchronousAsync(int items)

@@ -6,7 +6,7 @@ Research-source verbs route through `PoliteHandler`, which:
 
 - Forces a 1 s minimum gap between requests to the same hostname.
 - Retries on `429 Too Many Requests` and `503 Service Unavailable` up to 3 times.
-- Waits the upstream `Retry-After` if it's present, otherwise exponential backoff (2 s, 4 s, 8 s).
+- Waits the upstream `Retry-After` if it's present, otherwise a full-jitter backoff: a random delay in `[0, min(120, 2^(attempt+1)))` seconds, capped at 2 minutes.
 
 There is **no user-visible signal** when this throttle engages. A `search` or `archive` against a saturated source can appear to hang for tens of seconds while the handler waits between retries. Set `VICE_LOG_LEVEL=debug` to see the underlying timing; otherwise the only sign is a long pause before the response.
 
@@ -35,7 +35,7 @@ In session mode, an `OperationCanceledException` raised during a REPL command is
 |---|---|---|
 | Triggered by | `vice` with no args | `vice <args>` |
 | Job runners | Active. Long-running operations (downloads, server-streaming gRPC calls) are submitted as background jobs and reported via `jobs`. | Not started. Operations run synchronously to completion. |
-| `jobs` / `pause` / `resume` / `cancel` / `history` / `clear` / `set` | Built-in, handled by the session loop. | Not available. |
+| `jobs` / `pause` / `resume` / `cancel` / `history` / `clear` | Built-in, handled by the session loop. | Not available. |
 | Daemon detach | If you exit the REPL while jobs are active, the process detaches and the jobs continue in a background daemon. Reconnect by running `vice` again. You can also start a daemon explicitly with `vice daemon` or `vice --daemon <command>` (useful under systemd/supervisord), and inspect a running daemon with `vice status`. | `vice daemon`, `vice --daemon`, and `vice status` all apply. |
 
 A side-effect to be aware of: a `download` issued from a one-shot invocation runs to completion in-line and blocks the caller; the same command in session mode returns immediately with `Queued download as job #N`.
@@ -50,4 +50,4 @@ A side-effect to be aware of: a `download` issued from a one-shot invocation run
 
 ## Logging output is empty
 
-The default log level is `warn`. `Info` and `debug` lines are filtered out. To see the structured `(cached)` markers, "build queue starting" lines, or retry warnings, set `VICE_LOG_LEVEL=debug` (or `info` for less noise). Logs go to stderr, never stdout.
+The default log level is `warn`. `Info` and `debug` lines are filtered out. To see the structured "build queue starting" lines or retry warnings, set `VICE_LOG_LEVEL=debug` (or `info` for less noise). Logs go to stderr, never stdout.

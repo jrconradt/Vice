@@ -12,10 +12,6 @@
   <ItemGroup>
     <InternalsVisibleTo Include="Vice.Net" />
     <InternalsVisibleTo Include="Vice.Files" />
-    <InternalsVisibleTo Include="Vice.Build" />
-    <InternalsVisibleTo Include="Vice.Mux" />
-    <InternalsVisibleTo Include="Vice.Cli" />
-    <InternalsVisibleTo Include="Vice.Mux.Cli" />
     <InternalsVisibleTo Include="Vice.Benchmarks" />
     <InternalsVisibleTo Include="Vice.Tests" />
     <InternalsVisibleTo Include="Vice.Net.Tests" />

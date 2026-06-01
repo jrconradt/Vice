@@ -141,7 +141,7 @@ public class ArchivingTests
         var scratch = MakeScratchDir();
         try
         {
-            var oversized = Archiving.MaxPerEntryBytes + 1;
+            var oversized = Archiving.MAX_PER_ENTRY_BYTES + 1;
 
             var zipPath = Path.Combine(scratch, "big.zip");
             using (var fs = File.Create(zipPath))
@@ -178,8 +178,8 @@ public class ArchivingTests
         var scratch = MakeScratchDir();
         try
         {
-            var perEntry = Archiving.MaxPerEntryBytes;
-            var entriesNeeded = (int)(Archiving.MaxTotalExpandedBytes / perEntry) + 2;
+            var perEntry = Archiving.MAX_PER_ENTRY_BYTES;
+            var entriesNeeded = (int)(Archiving.MAX_TOTAL_EXPANDED_BYTES / perEntry) + 2;
 
             var zipPath = Path.Combine(scratch, "many.zip");
             using (var fs = File.Create(zipPath))
@@ -223,7 +223,7 @@ public class ArchivingTests
             using (var fs = File.Create(zipPath))
             using (var archive = new ZipArchive(fs, ZipArchiveMode.Create, leaveOpen: false))
             {
-                for (var i = 0; i <= Archiving.MaxEntries; i++)
+                for (var i = 0; i <= Archiving.MAX_ENTRIES; i++)
                 {
                     archive.CreateEntry($"f{i}.txt", CompressionLevel.NoCompression);
                 }
@@ -242,14 +242,9 @@ public class ArchivingTests
         }
     }
 
-    [Fact]
+    [UnixOnlyFact]
     public async Task ExtractAsync_ZipSymlinkEntry_Refused_Linux()
     {
-        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
-        {
-            return;
-        }
-
         var scratch = MakeScratchDir();
         try
         {
@@ -289,14 +284,9 @@ public class ArchivingTests
         }
     }
 
-    [Fact]
+    [UnixOnlyFact]
     public async Task ExtractAsync_DestDirIsSymlink_StillContainsEntries()
     {
-        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
-        {
-            return;
-        }
-
         var scratch = MakeScratchDir();
         try
         {

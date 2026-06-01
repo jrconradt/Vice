@@ -60,8 +60,8 @@ public class ViceCompositionGeneratorTests
         var result = GeneratorHarness.Run(SOURCE);
 
         Assert.Empty(result.GeneratorDiagnostics.Where(d => d.Severity == DiagnosticSeverity.Error));
-        var emitted = result.CombinedSource;
-        Assert.Contains("MyApp.MyPack.Register(app);", emitted);
+        Assert.Single(result.GeneratedSources);
+        GoldenFile.Verify("composition_pack_registration.golden", result.GeneratedSources[0]);
     }
 
     [Fact]
@@ -179,47 +179,10 @@ public class ViceCompositionGeneratorTests
             }
             """;
 
-        const string EXPECTED = "#nullable enable\n"
-            + "using System;\n"
-            + "using Vice;\n"
-            + "\n"
-            + "namespace MyApp;\n"
-            + "\n"
-            + "internal static class ViceComposition\n"
-            + "{\n"
-            + "    internal static global::Vice.ViceAppBuilder ComposeFromAttributes(this global::Vice.ViceAppBuilder builder, global::MyApp.HostServices host)\n"
-            + "    {\n"
-            + "        if (builder is null)\n"
-            + "        {\n"
-            + "            throw new global::System.ArgumentNullException(nameof(builder));\n"
-            + "        }\n"
-            + "        if (host is null)\n"
-            + "        {\n"
-            + "            throw new global::System.ArgumentNullException(nameof(host));\n"
-            + "        }\n"
-            + "        builder.WithSessionService<global::MyApp.IMyService>(global::MyApp.Factories.BuildSvc(host.Svc));\n"
-            + "        return builder;\n"
-            + "    }\n"
-            + "\n"
-            + "    internal static global::Vice.IViceApp RegisterDiscoveredPacks(this global::Vice.IViceApp app, global::MyApp.HostServices host)\n"
-            + "    {\n"
-            + "        if (app is null)\n"
-            + "        {\n"
-            + "            throw new global::System.ArgumentNullException(nameof(app));\n"
-            + "        }\n"
-            + "        if (host is null)\n"
-            + "        {\n"
-            + "            throw new global::System.ArgumentNullException(nameof(host));\n"
-            + "        }\n"
-            + "        return app;\n"
-            + "    }\n"
-            + "}\n";
-
         var result = GeneratorHarness.Run(SOURCE);
 
         Assert.Single(result.GeneratedSources);
-        var emitted = result.GeneratedSources[0].Replace("\r\n", "\n");
-        Assert.Equal(EXPECTED, emitted);
+        GoldenFile.Verify("composition_session_service.golden", result.GeneratedSources[0]);
     }
 
     [Fact]
@@ -284,11 +247,8 @@ public class ViceCompositionGeneratorTests
 
         Assert.Empty(result.GeneratorDiagnostics.Where(d => d.Id == "VICE010"));
         Assert.Empty(result.GeneratorDiagnostics.Where(d => d.Id == "VICE011"));
-        var emitted = result.CombinedSource;
-        Assert.Contains("static class Handle_", emitted);
-        Assert.Contains("_Targets", emitted);
-        Assert.Contains("TargetSet Of(", emitted);
-        Assert.Contains("public string Foo => _ctx[\"foo\"]", emitted);
+        Assert.Single(result.GeneratedSources);
+        GoldenFile.Verify("targets_chain_scan.golden", result.GeneratedSources[0]);
     }
 
     [Fact]
@@ -392,8 +352,7 @@ public class ViceCompositionGeneratorTests
 
         Assert.Empty(result.GeneratorDiagnostics.Where(d => d.Id == "VICE010"));
         Assert.Empty(result.GeneratorDiagnostics.Where(d => d.Id == "VICE011"));
-        var emitted = result.CombinedSource;
-        Assert.Contains("public string Alpha => _ctx[\"alpha\"]", emitted);
-        Assert.Contains("public string Beta => _ctx[\"beta\"]", emitted);
+        Assert.Single(result.GeneratedSources);
+        GoldenFile.Verify("targets_explicit.golden", result.GeneratedSources[0]);
     }
 }

@@ -12,16 +12,16 @@ namespace Vice.Files;
 [ViceCommandPack]
 public static class FileIoCommands
 {
-    private const int DefaultChunkSize = 81920;
-    private const int MaxChunkSize = 16 * 1024 * 1024;
+    private const int DEFAULT_CHUNK_SIZE = 81920;
+    private const int MAX_CHUNK_SIZE = 16 * 1024 * 1024;
 
     public static void Register(IViceApp app)
     {
         app.RegisterStreaming<byte[]>(
             Verbs.Read() * Targets.Path,
             "Read a file; standalone decodes UTF-8 to stdout, piped emits raw byte chunks",
-            ReadAsStream,
-            classicFallback: ReadToConsole);
+            ReadAsStreamAsync,
+            classicFallback: ReadToConsoleAsync);
 
         app.RegisterStreamConsumer<byte[]>(
             Verbs.Write() > Connectors.To() > Nouns.File() * Targets.Path,
@@ -61,16 +61,16 @@ public static class FileIoCommands
 
     private static int ChunkSizeOf(ICommandContext ctx)
     {
-        var chunkSize = ctx.GetGlobalOption("chunk-size").AsPositiveInt() ?? DefaultChunkSize;
-        if (chunkSize > MaxChunkSize)
+        var chunkSize = ctx.GetGlobalOption("chunk-size").AsPositiveInt() ?? DEFAULT_CHUNK_SIZE;
+        if (chunkSize > MAX_CHUNK_SIZE)
         {
-            throw new BadArgument($"chunk-size {chunkSize} exceeds the maximum of {MaxChunkSize} bytes.");
+            throw new BadArgument($"chunk-size {chunkSize} exceeds the maximum of {MAX_CHUNK_SIZE} bytes.");
         }
 
         return chunkSize;
     }
 
-    private static async Task<int> ReadAsStream(
+    private static async Task<int> ReadAsStreamAsync(
         IStreamingCommandContext<byte[]> ctx,
         CancellationToken ct)
     {
@@ -99,7 +99,7 @@ public static class FileIoCommands
         }
     }
 
-    private static async Task<int> ReadToConsole(CommandContext ctx, CancellationToken ct)
+    private static async Task<int> ReadToConsoleAsync(CommandContext ctx, CancellationToken ct)
     {
         var resolved = Path.GetFullPath(ctx.Require("path"));
         var chunkSize = ChunkSizeOf(ctx);
@@ -153,10 +153,10 @@ public static class FileIoCommands
         FileShare share,
         CancellationToken ct)
     {
-        var resolved = Path.GetFullPath(ctx.Require("path"));
-        if (!SafeWriteRoots.IsAllowed(resolved, out var reason))
+        var requested = Path.GetFullPath(ctx.Require("path"));
+        if (!SafeWriteRoots.IsAllowed(requested, out var resolved, out var reason))
         {
-            throw new BadArgument($"Destination '{resolved}' is outside allowed write roots: {reason}.");
+            throw new BadArgument($"Destination '{requested}' is outside allowed write roots: {reason}.");
         }
 
         var dir = Path.GetDirectoryName(resolved);
@@ -172,7 +172,7 @@ public static class FileIoCommands
                 mode,
                 FileAccess.Write,
                 share,
-                bufferSize: DefaultChunkSize,
+                bufferSize: DEFAULT_CHUNK_SIZE,
                 useAsync: true);
             await StreamLoop.RunAsync(
                 ctx.Input,
@@ -186,6 +186,12 @@ public static class FileIoCommands
         }
 
         var partial = resolved + ".partial";
+        if (!SafeWriteRoots.IsAllowed(partial, out var resolvedPartial, out var partialReason))
+        {
+            throw new BadArgument($"Temporary destination '{partial}' is outside allowed write roots: {partialReason}.");
+        }
+
+        partial = resolvedPartial;
         try
         {
             await using (var dest = new FileStream(
@@ -193,7 +199,7 @@ public static class FileIoCommands
                 FileMode.Create,
                 FileAccess.Write,
                 share,
-                bufferSize: DefaultChunkSize,
+                bufferSize: DEFAULT_CHUNK_SIZE,
                 useAsync: true))
             {
                 await StreamLoop.RunAsync(
@@ -204,32 +210,21 @@ public static class FileIoCommands
                     },
                     ct);
                 await dest.FlushAsync(ct).ConfigureAwait(false);
+                SafeFile.FlushToDisk(dest.SafeFileHandle);
             }
 
             File.Move(partial, resolved, overwrite: true);
+            if (!string.IsNullOrEmpty(dir))
+            {
+                SafeFile.FlushDirectory(dir);
+            }
+
             return ViceExitCode.SUCCESS;
         }
         catch
         {
-            TryDelete(partial);
+            SafeFile.TryDelete(partial);
             throw;
-        }
-    }
-
-    private static void TryDelete(string path)
-    {
-        try
-        {
-            if (File.Exists(path))
-            {
-                File.Delete(path);
-            }
-        }
-        catch (IOException)
-        {
-        }
-        catch (UnauthorizedAccessException)
-        {
         }
     }
 
@@ -247,8 +242,8 @@ public static class FileIoCommands
         string? resolvedDest = null;
         if (dest is not null)
         {
-            resolvedDest = Path.GetFullPath(dest);
-            if (!SafeWriteRoots.IsAllowed(resolvedDest, out var reason))
+            var requestedDest = Path.GetFullPath(dest);
+            if (!SafeWriteRoots.IsAllowed(requestedDest, out resolvedDest, out var reason))
             {
                 Vice.Output.Error($"Destination '{dest}' refused: {reason}.");
                 return ViceExitCode.USAGE_ERROR;

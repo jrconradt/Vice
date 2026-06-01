@@ -83,6 +83,8 @@ internal sealed class ArxivSource : IResearchSource
                                                      CancellationToken ct)
     {
         var uri = new Uri($"https://export.arxiv.org/pdf/{WebUtility.UrlEncode(id)}");
+        Vice.Log.Emit(ViceLogLevel.Debug,
+                      $"research source {Name} resolved {id} to {uri}");
         return Task.FromResult(new DownloadTarget(uri, DefaultExtension));
     }
 

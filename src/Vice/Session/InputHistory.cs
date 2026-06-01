@@ -1,11 +1,10 @@
-using System.Collections.Immutable;
 using System.Text.RegularExpressions;
 
 namespace Vice.Session;
 
 internal sealed class InputHistory : IInputHistory
 {
-    private const int MaxEntries = 1000;
+    private const int MAX_ENTRIES = 1000;
 
     private static readonly TimeSpan RedactTimeout = TimeSpan.FromMilliseconds(100);
 
@@ -19,7 +18,21 @@ internal sealed class InputHistory : IInputHistory
         RegexOptions.IgnoreCase | RegexOptions.Compiled,
         RedactTimeout);
 
-    private ImmutableList<string> _entries = ImmutableList<string>.Empty;
+    private static readonly Regex WithDataPayload = new(
+        @"(\bwith\s+data\s+)(""[^""]*""|'[^']*'|\S+)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled,
+        RedactTimeout);
+
+    private static readonly Regex SendPayload = new(
+        @"(\b(?:tcp|udp)\s+send\s+)(""[^""]*""|'[^']*'|\S+)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled,
+        RedactTimeout);
+
+    private readonly string[] _entries = new string[MAX_ENTRIES];
+
+    private int _head;
+
+    private int _count;
 
     internal static string Redact(string command)
     {
@@ -31,7 +44,9 @@ internal sealed class InputHistory : IInputHistory
                 var sep = m.Groups[2].Value[0];
                 return sep == '=' ? $"{flag}=<redacted>" : $"{flag} <redacted>";
             });
-            return JsonCredentialField.Replace(step1, m => $"\"{m.Groups[1].Value}\":\"<redacted>\"");
+            var step2 = JsonCredentialField.Replace(step1, m => $"\"{m.Groups[1].Value}\":\"<redacted>\"");
+            var step3 = WithDataPayload.Replace(step2, m => $"{m.Groups[1].Value}<redacted>");
+            return SendPayload.Replace(step3, m => $"{m.Groups[1].Value}<redacted>");
         }
         catch (RegexMatchTimeoutException)
         {
@@ -48,44 +63,61 @@ internal sealed class InputHistory : IInputHistory
 
         command = Redact(command);
 
-        while (true)
+        if (_count > 0)
         {
-            var current = Volatile.Read(ref _entries);
-            if (current.Count > 0 && current[^1] == command)
-            {
-                return Task.CompletedTask;
-            }
-
-            var appended = current.Add(command);
-            ImmutableList<string> next;
-            if (appended.Count > MaxEntries)
-            {
-                next = appended.RemoveRange(0, appended.Count - MaxEntries);
-            }
-            else
-            {
-                next = appended;
-            }
-
-            if (Interlocked.CompareExchange(ref _entries, next, current) == current)
+            var lastIndex = (_head + _count - 1) % MAX_ENTRIES;
+            if (_entries[lastIndex] == command)
             {
                 return Task.CompletedTask;
             }
         }
+
+        if (_count < MAX_ENTRIES)
+        {
+            var tail = (_head + _count) % MAX_ENTRIES;
+            _entries[tail] = command;
+            _count++;
+        }
+        else
+        {
+            _entries[_head] = command;
+            _head = (_head + 1) % MAX_ENTRIES;
+        }
+
+        return Task.CompletedTask;
     }
 
     public IReadOnlyList<string> GetHistory()
-        => Volatile.Read(ref _entries);
+    {
+        var snapshot = new string[_count];
+        for (var i = 0; i < _count; i++)
+        {
+            snapshot[i] = _entries[(_head + i) % MAX_ENTRIES];
+        }
+
+        return snapshot;
+    }
 
     public IReadOnlyList<string> GetHistory(int count)
     {
-        var snapshot = Volatile.Read(ref _entries);
-        if (count >= snapshot.Count)
+        if (count <= 0)
         {
-            return snapshot;
+            return Array.Empty<string>();
         }
 
-        return snapshot.GetRange(snapshot.Count - count, count);
+        if (count >= _count)
+        {
+            return GetHistory();
+        }
+
+        var snapshot = new string[count];
+        var start = _count - count;
+        for (var i = 0; i < count; i++)
+        {
+            snapshot[i] = _entries[(_head + start + i) % MAX_ENTRIES];
+        }
+
+        return snapshot;
     }
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;

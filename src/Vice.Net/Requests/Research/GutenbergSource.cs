@@ -96,6 +96,8 @@ internal sealed class GutenbergSource : IResearchSource
         using var meta = await GetBookAsync(http, id, ct).ConfigureAwait(false);
         var url = SelectFormat(meta.RootElement, format)
             ?? throw new BadArgument($"Gutenberg book {id} has no downloadable '{format ?? "text"}' format.");
+        Vice.Log.Emit(ViceLogLevel.Debug,
+                      $"research source {Name} resolved {id} to {url}");
         return new DownloadTarget(new Uri(url), extension);
     }
 

@@ -1,8 +1,8 @@
 using System.Net.Security;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using Vice.Net.Requests.Grpc;
 using Vice.Net.Research;
-using Vice.Network.gRPC;
 using Xunit;
 
 namespace Vice.Net.Tests;

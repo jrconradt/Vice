@@ -114,8 +114,23 @@ internal static class BuiltinCommands
                 }
                 await using (client)
                 {
-                    var response = await client.SendAsync(new JobStatusRequest(), ct).ConfigureAwait(false);
-                    if (response is not JobStatusResponse statuses)
+                    var healthResponse = await client.SendAsync(new HealthRequest(), ct).ConfigureAwait(false);
+                    if (healthResponse is not HealthResponse health)
+                    {
+                        Vice.Output.Error("Daemon returned unexpected response.");
+                        return ViceExitCode.FAILURE;
+                    }
+
+                    var listening = health.Listening && !health.AcceptLoopCrashed;
+                    Vice.Output.Line($"{app.Name} daemon v{health.Version} — {(listening ? "healthy" : "unhealthy")}");
+                    Vice.Output.Line($"  listening: {(health.Listening ? "yes" : "no")}");
+                    Vice.Output.Line($"  accept loop: {(health.AcceptLoopCrashed ? $"crashed ({health.FaultSummary ?? "unknown fault"})" : "running")}");
+                    Vice.Output.Line($"  uptime: {health.UptimeSeconds:0.0}s");
+                    Vice.Output.Line($"  workers: {health.LiveWorkers}/{health.ConfiguredWorkers}{(health.WorkerPoolDegraded ? " (degraded)" : "")}");
+                    Vice.Output.Line($"  jobs: {health.JobCount}");
+
+                    var jobsResponse = await client.SendAsync(new JobStatusRequest(), ct).ConfigureAwait(false);
+                    if (jobsResponse is not JobStatusResponse statuses)
                     {
                         Vice.Output.Error("Daemon returned unexpected response.");
                         return ViceExitCode.FAILURE;
@@ -123,14 +138,14 @@ internal static class BuiltinCommands
                     if (statuses.Jobs.Count == 0)
                     {
                         Vice.Output.Line("No jobs.");
-                        return ViceExitCode.SUCCESS;
+                        return listening ? ViceExitCode.SUCCESS : ViceExitCode.FAILURE;
                     }
                     foreach (var job in statuses.Jobs)
                     {
                         Vice.Output.Line($"#{job.Id} [{job.Kind}] {job.Status} — {job.Label}");
                     }
 
-                    return ViceExitCode.SUCCESS;
+                    return listening ? ViceExitCode.SUCCESS : ViceExitCode.FAILURE;
                 }
             },
             isBuiltin: true);

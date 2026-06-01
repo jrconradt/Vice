@@ -1,9 +1,8 @@
 using System.Text;
 using Vice.Commands;
 using Vice.Plugins;
-using Xunit;
-
 using Vice.Tests;
+using Xunit;
 
 namespace Vice.Tests.Plugins;
 

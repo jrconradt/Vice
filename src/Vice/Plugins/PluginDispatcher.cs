@@ -71,9 +71,9 @@ internal static class PluginDispatcher
 
         if (!IsTrustedPluginFile(candidate, pluginDir, out var rejection))
         {
-            Vice.Log.Emit(
-                ViceLogLevel.Warn,
-                $"plugin rejected as untrusted: candidate='{candidate}' reason={rejection}");
+            var rejectionMessage = $"plugin rejected as untrusted: candidate='{candidate}' reason={rejection}";
+            Vice.Log.Emit(ViceLogLevel.Warn, rejectionMessage);
+            Vice.Audit.Emit(ViceLogLevel.Warn, rejectionMessage);
             return false;
         }
 
@@ -115,9 +115,9 @@ internal static class PluginDispatcher
 
         if (!IsTrustedPluginFile(candidate, pluginDir, out var rejection))
         {
-            Vice.Log.Emit(
-                ViceLogLevel.Warn,
-                $"plugin rejected as untrusted: candidate='{candidate}' reason={rejection}");
+            var rejectionMessage = $"plugin rejected as untrusted: candidate='{candidate}' reason={rejection}";
+            Vice.Log.Emit(ViceLogLevel.Warn, rejectionMessage);
+            Vice.Audit.Emit(ViceLogLevel.Warn, rejectionMessage);
             return false;
         }
 
@@ -366,9 +366,9 @@ internal static class PluginDispatcher
 
     public static async Task<int> RunAsync(string pluginPath, string[] args, CancellationToken ct)
     {
-        Vice.Log.Emit(
-            ViceLogLevel.Info,
-            $"plugin execution: path='{pluginPath}' argc={args.Length}");
+        var executionMessage = $"plugin execution: path='{pluginPath}' argc={args.Length}";
+        Vice.Log.Emit(ViceLogLevel.Info, executionMessage);
+        Vice.Audit.Emit(ViceLogLevel.Info, executionMessage);
         var psi = new ProcessStartInfo
         {
             FileName = pluginPath,
@@ -380,8 +380,16 @@ internal static class PluginDispatcher
         }
 
         using var process = new Process { StartInfo = psi };
-        if (!process.Start())
+        try
         {
+            if (!process.Start())
+            {
+                return 127;
+            }
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            Vice.Log.Emit(ViceLogLevel.Error, $"plugin failed to execute: path='{pluginPath}'", ex);
             return 127;
         }
 

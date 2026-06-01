@@ -1,7 +1,7 @@
 using Vice.Commands;
 using Vice.Completions;
-using Vice.Nodes;
 using Vice.Display;
+using Vice.Nodes;
 using Vice.Options;
 using Xunit;
 using static Vice.Dsl;

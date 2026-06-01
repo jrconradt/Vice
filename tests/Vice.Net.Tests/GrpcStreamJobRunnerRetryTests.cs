@@ -9,7 +9,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Vice.Jobs;
 using Vice.Logging;
-using Vice.Network.gRPC;
+using Vice.Net.Requests.Grpc;
 using Xunit;
 
 namespace Vice.Net.Tests;
@@ -152,6 +152,119 @@ public class GrpcStreamJobRunnerRetryTests : IAsyncLifetime, IDisposable
         Assert.Equal(2, partialLines.Length);
     }
 
+    [Fact]
+    public async Task Retry_stops_after_configured_max_attempts()
+    {
+        _config.Reset();
+        _config.MessagesToYield = 10;
+        _config.AbortOnEveryAttempt = true;
+        _config.AbortAfterMessages = 1;
+        _config.AbortStatus = StatusCode.Unavailable;
+
+        const int MAX_RETRIES = 3;
+
+        await using var conn = new GrpcConnectionManager(NullViceLogger.Instance);
+        conn.Connect(_endpoint, plaintext: true);
+
+        var runner = new GrpcStreamJobRunner(
+            conn,
+            maxRetries: MAX_RETRIES,
+            baseRetryBackoff: TimeSpan.FromMilliseconds(10),
+            maxRetryBackoff: TimeSpan.FromMilliseconds(50));
+        var dest = Path.Combine(_tempDir, "retry-max-attempts.jsonl");
+
+        var job = new JobState
+        {
+            Id = 102,
+            Kind = JobKind.GrpcStream,
+            Endpoint = _endpoint,
+            Method = "vice.test.RetryStreamer/Stream",
+            ResourceId = "{}",
+            DestinationPath = dest,
+        };
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            runner.RunAsync(job, NoopProgress(), CancellationToken.None));
+
+        Assert.Equal(MAX_RETRIES + 1, _config.Attempts);
+    }
+
+    [Fact]
+    public async Task Non_retryable_status_fails_immediately_without_retry()
+    {
+        _config.Reset();
+        _config.MessagesToYield = 10;
+        _config.AbortOnEveryAttempt = true;
+        _config.AbortAfterMessages = 0;
+        _config.AbortStatus = StatusCode.PermissionDenied;
+
+        await using var conn = new GrpcConnectionManager(NullViceLogger.Instance);
+        conn.Connect(_endpoint, plaintext: true);
+
+        var runner = new GrpcStreamJobRunner(
+            conn,
+            maxRetries: 5,
+            baseRetryBackoff: TimeSpan.FromMilliseconds(10),
+            maxRetryBackoff: TimeSpan.FromMilliseconds(50));
+        var dest = Path.Combine(_tempDir, "retry-nonretryable.jsonl");
+
+        var job = new JobState
+        {
+            Id = 103,
+            Kind = JobKind.GrpcStream,
+            Endpoint = _endpoint,
+            Method = "vice.test.RetryStreamer/Stream",
+            ResourceId = "{}",
+            DestinationPath = dest,
+        };
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            runner.RunAsync(job, NoopProgress(), CancellationToken.None));
+        Assert.Contains("PermissionDenied", ex.Message);
+
+        Assert.Equal(1, _config.Attempts);
+        Assert.False(File.Exists(dest));
+        Assert.False(File.Exists(dest + ".partial"));
+    }
+
+    [Fact]
+    public async Task Transient_deadline_exceeded_is_retried_and_recovers()
+    {
+        _config.Reset();
+        _config.MessagesToYield = 6;
+        _config.AbortOnAttempt = 1;
+        _config.AbortAfterMessages = 3;
+        _config.AbortStatus = StatusCode.DeadlineExceeded;
+
+        await using var conn = new GrpcConnectionManager(NullViceLogger.Instance);
+        conn.Connect(_endpoint, plaintext: true);
+
+        var runner = new GrpcStreamJobRunner(
+            conn,
+            maxRetries: 5,
+            baseRetryBackoff: TimeSpan.FromMilliseconds(10),
+            maxRetryBackoff: TimeSpan.FromMilliseconds(50));
+        var dest = Path.Combine(_tempDir, "retry-deadline.jsonl");
+
+        var job = new JobState
+        {
+            Id = 104,
+            Kind = JobKind.GrpcStream,
+            Endpoint = _endpoint,
+            Method = "vice.test.RetryStreamer/Stream",
+            ResourceId = "{}",
+            DestinationPath = dest,
+        };
+
+        await runner.RunAsync(job, NoopProgress(), CancellationToken.None);
+
+        Assert.Equal(2, _config.Attempts);
+        Assert.True(File.Exists(dest));
+        Assert.False(File.Exists(dest + ".partial"));
+        var lines = await File.ReadAllLinesAsync(dest);
+        Assert.Equal(6, lines.Length);
+    }
+
     internal sealed class RetryServiceConfig
     {
         public int MessagesToYield { get; set; } = 1;
@@ -160,6 +273,8 @@ public class GrpcStreamJobRunnerRetryTests : IAsyncLifetime, IDisposable
         public bool AbortOnEveryAttempt { get; set; }
         public StatusCode AbortStatus { get; set; } = StatusCode.Unavailable;
         private int _attempt;
+
+        public int Attempts => Volatile.Read(ref _attempt);
 
         public int NextAttempt() => Interlocked.Increment(ref _attempt);
 

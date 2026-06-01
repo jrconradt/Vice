@@ -1,8 +1,8 @@
 using System.Threading.Tasks;
 using Vice;
+using Vice.Display;
 using Vice.Execution;
 using Vice.Lexicon;
-using Vice.Display;
 using Xunit;
 using static Vice.Dsl;
 

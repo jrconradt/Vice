@@ -1,18 +1,29 @@
 using System.Runtime.CompilerServices;
+using Vice.Concurrency;
 using Vice.Logging;
 
 namespace Vice;
 
-internal sealed class ConsoleLogSink : ILogSink
+internal sealed class ConsoleLogSink : ILogSink, IAsyncDisposable
 {
+    private static readonly string[] LEVEL_LABELS =
+    {
+        "TRACE",
+        "DEBUG",
+        "INFO",
+        "WARN",
+        "ERROR",
+    };
+
     private readonly ViceLogLevel _minLevel;
     private readonly TextWriter _sink;
-    private readonly object _writeLock = new();
+    private readonly SerialQueue _queue;
 
     public ConsoleLogSink(ViceLogLevel minLevel, TextWriter? sink = null)
     {
         _minLevel = minLevel;
         _sink = sink ?? System.Console.Error;
+        _queue = new SerialQueue();
     }
 
     public bool IsEnabled(ViceLogLevel level) => level >= _minLevel;
@@ -24,11 +35,7 @@ internal sealed class ConsoleLogSink : ILogSink
             return;
         }
 
-        lock (_writeLock)
-        {
-            _sink.WriteLine(LogFormat.Format(error));
-            _sink.Flush();
-        }
+        Append($"{LogFormat.Format(error)}\n");
     }
 
     public void Log(
@@ -45,7 +52,7 @@ internal sealed class ConsoleLogSink : ILogSink
         }
 
         var fileName = file is null ? "?" : Path.GetFileName(file);
-        var text = $"[{level.ToString().ToUpperInvariant()}] {caller}@{fileName}:{line}: {message}\n";
+        var text = $"[{LEVEL_LABELS[(int)level]}] {caller}@{fileName}:{line}: {message}\n";
         if (exception is not null)
         {
             text += $"  {exception.GetType().Name}: {exception.Message}\n";
@@ -55,10 +62,17 @@ internal sealed class ConsoleLogSink : ILogSink
             }
         }
 
-        lock (_writeLock)
-        {
-            _sink.Write(text);
-            _sink.Flush();
-        }
+        Append(text);
     }
+
+    private void Append(string text)
+    {
+        _ = _queue.EnqueueAsync(async ct =>
+        {
+            await _sink.WriteAsync(text.AsMemory(), ct).ConfigureAwait(false);
+            await _sink.FlushAsync(ct).ConfigureAwait(false);
+        });
+    }
+
+    public ValueTask DisposeAsync() => _queue.DisposeAsync();
 }

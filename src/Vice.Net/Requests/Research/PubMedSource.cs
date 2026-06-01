@@ -9,6 +9,10 @@ internal sealed class PubMedSource : IResearchSource
 {
     private const string Base = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils";
 
+    private const string TOOL_NAME = "vice";
+
+    private const string API_KEY_ENV_VAR = "VICE_NCBI_API_KEY";
+
     public string Name => "pubmed";
 
     public IReadOnlyList<string> Aliases => new[] { "pmc" };
@@ -23,7 +27,7 @@ internal sealed class PubMedSource : IResearchSource
                                                             int offset,
                                                             CancellationToken ct)
     {
-        var searchUrl = $"{Base}/esearch.fcgi?db=pubmed&term={WebUtility.UrlEncode(query)}&retstart={offset}&retmax={limit}&retmode=json";
+        var searchUrl = $"{Base}/esearch.fcgi?db=pubmed&term={WebUtility.UrlEncode(query)}&retstart={offset}&retmax={limit}&retmode=json{Identification()}";
         var searchJson = await http.GetStringAsync(searchUrl, ct).ConfigureAwait(false);
 
         var ids = ExtractIds(searchJson);
@@ -32,7 +36,7 @@ internal sealed class PubMedSource : IResearchSource
             return Array.Empty<SearchHit>();
         }
 
-        var summaryUrl = $"{Base}/esummary.fcgi?db=pubmed&id={string.Join(",", ids)}&retmode=json";
+        var summaryUrl = $"{Base}/esummary.fcgi?db=pubmed&id={string.Join(",", ids)}&retmode=json{Identification()}";
         var summaryJson = await http.GetStringAsync(summaryUrl, ct).ConfigureAwait(false);
 
         return BuildHits(ids, summaryJson);
@@ -42,7 +46,7 @@ internal sealed class PubMedSource : IResearchSource
                                               string id,
                                               CancellationToken ct)
     {
-        var url = $"{Base}/efetch.fcgi?db=pubmed&id={WebUtility.UrlEncode(id)}&rettype=abstract&retmode=xml";
+        var url = $"{Base}/efetch.fcgi?db=pubmed&id={WebUtility.UrlEncode(id)}&rettype=abstract&retmode=xml{Identification()}";
         var xml = await http.GetStringAsync(url, ct).ConfigureAwait(false);
         var doc = XDocument.Parse(xml);
 
@@ -85,8 +89,32 @@ internal sealed class PubMedSource : IResearchSource
                                                      string? format,
                                                      CancellationToken ct)
     {
-        var uri = new Uri($"{Base}/efetch.fcgi?db=pubmed&id={WebUtility.UrlEncode(id)}&rettype=abstract&retmode=xml");
+        var uri = new Uri($"{Base}/efetch.fcgi?db=pubmed&id={WebUtility.UrlEncode(id)}&rettype=abstract&retmode=xml{Identification()}");
+        Vice.Log.Emit(ViceLogLevel.Debug,
+                      $"research source {Name} resolved {id} to {uri}");
         return Task.FromResult(new DownloadTarget(uri, DefaultExtension));
+    }
+
+    private static string Identification()
+    {
+        var parts = new List<string>
+        {
+            $"tool={WebUtility.UrlEncode(TOOL_NAME)}",
+        };
+
+        var contact = Environment.GetEnvironmentVariable(ResearchHttp.ContactEmailEnvVar);
+        if (!string.IsNullOrWhiteSpace(contact))
+        {
+            parts.Add($"email={WebUtility.UrlEncode(contact.Trim())}");
+        }
+
+        var apiKey = Environment.GetEnvironmentVariable(API_KEY_ENV_VAR);
+        if (!string.IsNullOrWhiteSpace(apiKey))
+        {
+            parts.Add($"api_key={WebUtility.UrlEncode(apiKey.Trim())}");
+        }
+
+        return $"&{string.Join("&", parts)}";
     }
 
     private static IReadOnlyList<string> ExtractIds(string json)

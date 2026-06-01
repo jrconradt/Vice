@@ -2,7 +2,7 @@ using System.Net.Http.Headers;
 using Vice;
 using Vice.Logging;
 using Vice.Net.Http;
-using Vice.Network.gRPC;
+using Vice.Net.Requests.Grpc;
 
 namespace Vice.Net.Research;
 

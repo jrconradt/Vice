@@ -10,6 +10,7 @@ namespace Vice.Ipc;
 internal sealed class PipeServer : IPipeServer
 {
     private const int MaxConcurrentClients = 64;
+    private const int MAX_CONSECUTIVE_ACCEPT_FAILURES = 10;
     private static readonly TimeSpan ClientDisposeTimeout = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan AcceptIterationBackoff = TimeSpan.FromMilliseconds(250);
 
@@ -54,6 +55,7 @@ internal sealed class PipeServer : IPipeServer
         _isListening = true;
         var readyCompleted = false;
         var everBound = false;
+        var consecutiveFailures = 0;
 
         try
         {
@@ -65,6 +67,7 @@ internal sealed class PipeServer : IPipeServer
                 {
                     serverStream = CreateServerStream();
                     everBound = true;
+                    consecutiveFailures = 0;
 
                     if (!readyCompleted)
                     {
@@ -93,6 +96,8 @@ internal sealed class PipeServer : IPipeServer
                     var peerCheck = VerifyPeer(serverStream);
                     if (!peerCheck.Authorized)
                     {
+                        EmitAudit(
+                            $"pipe connection rejected on '{_pipeName}': unauthorized peer peer-uid={peerCheck.PeerUid} peer-pid={peerCheck.PeerPid}");
                         await serverStream.DisposeAsync().ConfigureAwait(false);
                         serverStream = null;
                         continue;
@@ -100,10 +105,8 @@ internal sealed class PipeServer : IPipeServer
 
                     if (_clientTasks.Count >= MaxConcurrentClients)
                     {
-                        var capMessage =
-                            $"pipe server '{_pipeName}' at concurrent-client cap ({MaxConcurrentClients}); rejecting connection peer-uid={peerCheck.PeerUid} peer-pid={peerCheck.PeerPid}";
-                        Vice.Log.Emit(ViceLogLevel.Warn, capMessage);
-                        EmitAudit(capMessage);
+                        EmitAudit(
+                            $"pipe server '{_pipeName}' at concurrent-client cap ({MaxConcurrentClients}); rejecting connection peer-uid={peerCheck.PeerUid} peer-pid={peerCheck.PeerPid}");
                         await serverStream.DisposeAsync().ConfigureAwait(false);
                         serverStream = null;
                         continue;
@@ -114,9 +117,11 @@ internal sealed class PipeServer : IPipeServer
                     var clientId = Interlocked.Increment(ref _nextClientId);
                     EmitAudit(
                         $"pipe connection accepted on '{_pipeName}': client={clientId} peer-uid={peerCheck.PeerUid} peer-pid={peerCheck.PeerPid}");
-                    var clientTask = HandleClientAsync(attached, clientId, ct);
+                    var clientGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                    var clientTask = HandleClientAsync(attached, clientId, clientGate.Task, ct);
 
                     _clientTasks[clientId] = clientTask;
+                    clientGate.SetResult();
                 }
                 catch (Exception ex)
                 {
@@ -134,10 +139,9 @@ internal sealed class PipeServer : IPipeServer
 
                     if (!everBound)
                     {
-                        var bindMessage =
-                            $"pipe server '{_pipeName}' could not bind (another daemon may already own this pipe); not starting a second listener";
-                        Vice.Log.Emit(ViceLogLevel.Error, bindMessage, ex);
-                        EmitAudit(bindMessage);
+                        Vice.Log.Emit(ViceLogLevel.Error,
+                            $"pipe server '{_pipeName}' could not bind (another daemon may already own this pipe); not starting a second listener",
+                            ex);
                         _acceptLoopCrashed = true;
                         _faulted = ex;
 
@@ -147,6 +151,18 @@ internal sealed class PipeServer : IPipeServer
                             readyCompleted = true;
                         }
 
+                        break;
+                    }
+
+                    consecutiveFailures++;
+
+                    if (consecutiveFailures >= MAX_CONSECUTIVE_ACCEPT_FAILURES)
+                    {
+                        Vice.Log.Emit(ViceLogLevel.Error,
+                            $"pipe accept loop on '{_pipeName}' failed {consecutiveFailures} consecutive times; faulting so a supervisor can restart",
+                            ex);
+                        _acceptLoopCrashed = true;
+                        _faulted = ex;
                         break;
                     }
 
@@ -207,8 +223,9 @@ internal sealed class PipeServer : IPipeServer
         }
         catch (Exception ex)
         {
-            Vice.Log.Emit(ViceLogLevel.Warn,
-                "umask P/Invoke failed; pipe socket may be created with default permissions", ex);
+            throw new InvalidOperationException(
+                "umask P/Invoke failed; cannot guarantee restrictive pipe-socket permissions, refusing to listen",
+                ex);
         }
 
         try
@@ -219,7 +236,16 @@ internal sealed class PipeServer : IPipeServer
                 MaxConcurrentClients,
                 PipeTransmissionMode.Byte,
                 PipeOptions.Asynchronous);
-            TryRestrictUnixPipePermissions();
+            try
+            {
+                RestrictUnixPipePermissions();
+            }
+            catch
+            {
+                stream.Dispose();
+                throw;
+            }
+
             return stream;
         }
         finally
@@ -245,19 +271,22 @@ internal sealed class PipeServer : IPipeServer
     }
 
     [UnsupportedOSPlatform("windows")]
-    private void TryRestrictUnixPipePermissions()
+    private void RestrictUnixPipePermissions()
     {
         var socketPath = Path.Combine(Path.GetTempPath(), "CoreFxPipe_" + _pipeName);
-        try
+        if (!File.Exists(socketPath))
         {
-            if (File.Exists(socketPath))
-            {
-                File.SetUnixFileMode(socketPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
-            }
+            throw new InvalidOperationException(
+                $"pipe socket '{socketPath}' was not present after bind; cannot confirm restrictive permissions, refusing to listen");
         }
-        catch (Exception ex)
+
+        File.SetUnixFileMode(socketPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+
+        var mode = File.GetUnixFileMode(socketPath);
+        if (mode != (UnixFileMode.UserRead | UnixFileMode.UserWrite))
         {
-            Vice.Log.Emit(ViceLogLevel.Warn, $"failed to restrict permissions on {socketPath}", ex);
+            throw new InvalidOperationException(
+                $"pipe socket '{socketPath}' has permissions {mode} after tightening; refusing to listen with broader access");
         }
     }
 
@@ -278,27 +307,21 @@ internal sealed class PipeServer : IPipeServer
         var gotEuid = PeerCredentials.TryGetEuid(out var euid);
         if (!gotEuid)
         {
-            var message = $"pipe peer-uid check: geteuid failed on '{_pipeName}'; rejecting connection";
-            Vice.Log.Emit(ViceLogLevel.Warn, message);
-            EmitAudit(message);
+            EmitAudit($"pipe peer-uid check: geteuid failed on '{_pipeName}'; rejecting connection");
         }
 
         var gotPeer = PeerCredentials.TryGetPeerCredentials(stream.SafePipeHandle, out var peerUid, out var peerPid);
         if (gotEuid && !gotPeer)
         {
-            var message = $"pipe peer-uid check: unable to determine peer uid on '{_pipeName}'; rejecting";
-            Vice.Log.Emit(ViceLogLevel.Warn, message);
-            EmitAudit(message);
+            EmitAudit($"pipe peer-uid check: unable to determine peer uid on '{_pipeName}'; rejecting");
         }
 
         if (gotEuid
             && gotPeer
             && peerUid != euid)
         {
-            var message =
-                $"pipe peer-uid mismatch on '{_pipeName}': peer-uid={peerUid} peer-pid={peerPid} euid={euid}; rejecting";
-            Vice.Log.Emit(ViceLogLevel.Warn, message);
-            EmitAudit(message);
+            EmitAudit(
+                $"pipe peer-uid mismatch on '{_pipeName}': peer-uid={peerUid} peer-pid={peerPid} euid={euid}; rejecting");
         }
 
         var authorized = AuthorizePeer(peerUid, euid, gotEuid, gotPeer);
@@ -307,7 +330,7 @@ internal sealed class PipeServer : IPipeServer
 
     private static void EmitAudit(string message)
     {
-        Vice.Log.Audit.Log(ViceLogLevel.Warn, message);
+        Vice.Log.Emit(ViceLogLevel.Info, message);
     }
 
     internal static bool AuthorizePeer(int peerUid, int euid, bool gotEuid, bool gotPeer)
@@ -348,8 +371,14 @@ internal sealed class PipeServer : IPipeServer
             pipeSecurity: security);
     }
 
-    private async Task HandleClientAsync(NamedPipeServerStream stream, int clientId, CancellationToken ct)
+    private async Task HandleClientAsync(
+        NamedPipeServerStream stream,
+        int clientId,
+        Task gate,
+        CancellationToken ct)
     {
+        await gate.ConfigureAwait(false);
+
         try
         {
             while (!ct.IsCancellationRequested)
@@ -369,6 +398,34 @@ internal sealed class PipeServer : IPipeServer
                     Vice.Log.Emit(ViceLogLevel.Debug, "pipe client read failed", ex);
                     break;
                 }
+                catch (System.Text.Json.JsonException ex)
+                {
+                    Vice.Log.Emit(ViceLogLevel.Warn, "pipe client sent malformed frame; rejecting and keeping connection", ex);
+
+                    try
+                    {
+                        await PipeProtocol.WriteMessageAsync(
+                            stream,
+                            new CommandResponse
+                            {
+                                ExitCode = 1,
+                                Output = string.Empty,
+                                Error = "malformed message frame",
+                            },
+                            ct).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        break;
+                    }
+                    catch (IOException writeEx)
+                    {
+                        Vice.Log.Emit(ViceLogLevel.Debug, "pipe client write failed after malformed frame", writeEx);
+                        break;
+                    }
+
+                    continue;
+                }
 
                 if (message is null)
                 {
@@ -377,8 +434,9 @@ internal sealed class PipeServer : IPipeServer
 
                 if (message is CommandMessage commandMessage)
                 {
+                    var invocationId = Vice.Execution.CommandContext.BeginInvocationScope();
                     EmitAudit(
-                        $"pipe command on '{_pipeName}': client={clientId} command={commandMessage.CommandLine}");
+                        $"pipe command on '{_pipeName}': client={clientId} invocation={invocationId} command={Vice.Session.InputHistory.Redact(commandMessage.CommandLine)}");
                 }
 
                 PipeMessage? response;

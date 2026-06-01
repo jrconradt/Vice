@@ -2,7 +2,7 @@ using System.Text.Json;
 using Google.Protobuf;
 using Google.Protobuf.Reflection;
 using Vice.Logging;
-using Vice.Network.gRPC;
+using Vice.Net.Requests.Grpc;
 using Vice.Net.Tests.Grpc;
 using Xunit;
 
@@ -231,12 +231,39 @@ public class ProtobufJsonTranscoderTests
     }
 
     [Fact]
-    public void Unknown_enum_name_encodes_as_zero()
+    public void Unknown_enum_name_throws_BadArgument()
     {
         var desc = Kitchen();
-        var bytes = ProtobufJsonTranscoder.JsonToProtobuf("{\"shade\":\"PURPLE\"}", desc);
-        var output = ProtobufJsonTranscoder.ProtobufToJson(bytes, desc);
+        var ex = Assert.Throws<BadArgument>(() =>
+            ProtobufJsonTranscoder.JsonToProtobuf("{\"shade\":\"PURPLE\"}", desc));
+        Assert.Contains("PURPLE", ex.Detail);
+    }
+
+    [Fact]
+    public void Packed_repeated_int32_from_stock_serializer_decodes_all_elements()
+    {
+        var desc = Kitchen();
+        using var ms = new MemoryStream();
+        var cos = new CodedOutputStream(ms);
+        using (var payload = new MemoryStream())
+        {
+            var inner = new CodedOutputStream(payload);
+            inner.WriteInt32(10);
+            inner.WriteInt32(20);
+            inner.WriteInt32(30);
+            inner.Flush();
+            cos.WriteTag(5, WireFormat.WireType.LengthDelimited);
+            cos.WriteBytes(ByteString.CopyFrom(payload.ToArray()));
+        }
+
+        cos.Flush();
+        var output = ProtobufJsonTranscoder.ProtobufToJson(ms.ToArray(), desc);
+
         using var doc = JsonDocument.Parse(output);
-        Assert.Equal("RED", doc.RootElement.GetProperty("shade").GetString());
+        var items = doc.RootElement.GetProperty("items")
+            .EnumerateArray()
+            .Select(e => e.GetInt32())
+            .ToArray();
+        Assert.Equal(new[] { 10, 20, 30 }, items);
     }
 }

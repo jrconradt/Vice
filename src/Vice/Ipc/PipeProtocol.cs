@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Text.Json;
+using Vice.Session;
 
 namespace Vice.Ipc;
 
@@ -18,30 +19,39 @@ internal static class PipeProtocol
                 nameof(message));
         }
 
-        var lengthPrefix = new byte[4];
-        BinaryPrimitives.WriteInt32BigEndian(lengthPrefix, json.Length);
+        var header = new byte[8];
+        BinaryPrimitives.WriteInt32BigEndian(header.AsSpan(0, 4), SessionState.ProtocolVersion);
+        BinaryPrimitives.WriteInt32BigEndian(header.AsSpan(4, 4), json.Length);
 
-        await stream.WriteAsync(lengthPrefix, ct).ConfigureAwait(false);
+        await stream.WriteAsync(header, ct).ConfigureAwait(false);
         await stream.WriteAsync(json, ct).ConfigureAwait(false);
         await stream.FlushAsync(ct).ConfigureAwait(false);
     }
 
     public static async Task<PipeMessage?> ReadMessageAsync(Stream stream, CancellationToken ct)
     {
-        var lengthPrefix = new byte[4];
-        var bytesRead = await ReadExactlyAsync(stream, lengthPrefix, ct).ConfigureAwait(false);
+        var header = new byte[8];
+        var bytesRead = await ReadExactlyAsync(stream, header, ct).ConfigureAwait(false);
 
         if (bytesRead == 0)
         {
             return null;
         }
 
-        if (bytesRead < 4)
+        if (bytesRead < 8)
         {
-            throw new InvalidOperationException("Unexpected end of stream while reading message length.");
+            throw new InvalidOperationException("Unexpected end of stream while reading message header.");
         }
 
-        var length = BinaryPrimitives.ReadInt32BigEndian(lengthPrefix);
+        var peerVersion = BinaryPrimitives.ReadInt32BigEndian(header.AsSpan(0, 4));
+
+        if (peerVersion != SessionState.ProtocolVersion)
+        {
+            throw new IOException(
+                $"Pipe protocol version mismatch: peer sent v{peerVersion}, this process speaks v{SessionState.ProtocolVersion}.");
+        }
+
+        var length = BinaryPrimitives.ReadInt32BigEndian(header.AsSpan(4, 4));
 
         if (length < 0 || length > MAX_MESSAGE_BYTES)
         {
@@ -58,7 +68,14 @@ internal static class PipeProtocol
             throw new InvalidOperationException("Unexpected end of stream while reading message body.");
         }
 
-        return JsonSerializer.Deserialize(body, PipeMessageJsonContext.Default.PipeMessage);
+        try
+        {
+            return JsonSerializer.Deserialize(body, PipeMessageJsonContext.Default.PipeMessage);
+        }
+        catch (NotSupportedException ex)
+        {
+            throw new JsonException("Pipe payload was not a recognized message.", ex);
+        }
     }
 
     private static async Task<int> ReadExactlyAsync(Stream stream, byte[] buffer, CancellationToken ct)

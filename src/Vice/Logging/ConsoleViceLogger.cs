@@ -2,9 +2,9 @@ using System.Runtime.CompilerServices;
 
 namespace Vice.Logging;
 
-public sealed class ConsoleViceLogger : IViceLogger
+public sealed class ConsoleViceLogger : IViceLogger, IAsyncDisposable
 {
-    private readonly ILogSink _sink;
+    private readonly ConsoleLogSink _sink;
 
     public ConsoleViceLogger(ViceLogLevel minLevel, TextWriter? sink = null)
     {
@@ -23,4 +23,6 @@ public sealed class ConsoleViceLogger : IViceLogger
         [CallerFilePath] string? file = null,
         [CallerLineNumber] int line = 0)
         => _sink.Log(level, message, exception, caller, file, line);
+
+    public ValueTask DisposeAsync() => _sink.DisposeAsync();
 }

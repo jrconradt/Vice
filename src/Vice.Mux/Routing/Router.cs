@@ -26,11 +26,13 @@ public static class Router
             return 0;
         }
 
-        var sinks = new ISink[matched.Count];
+        var opens = new Task<ISink>[matched.Count];
         for (int i = 0; i < matched.Count; i++)
         {
-            sinks[i] = SinkFactory.Open(matched[i].SinkSpec);
+            opens[i] = SinkFactory.OpenAsync(matched[i].SinkSpec, ct).AsTask();
         }
+
+        var sinks = await Task.WhenAll(opens);
 
         var pool = ArrayPool<byte>.Shared;
         var buffer = pool.Rent(chunkSize);

@@ -12,7 +12,7 @@ No source file carries an inline license or `SPDX-License-Identifier` comment he
 
 The SPDX license expression is `Apache-2.0`. Rather than repeating it as a comment in thousands of files, it is carried as machine-readable metadata that ships with every build:
 
-- **Package metadata.** `Directory.Build.props` sets `PackageLicenseExpression` to `Apache-2.0`, so every produced NuGet package (`Vice.Cli`, `Vice.Mux.Cli`) declares its SPDX license expression in its `.nuspec`. Package consumers and SBOM tooling read it directly.
+- **Package metadata.** `Directory.Build.props` sets `PackageLicenseExpression` to `Apache-2.0`, so every produced NuGet package declares its SPDX license expression in its `.nuspec`. The packable set is whatever the `.csproj` files under `src/` declare a `PackageId` for without setting `IsPackable` to `false` — currently `Vice`, `Vice.Parser`, `Vice.Cli`, and `Vice.Mux.Cli`. Package consumers and SBOM tooling read the expression directly.
 - **Assembly metadata.** `Directory.Build.props` also emits an `AssemblyMetadata` item with key `SPDX-License-Identifier` and value `Apache-2.0`, baked into every compiled assembly in the solution. The value is queryable at runtime via `Assembly.GetCustomAttributes<AssemblyMetadataAttribute>()` and is visible to license scanners that inspect compiled output.
 - **Copyright.** `Directory.Build.props` sets `Copyright` to `Copyright 2026 Infalligence Labs LLC · Apache-2.0`, surfaced in the assembly's `AssemblyCopyrightAttribute`.
 

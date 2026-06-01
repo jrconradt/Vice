@@ -7,6 +7,8 @@ internal static class PeerCredentials
 {
     private const int SOL_SOCKET = 1;
     private const int SO_PEERCRED = 17;
+    private const int SOL_LOCAL = 0;
+    private const int LOCAL_PEERPID = 0x002;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct Ucred
@@ -21,6 +23,13 @@ internal static class PeerCredentials
 
     [DllImport("libc", EntryPoint = "getpeereid", SetLastError = true)]
     private static extern int MacGetPeerEid(int sockfd, ref uint euid, ref uint egid);
+
+    [DllImport("libc", EntryPoint = "getsockopt", SetLastError = true)]
+    private static extern int MacGetSockOpt(int sockfd,
+                                            int level,
+                                            int optname,
+                                            ref int optval,
+                                            ref int optlen);
 
     [DllImport("libc", EntryPoint = "geteuid")]
     private static extern uint LibcGeteuid();
@@ -64,7 +73,7 @@ internal static class PeerCredentials
 
         if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
         {
-            return TryGetPeerUidMac(handle, out peerUid);
+            return TryGetPeerCredentialsMac(handle, out peerUid, out peerPid);
         }
 
         return false;
@@ -125,6 +134,38 @@ internal static class PeerCredentials
         }
 
         peerUid = unchecked((int)euid);
+        return true;
+    }
+
+    [SupportedOSPlatform("macos")]
+    private static bool TryGetPeerCredentialsMac(SafeHandle handle, out int peerUid, out int peerPid)
+    {
+        peerUid = -1;
+        peerPid = -1;
+        var fd = handle.DangerousGetHandle().ToInt32();
+        if (fd < 0)
+        {
+            return false;
+        }
+
+        uint euid = 0;
+        uint egid = 0;
+        var eidRc = MacGetPeerEid(fd, ref euid, ref egid);
+        if (eidRc != 0)
+        {
+            return false;
+        }
+
+        peerUid = unchecked((int)euid);
+
+        var pid = 0;
+        var len = Marshal.SizeOf<int>();
+        var pidRc = MacGetSockOpt(fd, SOL_LOCAL, LOCAL_PEERPID, ref pid, ref len);
+        if (pidRc == 0)
+        {
+            peerPid = pid;
+        }
+
         return true;
     }
 

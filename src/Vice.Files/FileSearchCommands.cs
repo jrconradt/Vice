@@ -3,6 +3,7 @@ using System.Text.RegularExpressions;
 using Vice.Composition;
 using Vice.Execution;
 using Vice.Lexicon;
+using Vice.Logging;
 using Vice.Streaming;
 using static Vice.Dsl;
 
@@ -117,7 +118,7 @@ public static class FileSearchCommands
 
         var root = ResolveRoot(ctx);
         var options = WalkOptions.FromContext(ctx);
-        var chunkSize = ctx.GetGlobalOption("chunk-size").AsPositiveInt() ?? 81920;
+        var chunkSize = ctx.GetGlobalOption("chunk-size").AsPositiveInt() ?? BufferConstants.FILE_IO;
 
         foreach (var path in Walk(root, WalkKind.Files, predicates, options, ct))
         {
@@ -206,17 +207,16 @@ public static class FileSearchCommands
         }
     }
 
-    private static List<string> Walk(
+    private static IEnumerable<string> Walk(
         string root,
         WalkKind kind,
         IReadOnlyList<Predicate> predicates,
         WalkOptions options,
         CancellationToken ct)
     {
-        var results = new List<string>();
         if (!Directory.Exists(root))
         {
-            return results;
+            yield break;
         }
 
         var stack = new Stack<(string Dir, int Depth)>();
@@ -227,97 +227,111 @@ public static class FileSearchCommands
             ct.ThrowIfCancellationRequested();
             var (dir, depth) = stack.Pop();
 
-            IEnumerator<string> entries;
-            try
-            {
-                entries = Directory.EnumerateFileSystemEntries(dir).GetEnumerator();
-            }
-            catch (UnauthorizedAccessException)
-            {
-                continue;
-            }
-            catch (DirectoryNotFoundException)
-            {
-                continue;
-            }
-            catch (IOException)
-            {
-                continue;
-            }
+            var entries = EnumerateEntries(dir);
+            entries.Sort(StringComparer.Ordinal);
 
-            using (entries)
+            var children = new List<(string Dir, int Depth)>();
+            foreach (var entry in entries)
             {
-                while (true)
+                ct.ThrowIfCancellationRequested();
+
+                FileSystemInfo info;
+                try
                 {
-                    ct.ThrowIfCancellationRequested();
+                    info = Directory.Exists(entry) ? new DirectoryInfo(entry) : new FileInfo(entry);
+                }
+                catch (IOException)
+                {
+                    continue;
+                }
 
-                    string entry;
-                    try
-                    {
-                        if (!entries.MoveNext())
-                        {
-                            break;
-                        }
+                var isHidden = (info.Attributes & FileAttributes.Hidden) != 0
+                    || info.Name.StartsWith('.');
+                if (isHidden && !options.IncludeHidden)
+                {
+                    continue;
+                }
 
-                        entry = entries.Current;
-                    }
-                    catch (UnauthorizedAccessException)
-                    {
-                        break;
-                    }
-                    catch (DirectoryNotFoundException)
-                    {
-                        break;
-                    }
-                    catch (IOException)
-                    {
-                        break;
-                    }
+                var isSymlink = (info.Attributes & FileAttributes.ReparsePoint) != 0;
+                var isDirectory = info is DirectoryInfo;
 
-                    FileSystemInfo info;
-                    try
+                if (isDirectory)
+                {
+                    var descend = depth < options.MaxDepth
+                        && (!isSymlink || options.FollowSymlinks);
+                    if (descend)
                     {
-                        info = Directory.Exists(entry) ? new DirectoryInfo(entry) : new FileInfo(entry);
-                    }
-                    catch (IOException)
-                    {
-                        continue;
+                        children.Add((entry, depth + 1));
                     }
 
-                    var isHidden = (info.Attributes & FileAttributes.Hidden) != 0
-                        || info.Name.StartsWith('.');
-                    if (isHidden && !options.IncludeHidden)
+                    if (kind == WalkKind.Folders && Matches(predicates, info))
                     {
-                        continue;
-                    }
-
-                    var isSymlink = (info.Attributes & FileAttributes.ReparsePoint) != 0;
-                    var isDirectory = info is DirectoryInfo;
-
-                    if (isDirectory)
-                    {
-                        var descend = depth < options.MaxDepth
-                            && (!isSymlink || options.FollowSymlinks);
-                        if (descend)
-                        {
-                            stack.Push((entry, depth + 1));
-                        }
-
-                        if (kind == WalkKind.Folders && Matches(predicates, info))
-                        {
-                            results.Add(entry);
-                        }
-                    }
-                    else if (kind == WalkKind.Files && Matches(predicates, info))
-                    {
-                        results.Add(entry);
+                        yield return entry;
                     }
                 }
+                else if (kind == WalkKind.Files && Matches(predicates, info))
+                {
+                    yield return entry;
+                }
+            }
+
+            for (var i = children.Count - 1; i >= 0; i--)
+            {
+                stack.Push(children[i]);
+            }
+        }
+    }
+
+    private static List<string> EnumerateEntries(string dir)
+    {
+        var entries = new List<string>();
+        IEnumerator<string> enumerator;
+        try
+        {
+            enumerator = Directory.EnumerateFileSystemEntries(dir).GetEnumerator();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return entries;
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return entries;
+        }
+        catch (IOException)
+        {
+            return entries;
+        }
+
+        using (enumerator)
+        {
+            while (true)
+            {
+                try
+                {
+                    if (!enumerator.MoveNext())
+                    {
+                        break;
+                    }
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    break;
+                }
+                catch (DirectoryNotFoundException)
+                {
+                    break;
+                }
+                catch (IOException)
+                {
+                    break;
+                }
+
+                entries.Add(enumerator.Current);
             }
         }
 
-        results.Sort(StringComparer.Ordinal);
-        return results;
+        return entries;
     }
 
     private static bool Matches(IReadOnlyList<Predicate> predicates, FileSystemInfo info)
@@ -356,6 +370,7 @@ public static class FileSearchCommands
         private readonly string _pattern;
         private readonly Regex? _regex;
         private readonly bool _fullPath;
+        private bool _timeoutWarned;
 
         private NamePredicate(string pattern, Regex? regex, bool fullPath)
         {
@@ -396,6 +411,14 @@ public static class FileSearchCommands
                 }
                 catch (RegexMatchTimeoutException)
                 {
+                    if (!_timeoutWarned)
+                    {
+                        _timeoutWarned = true;
+                        Vice.Log.Emit(
+                            ViceLogLevel.Warn,
+                            $"search: regex pattern '{_pattern}' timed out evaluating an entry; results may be incomplete.");
+                    }
+
                     return false;
                 }
             }
@@ -561,7 +584,15 @@ public static class FileSearchCommands
                 return null;
             }
 
-            return (long)(value * multiplier.Value);
+            var bytes = value * multiplier.Value;
+            if (double.IsNaN(bytes)
+                || bytes < 0d
+                || bytes >= 9223372036854775808d)
+            {
+                return null;
+            }
+
+            return (long)bytes;
         }
 
         private static double? SuffixMultiplier(string suffix)

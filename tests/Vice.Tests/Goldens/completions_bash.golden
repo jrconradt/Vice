@@ -23,7 +23,6 @@ _vice() {
         case "$state:$word" in
             "root:alpha"|"root:a") state="root__alpha"; ;;
             "root:beta") state="root__beta"; ;;
-            "root__beta:things") state="root__beta__things"; skip=1; ;;
             "root:cancel") state="root__cancel"; skip=1; ;;
             "root:clear") state="root__clear"; ;;
             "root:completions") state="root__completions"; skip=1; ;;
@@ -34,12 +33,13 @@ _vice() {
             "root:history") state="root__history"; ;;
             "root:jobs") state="root__jobs"; ;;
             "root:list") state="root__list"; ;;
-            "root__list:commands") state="root__list__commands"; ;;
             "root:manpage") state="root__manpage"; ;;
             "root:pause") state="root__pause"; skip=1; ;;
             "root:resume") state="root__resume"; skip=1; ;;
             "root:status") state="root__status"; ;;
             "root:version") state="root__version"; ;;
+            "root__beta:things") state="root__beta__things"; skip=1; ;;
+            "root__list:commands") state="root__list__commands"; ;;
             *) state="unknown" ;;
         esac
         i=$((i+1))

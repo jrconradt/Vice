@@ -1,4 +1,3 @@
-using Vice.Logging;
 using Vice.Net.Http;
 using Vice.Persistence;
 
@@ -12,54 +11,23 @@ internal static class ResearchDownloader
                                                        IProgress<DownloadProgress>? progress,
                                                        CancellationToken ct)
     {
-        var fullPath = Path.GetFullPath(destinationPath);
-        if (!SafeWriteRoots.IsAllowed(fullPath, out var reason))
-        {
-            throw new BadArgument($"Destination '{fullPath}' is outside allowed write roots: {reason}.");
-        }
-
-        var directory = Path.GetDirectoryName(fullPath);
-        if (!string.IsNullOrEmpty(directory))
-        {
-            Directory.CreateDirectory(directory);
-        }
-
+        var fullPath = AtomicDownload.ResolveDestination(destinationPath);
         var partial = $"{fullPath}.{Guid.NewGuid():N}.partial";
+        var resumable = new ResumableHttpStream(http, uri);
         try
         {
-            long written;
-            var observed = new ExpectedLengthObserver(progress);
-            await using (var file = new FileStream(partial,
-                                                   FileMode.CreateNew,
-                                                   FileAccess.ReadWrite,
-                                                   FileShare.None))
-            {
-                var resumable = new ResumableHttpStream(http, uri);
-                file.Seek(0, SeekOrigin.Begin);
-                file.SetLength(0);
-
-                await resumable.DownloadAsync(file, startOffset: 0, observed, ct).ConfigureAwait(false);
-                await file.FlushAsync(ct).ConfigureAwait(false);
-                written = file.Length;
-            }
-
-            if (observed.ExpectedTotal is long expected
-                && written != expected)
-            {
-                throw new InvalidDataException(
-                    $"Download of '{uri}' is incomplete: wrote {written} bytes but the server advertised {expected}; refusing to promote a truncated file.");
-            }
-
-            File.Move(partial, fullPath, overwrite: true);
-            return written;
+            return await AtomicDownload.RunAsync(resumable,
+                                                 uri,
+                                                 fullPath,
+                                                 partial,
+                                                 FileMode.CreateNew,
+                                                 startOffset: 0,
+                                                 progress,
+                                                 ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
-            throw;
-        }
-        catch
-        {
-            TryDelete(partial);
+            SafeFile.TryDelete(partial);
             throw;
         }
     }
@@ -125,46 +93,5 @@ internal static class ResearchDownloader
         }
 
         return new string(chars.ToArray());
-    }
-
-    private static void TryDelete(string path)
-    {
-        try
-        {
-            if (File.Exists(path))
-            {
-                File.Delete(path);
-            }
-        }
-        catch (IOException)
-        {
-        }
-        catch (UnauthorizedAccessException)
-        {
-        }
-    }
-
-    private sealed class ExpectedLengthObserver : IProgress<DownloadProgress>
-    {
-        private readonly IProgress<DownloadProgress>? _inner;
-        private long _expected = -1;
-
-        public ExpectedLengthObserver(IProgress<DownloadProgress>? inner)
-        {
-            _inner = inner;
-        }
-
-        public long? ExpectedTotal => _expected >= 0 ? _expected : null;
-
-        public void Report(DownloadProgress value)
-        {
-            if (value.TotalBytes is long total
-                && total >= 0)
-            {
-                Volatile.Write(ref _expected, total);
-            }
-
-            _inner?.Report(value);
-        }
     }
 }

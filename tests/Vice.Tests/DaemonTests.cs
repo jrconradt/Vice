@@ -1,8 +1,8 @@
 using System.Threading;
 using System.Threading.Tasks;
 using Vice;
-using Vice.Ipc;
 using Vice.Display;
+using Vice.Ipc;
 using Vice.Session;
 using Xunit;
 using static Vice.Dsl;

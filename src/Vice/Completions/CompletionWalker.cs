@@ -29,40 +29,59 @@ internal static class CompletionWalker
 
     private static void EmitTransitions(CompletionNode node, List<CompletionTransition> sink)
     {
-        foreach (var child in node.Children.Values.OrderBy(c => c.Token, StringComparer.Ordinal))
+        var stack = new Stack<CompletionNode>();
+        stack.Push(node);
+
+        while (stack.Count > 0)
         {
-            sink.Add(new CompletionTransition(
-                node.StateId,
-                child.AllTokens().ToArray(),
-                child.StateId,
-                child.TargetCount));
-            EmitTransitions(child, sink);
+            var current = stack.Pop();
+            var ordered = current.Children.Values.OrderBy(c => c.Token, StringComparer.Ordinal).ToArray();
+            foreach (var child in ordered)
+            {
+                sink.Add(new CompletionTransition(
+                    current.StateId,
+                    child.AllTokens().ToArray(),
+                    child.StateId,
+                    child.TargetCount));
+            }
+            for (var i = ordered.Length - 1; i >= 0; i--)
+            {
+                stack.Push(ordered[i]);
+            }
         }
     }
 
     private static void EmitSuggestions(CompletionNode node, List<CompletionSuggestion> sink)
     {
-        if (node.Children.Count > 0)
+        var stack = new Stack<CompletionNode>();
+        stack.Push(node);
+
+        while (stack.Count > 0)
         {
-            var candidates = new List<CompletionCandidate>(node.Children.Count);
-            var allTokens = new List<string>();
-            foreach (var child in node.Children.Values.OrderBy(c => c.Token, StringComparer.Ordinal))
+            var current = stack.Pop();
+            var ordered = current.Children.Values.OrderBy(c => c.Token, StringComparer.Ordinal).ToArray();
+            if (ordered.Length > 0)
             {
-                candidates.Add(new CompletionCandidate(
-                    child.Token,
-                    child.Description,
-                    child.Synonyms.ToArray()));
-                allTokens.Add(child.Token);
-                foreach (var syn in child.Synonyms)
+                var candidates = new List<CompletionCandidate>(ordered.Length);
+                var allTokens = new List<string>();
+                foreach (var child in ordered)
                 {
-                    allTokens.Add(syn);
+                    candidates.Add(new CompletionCandidate(
+                        child.Token,
+                        child.Description,
+                        child.Synonyms.ToArray()));
+                    allTokens.Add(child.Token);
+                    foreach (var syn in child.Synonyms)
+                    {
+                        allTokens.Add(syn);
+                    }
                 }
+                sink.Add(new CompletionSuggestion(current.StateId, allTokens, candidates));
             }
-            sink.Add(new CompletionSuggestion(node.StateId, allTokens, candidates));
-        }
-        foreach (var child in node.Children.Values.OrderBy(c => c.Token, StringComparer.Ordinal))
-        {
-            EmitSuggestions(child, sink);
+            for (var i = ordered.Length - 1; i >= 0; i--)
+            {
+                stack.Push(ordered[i]);
+            }
         }
     }
 }

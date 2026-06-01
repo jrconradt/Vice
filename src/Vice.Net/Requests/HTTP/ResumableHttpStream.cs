@@ -7,13 +7,14 @@ namespace Vice.Net.Http;
 public sealed class ResumableHttpStream
 {
     private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan StallTimeout = TimeSpan.FromSeconds(60);
 
     private readonly HttpClient _http;
     private readonly Uri _uri;
     private readonly long _maxBytes;
-    private readonly Lazy<Task<ProbeResult>> _probeLazy;
+    private volatile ProbeResult? _probe;
 
-    private sealed record ProbeResult(bool SupportsRange, long? TotalLength);
+    private sealed record ProbeResult(bool SupportsRange, long? TotalLength, EntityTagHeaderValue? ETag, DateTimeOffset? LastModified);
 
     public ResumableHttpStream(HttpClient http, Uri uri)
         : this(http, uri, maxBytes: null)
@@ -29,13 +30,25 @@ public sealed class ResumableHttpStream
         {
             throw new ArgumentOutOfRangeException(nameof(maxBytes), "maxBytes must be positive.");
         }
-
-        _probeLazy = new Lazy<Task<ProbeResult>>(ProbeAsync, LazyThreadSafetyMode.ExecutionAndPublication);
     }
 
-    private async Task<ProbeResult> ProbeAsync()
+    private async Task<ProbeResult> GetProbeAsync(CancellationToken ct)
     {
-        using var timeoutCts = new CancellationTokenSource(ProbeTimeout);
+        var cached = _probe;
+        if (cached is not null)
+        {
+            return cached;
+        }
+
+        var fresh = await ProbeAsync(ct).ConfigureAwait(false);
+        _probe = fresh;
+        return fresh;
+    }
+
+    private async Task<ProbeResult> ProbeAsync(CancellationToken ct)
+    {
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeoutCts.CancelAfter(ProbeTimeout);
         using var request = new HttpRequestMessage(HttpMethod.Head, _uri);
         using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeoutCts.Token).ConfigureAwait(false);
 
@@ -43,6 +56,8 @@ public sealed class ResumableHttpStream
 
         var supportsRange = response.Headers.AcceptRanges.Contains("bytes");
         var totalLength = response.Content.Headers.ContentLength;
+        var etag = response.Headers.ETag;
+        var lastModified = response.Content.Headers.LastModified;
 
         if (totalLength.HasValue && totalLength.Value > _maxBytes)
         {
@@ -50,12 +65,12 @@ public sealed class ResumableHttpStream
                 $"HEAD reported Content-Length {totalLength.Value} exceeding cap {_maxBytes}.");
         }
 
-        return new ProbeResult(supportsRange, totalLength);
+        return new ProbeResult(supportsRange, totalLength, etag, lastModified);
     }
 
     public async Task<bool> SupportsResumeAsync(CancellationToken ct)
     {
-        var probe = await _probeLazy.Value.WaitAsync(ct).ConfigureAwait(false);
+        var probe = await GetProbeAsync(ct).ConfigureAwait(false);
         return probe.SupportsRange;
     }
 
@@ -63,7 +78,7 @@ public sealed class ResumableHttpStream
         Stream destination, long startOffset,
         IProgress<DownloadProgress>? progress, CancellationToken ct)
     {
-        var probe = await _probeLazy.Value.WaitAsync(ct).ConfigureAwait(false);
+        var probe = await GetProbeAsync(ct).ConfigureAwait(false);
         var supportsRange = probe.SupportsRange;
         var totalLength = probe.TotalLength;
 
@@ -75,10 +90,21 @@ public sealed class ResumableHttpStream
 
         using var request = new HttpRequestMessage(HttpMethod.Get, _uri);
 
-        bool attemptingResume = startOffset > 0 && supportsRange;
+        bool hasValidator = probe.ETag is not null || probe.LastModified.HasValue;
+        bool attemptingResume = startOffset > 0 && supportsRange
+            && hasValidator;
         if (attemptingResume)
         {
             request.Headers.Range = new RangeHeaderValue(startOffset, null);
+
+            if (probe.ETag is not null)
+            {
+                request.Headers.IfRange = new RangeConditionHeaderValue(probe.ETag);
+            }
+            else
+            {
+                request.Headers.IfRange = new RangeConditionHeaderValue(probe.LastModified!.Value);
+            }
         }
 
         using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
@@ -95,10 +121,25 @@ public sealed class ResumableHttpStream
         long effectiveOffset;
         long? totalBytes;
 
-        if (attemptingResume && response.StatusCode == HttpStatusCode.PartialContent)
+        var contentRange = response.Content.Headers.ContentRange;
+
+        if (attemptingResume
+            && response.StatusCode == HttpStatusCode.PartialContent
+            && !RangeStartsAt(contentRange, startOffset))
+        {
+            throw new InvalidDataException(
+                $"Server returned 206 PartialContent with Content-Range '{contentRange}' " +
+                $"that does not begin at the requested offset {startOffset}; refusing to " +
+                "splice mismatched bytes.");
+        }
+
+        bool rangeHonored = attemptingResume && response.StatusCode == HttpStatusCode.PartialContent;
+
+        if (rangeHonored)
         {
             effectiveOffset = startOffset;
-            totalBytes = totalLength
+            totalBytes = contentRange!.Length
+                         ?? totalLength
                          ?? (response.Content.Headers.ContentLength.HasValue
                              ? response.Content.Headers.ContentLength.Value + startOffset
                              : null);
@@ -108,13 +149,13 @@ public sealed class ResumableHttpStream
             effectiveOffset = 0;
             totalBytes = response.Content.Headers.ContentLength ?? totalLength;
 
-            if (attemptingResume)
+            if (startOffset > 0)
             {
                 if (!destination.CanSeek)
                 {
                     throw new InvalidOperationException(
-                        "Server ignored Range request and returned the full payload, but the " +
-                        "destination stream is not seekable; cannot safely complete the resume. " +
+                        "Server returned the full payload instead of the requested range, but the " +
+                        "destination stream is not seekable; cannot safely restart the download. " +
                         "Retry with a seekable destination (e.g., FileStream).");
                 }
                 destination.Seek(0, SeekOrigin.Begin);
@@ -131,6 +172,23 @@ public sealed class ResumableHttpStream
         await CopyToStreamAsync(response, destination, effectiveOffset, totalBytes, _maxBytes, progress, ct);
     }
 
+    private static bool RangeStartsAt(ContentRangeHeaderValue? contentRange, long startOffset)
+    {
+        if (contentRange is null)
+        {
+            return false;
+        }
+
+        if (!contentRange.HasRange
+            || contentRange.Unit != "bytes"
+            || !contentRange.From.HasValue)
+        {
+            return false;
+        }
+
+        return contentRange.From.Value == startOffset;
+    }
+
     private static async Task CopyToStreamAsync(
         HttpResponseMessage response, Stream destination,
         long offset, long? totalBytes, long cap,
@@ -141,10 +199,29 @@ public sealed class ResumableHttpStream
         var buffer = new byte[HttpStreamHelper.BUFFER_SIZE];
         long bytesDownloaded = 0;
         var lastReport = Stopwatch.GetTimestamp();
-        int bytesRead;
 
-        while ((bytesRead = await source.ReadAsync(buffer, ct)) > 0)
+        while (true)
         {
+            int bytesRead;
+            using (var stallCts = CancellationTokenSource.CreateLinkedTokenSource(ct))
+            {
+                stallCts.CancelAfter(StallTimeout);
+                try
+                {
+                    bytesRead = await source.ReadAsync(buffer, stallCts.Token);
+                }
+                catch (OperationCanceledException) when (stallCts.IsCancellationRequested && !ct.IsCancellationRequested)
+                {
+                    throw new IOException(
+                        $"Download stalled: no bytes received within {StallTimeout.TotalSeconds:0} seconds.");
+                }
+            }
+
+            if (bytesRead <= 0)
+            {
+                break;
+            }
+
             bytesDownloaded += bytesRead;
 
             if (bytesDownloaded + offset > cap)

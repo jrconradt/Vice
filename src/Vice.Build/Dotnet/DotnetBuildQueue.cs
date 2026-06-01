@@ -44,7 +44,7 @@ public sealed class DotnetBuildQueue : IAsyncDisposable
 
     private Task<int> RunBuild(string key, Func<Task<int>> factory)
     {
-        var task = RunBuildCore(key, factory);
+        var task = RunBuildCoreAsync(key, factory);
         _observed.TryAdd(task, 0);
 
         task.ContinueWith(
@@ -62,7 +62,7 @@ public sealed class DotnetBuildQueue : IAsyncDisposable
         return task;
     }
 
-    private async Task<int> RunBuildCore(string key, Func<Task<int>> factory)
+    private async Task<int> RunBuildCoreAsync(string key, Func<Task<int>> factory)
     {
         try
         {

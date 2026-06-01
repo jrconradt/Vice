@@ -1,5 +1,5 @@
 using System.Net;
-using Vice.Network.gRPC;
+using Vice.Net.Requests.Grpc;
 using Xunit;
 
 namespace Vice.Net.Tests;

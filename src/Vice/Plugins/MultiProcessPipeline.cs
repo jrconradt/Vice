@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Diagnostics;
 using System.Threading.Channels;
 using Vice.Commands;
@@ -37,6 +38,7 @@ internal static class MultiProcessPipeline
             var startError = StartProcesses(segments.Count, resolved, topology, procs, ref started);
             if (startError is int startCode)
             {
+                KillAll(procs);
                 return startCode;
             }
 
@@ -206,7 +208,7 @@ internal static class MultiProcessPipeline
             }
             catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException or System.ComponentModel.Win32Exception)
             {
-                Debug.WriteLine(ex);
+                Vice.Quietly.Swallow(ex);
             }
         }
     }
@@ -248,7 +250,6 @@ internal static class MultiProcessPipeline
             while ((read = await src.ReadAsync(buf.AsMemory(0, buf.Length), ct).ConfigureAwait(false)) > 0)
             {
                 await dst.WriteAsync(buf.AsMemory(0, read), ct).ConfigureAwait(false);
-                await dst.FlushAsync(ct).ConfigureAwait(false);
             }
         }
         catch (IOException ex)
@@ -257,7 +258,7 @@ internal static class MultiProcessPipeline
         }
         catch (OperationCanceledException ex)
         {
-            Debug.WriteLine(ex);
+            Vice.Quietly.Swallow(ex);
         }
         finally
         {
@@ -273,7 +274,7 @@ internal static class MultiProcessPipeline
         }
         catch (Exception ex) when (ex is IOException or ObjectDisposedException)
         {
-            Debug.WriteLine(ex);
+            Vice.Quietly.Swallow(ex);
         }
 
         try
@@ -282,16 +283,17 @@ internal static class MultiProcessPipeline
         }
         catch (Exception ex) when (ex is IOException or ObjectDisposedException)
         {
-            Debug.WriteLine(ex);
+            Vice.Quietly.Swallow(ex);
         }
     }
 
     private static async Task PumpFanAsync(Stream src, Stream[] dsts, CancellationToken ct)
     {
-        var queues = new Channel<byte[]?>[dsts.Length];
+        var pool = ArrayPool<byte>.Shared;
+        var queues = new Channel<FanChunk?>[dsts.Length];
         for (int i = 0; i < dsts.Length; i++)
         {
-            queues[i] = Channel.CreateBounded<byte[]?>(new BoundedChannelOptions(FAN_QUEUE_CAPACITY)
+            queues[i] = Channel.CreateBounded<FanChunk?>(new BoundedChannelOptions(FAN_QUEUE_CAPACITY)
             {
                 SingleReader = true,
                 SingleWriter = true,
@@ -315,8 +317,14 @@ internal static class MultiProcessPipeline
                             break;
                         }
 
-                        await di.WriteAsync(chunk, ct).ConfigureAwait(false);
-                        await di.FlushAsync(ct).ConfigureAwait(false);
+                        try
+                        {
+                            await di.WriteAsync(chunk.Memory, ct).ConfigureAwait(false);
+                        }
+                        finally
+                        {
+                            pool.Return(chunk.Buffer);
+                        }
                     }
                 }
                 catch (IOException ex)
@@ -325,7 +333,7 @@ internal static class MultiProcessPipeline
                 }
                 catch (OperationCanceledException ex)
                 {
-                    Debug.WriteLine(ex);
+                    Vice.Quietly.Swallow(ex);
                 }
                 finally
                 {
@@ -340,12 +348,16 @@ internal static class MultiProcessPipeline
             int read;
             while ((read = await src.ReadAsync(buf.AsMemory(0, buf.Length), ct).ConfigureAwait(false)) > 0)
             {
-                var chunk = new byte[read];
-                Buffer.BlockCopy(buf, 0, chunk, 0, read);
                 var dispatch = new Task[queues.Length];
                 for (int i = 0; i < queues.Length; i++)
                 {
-                    dispatch[i] = queues[i].Writer.WriteAsync(chunk, ct).AsTask();
+                    var rented = pool.Rent(read);
+                    Buffer.BlockCopy(buf,
+                                     0,
+                                     rented,
+                                     0,
+                                     read);
+                    dispatch[i] = queues[i].Writer.WriteAsync(new FanChunk(rented, read), ct).AsTask();
                 }
 
                 await Task.WhenAll(dispatch).ConfigureAwait(false);
@@ -357,7 +369,7 @@ internal static class MultiProcessPipeline
         }
         catch (OperationCanceledException ex)
         {
-            Debug.WriteLine(ex);
+            Vice.Quietly.Swallow(ex);
         }
         finally
         {
@@ -372,6 +384,13 @@ internal static class MultiProcessPipeline
 
     private static string SelfExePath()
         => Environment.ProcessPath ?? throw new InvalidOperationException("Environment.ProcessPath is null");
+
+    private sealed record FanChunk(byte[] Buffer, int Length)
+    {
+        public ReadOnlyMemory<byte> Memory => new(Buffer,
+                                                   0,
+                                                   Length);
+    }
 
     private sealed record ResolvedSegment(string FileName, string[] Args);
 

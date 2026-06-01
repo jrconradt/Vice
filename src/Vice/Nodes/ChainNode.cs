@@ -4,6 +4,10 @@ namespace Vice.Nodes;
 
 public abstract class ChainNode : IChainDescriptor
 {
+    private protected ChainNode()
+    {
+    }
+
     public abstract string Name { get; }
     public abstract ChainNodeKind Kind { get; }
     public List<string> SynonymList { get; } = new();

@@ -13,7 +13,6 @@ namespace Vice.Generators;
 public sealed partial class ViceCompositionGenerator
 {
     const string COMMAND_ATTR = "Vice.Composition.ViceCommandAttribute";
-    const string TARGET_DEF_FQ = "Vice.TargetDef";
 
     static readonly DiagnosticDescriptor TargetsInferenceFailed = new(
         "VICE010", "Cannot infer targets from chain expression",
@@ -23,6 +22,11 @@ public sealed partial class ViceCompositionGenerator
     static readonly DiagnosticDescriptor TargetsMultipleRegistrationsDiffer = new(
         "VICE011", "Multiple registrations for [ViceCommand] disagree on targets",
         "[ViceCommand] handler '{0}' is registered with multiple chain expressions that resolve to different target sets ({1} vs {2}). Add explicit targets on the attribute to disambiguate.",
+        "Vice.Composition", DiagnosticSeverity.Error, isEnabledByDefault: true);
+
+    static readonly DiagnosticDescriptor CommandTypeMissingHandle = new(
+        "VICE012", "[ViceCommand] class does not implement IViceCommand",
+        "[ViceCommand] class '{0}' does not implement global::Vice.Composition.IViceCommand and does not declare 'Task<int> Handle(CommandContext, CancellationToken)'. Implement IViceCommand (or declare the Handle method) so the generated partial can satisfy the interface.",
         "Vice.Composition", DiagnosticSeverity.Error, isEnabledByDefault: true);
 
     void InitializeTargetsPipeline(IncrementalGeneratorInitializationContext context)
@@ -375,9 +379,46 @@ public sealed partial class ViceCompositionGenerator
             : type.ContainingNamespace.ToDisplayString();
         var visibility = type.DeclaredAccessibility == Accessibility.Public ? "public" : "internal";
 
-        var sourceText = BuildPartialClassTargets(ns, visibility, type, resolved);
+        var satisfiesCommand = ImplementsIViceCommand(type) || DeclaresHandle(type);
+        if (!satisfiesCommand)
+        {
+            spc.ReportDiagnostic(Diagnostic.Create(CommandTypeMissingHandle,
+                                                   type.Locations.FirstOrDefault() ?? Location.None,
+                                                   displayName));
+        }
+
+        var sourceText = BuildPartialClassTargets(ns, visibility, type, resolved, satisfiesCommand);
         var hint = SanitizeHint($"{type.ToDisplayString()}_Targets.g.cs");
         spc.AddSource(hint, SourceText.From(sourceText, Encoding.UTF8));
+    }
+
+    static bool DeclaresHandle(INamedTypeSymbol type)
+    {
+        foreach (var member in type.GetMembers("Handle"))
+        {
+            if (member is not IMethodSymbol method)
+            {
+                continue;
+            }
+
+            if (method.ReturnType.ToDisplayString() != "System.Threading.Tasks.Task<int>")
+            {
+                continue;
+            }
+
+            if (method.Parameters.Length != 2)
+            {
+                continue;
+            }
+
+            if (method.Parameters[0].Type.ToDisplayString() == "Vice.Execution.CommandContext"
+                && method.Parameters[1].Type.ToDisplayString() == "System.Threading.CancellationToken")
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     static IReadOnlyList<string>? ReadExplicitTargets(AttributeData? attr)
@@ -463,7 +504,7 @@ public sealed partial class ViceCompositionGenerator
             $"}}\n";
     }
 
-    static string BuildPartialClassTargets(string? ns, string visibility, INamedTypeSymbol type, IReadOnlyList<string> names)
+    static string BuildPartialClassTargets(string? ns, string visibility, INamedTypeSymbol type, IReadOnlyList<string> names, bool emitInterface)
     {
         var namespaceBlock = ns is not null ? $"namespace {ns};\n\n" : "";
         var propBody = BuildTargetPropertyLines(names, type.Name);
@@ -486,9 +527,10 @@ public sealed partial class ViceCompositionGenerator
         }
 
         var typeParams = TypeParameterList(type);
+        var baseList = emitInterface ? " : global::Vice.Composition.IViceCommand" : "";
 
         var classBlock =
-            $"{indent}{visibility} partial class {type.Name}{typeParams} : global::Vice.Composition.IViceCommand\n{indent}{{\n" +
+            $"{indent}{visibility} partial class {type.Name}{typeParams}{baseList}\n{indent}{{\n" +
             $"{indent}    public TargetSet Targets(global::Vice.Execution.CommandContext ctx) => new(ctx);\n\n" +
             $"{indent}    public readonly struct TargetSet\n{indent}    {{\n" +
             $"{indent}        private readonly global::Vice.Execution.CommandContext _ctx;\n" +
@@ -532,7 +574,8 @@ public sealed partial class ViceCompositionGenerator
 
     static string MethodSignatureDisambiguator(IMethodSymbol method)
     {
-        var signature = string.Join(",", method.Parameters.Select(p => p.Type.ToDisplayString()));
+        var parameterSignature = string.Join(",", method.Parameters.Select(p => p.Type.ToDisplayString()));
+        var signature = $"{method.ContainingType.ToDisplayString()}.{method.Name}({parameterSignature})";
         unchecked
         {
             const uint offset = 2166136261;
@@ -564,9 +607,7 @@ public sealed partial class ViceCompositionGenerator
         var upper = true;
         foreach (var c in raw)
         {
-            if (c == '-' || c == '_'
-                || c == '.'
-                || c == ' ')
+            if (!char.IsLetterOrDigit(c))
             {
                 upper = true;
                 continue;
@@ -583,7 +624,17 @@ public sealed partial class ViceCompositionGenerator
             }
         }
 
-        return chars.Count == 0 ? "_" : new string(chars.ToArray());
+        if (chars.Count == 0)
+        {
+            return "_";
+        }
+
+        if (char.IsDigit(chars[0]))
+        {
+            chars.Insert(0, '_');
+        }
+
+        return new string(chars.ToArray());
     }
 
     sealed class RegistrationCandidate
@@ -654,7 +705,13 @@ internal static class ChainTargetScanner
     sealed class FailureSink
     {
         public string? Detail;
-        public void Set(string s) { if (Detail is null) Detail = s; }
+        public void Set(string s)
+        {
+            if (Detail is null)
+            {
+                Detail = s;
+            }
+        }
     }
 
     static bool ScanWorkList(ExpressionSyntax root, SemanticModel model, List<string> names, FailureSink fail)

@@ -5,20 +5,23 @@ using Grpc.Net.Client;
 using Vice.Display;
 using Vice.Logging;
 
-namespace Vice.Network.gRPC;
+namespace Vice.Net.Requests.Grpc;
 
 public sealed class GrpcConnectionManager : IAsyncDisposable
 {
     public const string PinnedCertEnvVar = "VICE_GRPC_PINNED_CERT_SHA256";
 
     private const int MAX_GRPC_MESSAGE_BYTES = 32 * 1024 * 1024;
-    private const int MaxConnections = 256;
+    private const int MAX_CONNECTIONS = 256;
+    private const int TLS_DEFAULT_PORT = 443;
     private static readonly TimeSpan DefaultShutdownTimeout = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan IdleTtl = TimeSpan.FromMinutes(10);
     private static readonly TimeSpan EvictionScanInterval = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan EvictionLoopDisposeTimeout = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan EvictionDrainTimeout = TimeSpan.FromMinutes(35);
 
     private readonly ConcurrentDictionary<string, Lazy<ConnectionEntry>> _connections = new();
+    private readonly ConcurrentDictionary<Task, byte> _drainTasks = new();
     private readonly CancellationTokenSource _evictionCts = new();
     private readonly Task _evictionLoop;
     private int _shuttingDown;
@@ -57,6 +60,11 @@ public sealed class GrpcConnectionManager : IAsyncDisposable
                         continue;
                     }
 
+                    if (!kvp.Value.Value.ActiveLeases.IsEmpty)
+                    {
+                        continue;
+                    }
+
                     var lastUsedTicks = Interlocked.Read(ref kvp.Value.Value.LastUsedTicks);
                     if (lastUsedTicks > cutoffTicks)
                     {
@@ -68,35 +76,18 @@ public sealed class GrpcConnectionManager : IAsyncDisposable
                         break;
                     }
 
-                    if (!_connections.TryRemove(kvp.Key, out var removed) || !removed.IsValueCreated)
+                    if (!_connections.TryRemove(kvp))
                     {
                         continue;
                     }
 
-                    var recheckTicks = Interlocked.Read(ref removed.Value.LastUsedTicks);
-                    if (recheckTicks > cutoffTicks)
+                    if (!kvp.Value.Value.ActiveLeases.IsEmpty)
                     {
-                        _connections.TryAdd(kvp.Key, removed);
+                        _connections.TryAdd(kvp.Key, kvp.Value);
                         continue;
                     }
 
-                    try
-                    {
-                        removed.Value.Channel.Dispose();
-                    }
-                    catch (Exception ex)
-                    {
-                        Vice.Log.Emit(ViceLogLevel.Warn, $"gRPC idle eviction channel dispose failed for {kvp.Key}", ex);
-                    }
-
-                    try
-                    {
-                        removed.Value.Handler?.Dispose();
-                    }
-                    catch (Exception ex)
-                    {
-                        Vice.Log.Emit(ViceLogLevel.Warn, $"gRPC idle eviction handler dispose failed for {kvp.Key}", ex);
-                    }
+                    DrainAndDispose(kvp.Key, kvp.Value.Value, "idle eviction");
                 }
             }
         }
@@ -108,7 +99,7 @@ public sealed class GrpcConnectionManager : IAsyncDisposable
 
     public static void WarnInsecure(IViceLogger? logger, string endpoint, IConsoleWriter? writer = null)
     {
-        var pinned = ParsePin(Environment.GetEnvironmentVariable(PinnedCertEnvVar)) is not null;
+        var pinned = ParsePin(Environment.GetEnvironmentVariable(PinnedCertEnvVar)).Pin is not null;
         var headline = pinned
             ? $"TLS chain validation bypassed for {endpoint} via --insecure; certificate pinned to {PinnedCertEnvVar}"
             : $"TLS certificate validation disabled for {endpoint} via --insecure flag";
@@ -193,14 +184,16 @@ public sealed class GrpcConnectionManager : IAsyncDisposable
 
     private void EnforceMaxConnections(string keepEndpoint)
     {
-        while (_connections.Count > MaxConnections)
+        while (_connections.Count > MAX_CONNECTIONS)
         {
-            string? lruKey = null;
+            KeyValuePair<string, Lazy<ConnectionEntry>> lru = default;
             var lruTicks = long.MaxValue;
+            var found = false;
             foreach (var kvp in _connections)
             {
                 if (kvp.Key == keepEndpoint
-                    || !kvp.Value.IsValueCreated)
+                    || !kvp.Value.IsValueCreated
+                    || !kvp.Value.Value.ActiveLeases.IsEmpty)
                 {
                     continue;
                 }
@@ -209,37 +202,77 @@ public sealed class GrpcConnectionManager : IAsyncDisposable
                 if (ticks < lruTicks)
                 {
                     lruTicks = ticks;
-                    lruKey = kvp.Key;
+                    lru = kvp;
+                    found = true;
                 }
             }
 
-            if (lruKey is null)
+            if (!found)
             {
                 break;
             }
 
-            if (!_connections.TryRemove(lruKey, out var removed) || !removed.IsValueCreated)
+            if (!_connections.TryRemove(lru))
             {
                 continue;
             }
 
-            try
+            if (!lru.Value.Value.ActiveLeases.IsEmpty)
             {
-                removed.Value.Channel.Dispose();
-            }
-            catch (Exception ex)
-            {
-                Vice.Log.Emit(ViceLogLevel.Warn, $"gRPC LRU eviction channel dispose failed for {lruKey}", ex);
+                _connections.TryAdd(lru.Key, lru.Value);
+                break;
             }
 
-            try
-            {
-                removed.Value.Handler?.Dispose();
-            }
-            catch (Exception ex)
-            {
-                Vice.Log.Emit(ViceLogLevel.Warn, $"gRPC LRU eviction handler dispose failed for {lruKey}", ex);
-            }
+            DrainAndDispose(lru.Key, lru.Value.Value, "LRU eviction");
+        }
+    }
+
+    private void DrainAndDispose(string endpoint, ConnectionEntry entry, string reason)
+    {
+        var task = DrainAndDisposeAsync(endpoint, entry, reason);
+        if (!task.IsCompleted)
+        {
+            _drainTasks.TryAdd(task, 0);
+            task.ContinueWith(
+                static (t, state) =>
+                {
+                    var (map, finished) = ((ConcurrentDictionary<Task, byte>, Task))state!;
+                    map.TryRemove(finished, out _);
+                },
+                (_drainTasks, task),
+                CancellationToken.None,
+                TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+        }
+    }
+
+    private static async Task DrainAndDisposeAsync(string endpoint, ConnectionEntry entry, string reason)
+    {
+        try
+        {
+            await entry.Channel.ShutdownAsync().WaitAsync(EvictionDrainTimeout).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            Vice.Log.Emit(ViceLogLevel.Warn, $"gRPC {reason} channel drain failed for {endpoint}", ex);
+        }
+
+        try
+        {
+            entry.Channel.Dispose();
+        }
+        catch (Exception ex)
+        {
+            Vice.Log.Emit(ViceLogLevel.Warn, $"gRPC {reason} channel dispose failed for {endpoint}", ex);
+        }
+
+        try
+        {
+            entry.Handler?.Dispose();
+        }
+        catch (Exception ex)
+        {
+            Vice.Log.Emit(ViceLogLevel.Warn, $"gRPC {reason} handler dispose failed for {endpoint}", ex);
         }
     }
 
@@ -254,6 +287,19 @@ public sealed class GrpcConnectionManager : IAsyncDisposable
         Interlocked.Exchange(ref entry.LastUsedTicks, DateTime.UtcNow.Ticks);
         Interlocked.Increment(ref entry.CallCount);
         return entry.Channel;
+    }
+
+    public ConnectionLease LeaseChannel(string endpoint)
+    {
+        if (!_connections.TryGetValue(endpoint, out var lazy))
+        {
+            throw new InvalidOperationException($"Not connected to {endpoint}");
+        }
+
+        var entry = lazy.Value;
+        Interlocked.Exchange(ref entry.LastUsedTicks, DateTime.UtcNow.Ticks);
+        Interlocked.Increment(ref entry.CallCount);
+        return new ConnectionLease(entry);
     }
 
     public bool Disconnect(string endpoint)
@@ -376,6 +422,19 @@ public sealed class GrpcConnectionManager : IAsyncDisposable
         }
 
         await ShutdownAsync(DefaultShutdownTimeout).ConfigureAwait(false);
+
+        var drains = _drainTasks.Keys.ToArray();
+        if (drains.Length > 0)
+        {
+            try
+            {
+                await Task.WhenAll(drains).WaitAsync(DefaultShutdownTimeout).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                Vice.Log.Emit(ViceLogLevel.Trace, "gRPC eviction drain tasks did not finish within dispose timeout", ex);
+            }
+        }
     }
 
     private ConnectionEntry CreateEntry(string endpoint, bool plaintext, bool insecure)
@@ -421,18 +480,49 @@ public sealed class GrpcConnectionManager : IAsyncDisposable
         }
 
         options.HttpHandler = handler;
-        var scheme = plaintext ? "http" : "https";
+        var useTls = !plaintext
+                     && EndpointPort(endpoint) == TLS_DEFAULT_PORT;
+        var scheme = useTls ? "https" : "http";
         return (GrpcChannel.ForAddress($"{scheme}://{endpoint}", options), handler);
+    }
+
+    private static int EndpointPort(string endpoint)
+    {
+        var lastColon = endpoint.LastIndexOf(':');
+        if (lastColon < 0
+            || lastColon == endpoint.Length - 1
+            || endpoint.IndexOf(']') > lastColon)
+        {
+            return -1;
+        }
+
+        var portText = endpoint[(lastColon + 1)..];
+        if (int.TryParse(portText, out var port))
+        {
+            return port;
+        }
+
+        return -1;
     }
 
     internal static System.Net.Security.RemoteCertificateValidationCallback BuildInsecureValidationCallback()
     {
-        var pin = ParsePin(Environment.GetEnvironmentVariable(PinnedCertEnvVar));
-        if (pin is null)
+        var configured = Environment.GetEnvironmentVariable(PinnedCertEnvVar);
+        var parse = ParsePin(configured);
+        if (parse.Malformed)
+        {
+            var message =
+                $"{PinnedCertEnvVar} is set but is not a valid SHA-256 certificate pin (expected 64 hex characters, separators ':' and ' ' allowed). Refusing to connect rather than silently accepting any certificate. Fix the pin value or unset {PinnedCertEnvVar}.";
+            Vice.Log.Emit(ViceLogLevel.Error, message);
+            throw new InvalidOperationException(message);
+        }
+
+        if (parse.Pin is null)
         {
             return (_, _, _, _) => true;
         }
 
+        var pin = parse.Pin;
         return (_, certificate, _, _) => CertificateMatchesPin(certificate, pin);
     }
 
@@ -448,30 +538,58 @@ public sealed class GrpcConnectionManager : IAsyncDisposable
         return CryptographicOperations.FixedTimeEquals(actual, pin);
     }
 
-    private static byte[]? ParsePin(string? configured)
+    private readonly record struct PinParse(byte[]? Pin, bool Malformed);
+
+    private static PinParse ParsePin(string? configured)
     {
         if (string.IsNullOrWhiteSpace(configured))
         {
-            return null;
+            return new PinParse(null, false);
         }
 
         var normalized = configured.Trim().Replace(":", string.Empty).Replace(" ", string.Empty);
         if (normalized.Length != 64)
         {
-            return null;
+            return new PinParse(null, true);
         }
 
         try
         {
-            return Convert.FromHexString(normalized);
+            return new PinParse(Convert.FromHexString(normalized), false);
         }
         catch (FormatException)
         {
-            return null;
+            return new PinParse(null, true);
         }
     }
 
-    private class ConnectionEntry
+    public sealed class ConnectionLease : IDisposable
+    {
+        private readonly ConnectionEntry _entry;
+        private readonly Guid _id;
+
+        internal ConnectionLease(ConnectionEntry entry)
+        {
+            _entry = entry;
+            _id = Guid.NewGuid();
+            _entry.ActiveLeases[_id] = 0;
+        }
+
+        public GrpcChannel Channel => _entry.Channel;
+
+        public void Renew()
+        {
+            Interlocked.Exchange(ref _entry.LastUsedTicks, DateTime.UtcNow.Ticks);
+        }
+
+        public void Dispose()
+        {
+            Interlocked.Exchange(ref _entry.LastUsedTicks, DateTime.UtcNow.Ticks);
+            _entry.ActiveLeases.TryRemove(_id, out _);
+        }
+    }
+
+    internal sealed class ConnectionEntry
     {
         public required GrpcChannel Channel { get; init; }
         public required string Endpoint { get; init; }
@@ -481,5 +599,6 @@ public sealed class GrpcConnectionManager : IAsyncDisposable
         public required bool Plaintext { get; init; }
         public required bool Insecure { get; init; }
         public IDisposable? Handler { get; init; }
+        public ConcurrentDictionary<Guid, byte> ActiveLeases { get; } = new();
     }
 }

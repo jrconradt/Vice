@@ -10,7 +10,8 @@ internal static class NetworkOptions
     public static (string host, int port) ParseEndpoint(string endpoint)
     {
         var parts = endpoint.Split(':', 2);
-        if (parts.Length != 2 || !int.TryParse(parts[1], out var port)
+        if (parts.Length != 2 || string.IsNullOrWhiteSpace(parts[0])
+            || !int.TryParse(parts[1], out var port)
             || port < 1
             || port > 65535)
         {
@@ -21,7 +22,7 @@ internal static class NetworkOptions
     }
 
     public static int GetTimeout(ICommandContext ctx)
-        => GetTimeout(ctx, NetworkConstants.DefaultTimeoutMs);
+        => GetTimeout(ctx, NetworkConstants.DEFAULT_TIMEOUT_MS);
 
     public static int GetTimeout(ICommandContext ctx, int defaultMs)
     {

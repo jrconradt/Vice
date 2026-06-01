@@ -84,6 +84,7 @@ internal static class PipelineSplitter
         IReadOnlyList<CommandRegistration> registrations)
     {
         var stages = new List<PipelineStage>(segments.Count);
+        int stageIndex = 0;
         foreach (var s in segments)
         {
             var reg = registrations[s.MatchedRegistrationIndex];
@@ -92,13 +93,19 @@ internal static class PipelineSplitter
 
             if (reg.Mode != StageMode.Buffered)
             {
+                var mode = (stageIndex > 0 && reg.Launcher is { HasConsumer: true })
+                    ? StageMode.StreamConsumer
+                    : reg.Mode;
+
                 stages.Add(new PipelineStage(null, s.OperatorWord, targets,
-                    reg.Handler, reg.Mode, reg.StreamOptions, reg.Launcher, nodes));
+                    reg.Handler, mode, reg.StreamOptions, reg.Launcher, nodes));
             }
             else
             {
                 stages.Add(new PipelineStage(null, s.OperatorWord, targets, reg.Handler, nodes));
             }
+
+            stageIndex++;
         }
         return stages;
     }

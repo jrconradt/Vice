@@ -8,12 +8,24 @@ namespace Vice.Build.Tests;
 public class BuildCommandsRegistrationTests
 {
     [Fact]
-    public async Task Register_WiresPackIntoApp_WithoutThrowing()
+    public async Task Register_WiresBuildVerbsIntoApp()
     {
         await using var queue = new DotnetBuildQueue();
-        await using var app = ViceApp.Create("vice-test", "0.0.0").Build();
+        await using var app = (ViceApp)ViceApp.Create("vice-test", "0.0.0").Build();
 
         BuildCommands.Register(app, queue);
+
+        var verbs = new[]
+        {
+            "build",
+            "test",
+            "restore",
+            "clean",
+        };
+        foreach (var verb in verbs)
+        {
+            Assert.NotNull(app.Registry.FindByVerb(verb));
+        }
     }
 
     [Fact]

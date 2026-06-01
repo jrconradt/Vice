@@ -6,6 +6,9 @@ namespace Vice.Jobs;
 internal sealed class JobManager : IJobManager
 {
     public const int MAX_RETAINED_JOBS = 1000;
+    public const int MAX_LIVE_JOBS = 4096;
+    public const int MAX_JOB_ATTEMPTS = 3;
+    public const int RETRY_BASE_BACKOFF_MS = 500;
 
     private readonly IReadOnlyList<IJobRunner> _runners;
     private readonly TimeSpan _shutdownTimeout;
@@ -13,6 +16,8 @@ internal sealed class JobManager : IJobManager
     private readonly ConcurrentDictionary<int, JobStateHolder> _jobs = new();
     private readonly ConcurrentDictionary<int, CancellationTokenSource> _jobCts = new();
     private readonly ConcurrentDictionary<int, Task> _activeTasks = new();
+    private readonly ConcurrentDictionary<int, byte> _terminalSeen = new();
+    private readonly ConcurrentQueue<int> _terminalOrder = new();
     private int _nextId;
 
     private readonly CancellationTokenSource _shutdownCts;
@@ -71,11 +76,19 @@ internal sealed class JobManager : IJobManager
                 nameof(descriptor));
         }
 
+        EvictOldCompleted();
+
+        var liveCount = _jobs.Count - _terminalOrder.Count;
+        if (liveCount >= MAX_LIVE_JOBS)
+        {
+            throw new InvalidOperationException(
+                $"Job submission rejected: {liveCount} non-terminal jobs are retained, at or above the live cap of {MAX_LIVE_JOBS}.");
+        }
+
         var holder = CreateJobState(descriptor);
         var id = holder.Read().Id;
 
         _jobs.TryAdd(id, holder);
-        EvictOldCompleted();
 
         await _workerPool.EnqueueAsync(holder, _shutdownCts.Token).ConfigureAwait(false);
         return id;
@@ -122,9 +135,7 @@ internal sealed class JobManager : IJobManager
             SafeDispose(stuckCts);
             if (transitioned)
             {
-                var failed = holder.Read();
-                EmitFailedTelemetry(failed, "pause drain timed out");
-                JobFailed?.Invoke(failed, "pause drain timed out");
+                FailJob(holder, "pause drain timed out");
             }
         }
         catch (Exception ex)
@@ -199,14 +210,18 @@ internal sealed class JobManager : IJobManager
         _jobCts.TryGetValue(jobId, out var cts);
 
         SafeCancel(cts);
-        var failed = holder.Read();
-        EmitFailedTelemetry(failed, "Cancelled");
-        JobFailed?.Invoke(failed, "Cancelled");
+        FailJob(holder, "Cancelled");
         return Task.CompletedTask;
     }
 
     public IReadOnlyList<JobState> GetJobs()
         => _jobs.Values.Select(h => h.Read()).OrderBy(j => j.Id).ToList();
+
+    public WorkerPoolHealth GetWorkerPoolHealth()
+        => new(
+            _workerPool.ConfiguredConcurrency,
+            _workerPool.LiveWorkerCount,
+            _workerPool.IsDegraded);
 
     public JobState? GetJob(int id)
         => FindHolder(id)?.Read();
@@ -279,34 +294,50 @@ internal sealed class JobManager : IJobManager
     private JobStateHolder? FindHolder(int id)
         => _jobs.TryGetValue(id, out var holder) ? holder : null;
 
+    private void RecordTerminal(int jobId)
+    {
+        if (_terminalSeen.TryAdd(jobId, 0))
+        {
+            _terminalOrder.Enqueue(jobId);
+        }
+    }
+
     private void EvictOldCompleted()
     {
-        var completedCount = 0;
-        foreach (var holder in _jobs.Values)
+        while (_terminalOrder.Count > MAX_RETAINED_JOBS)
         {
-            if (holder.Read().Status is JobStatus.Completed or JobStatus.Failed)
+            if (!_terminalOrder.TryDequeue(out var staleId))
             {
-                completedCount++;
+                return;
+            }
+
+            _terminalSeen.TryRemove(staleId, out _);
+            if (_jobs.TryRemove(staleId, out var evicted))
+            {
+                SweepAbandonedPartial(evicted.Read());
             }
         }
+    }
 
-        var excess = completedCount - MAX_RETAINED_JOBS;
-        if (excess <= 0)
+    private static void SweepAbandonedPartial(JobState job)
+    {
+        if (job.Kind != JobKind.Download
+            || string.IsNullOrEmpty(job.DestinationPath))
         {
             return;
         }
 
-        var completed = _jobs.Values
-            .Select(h => h.Read())
-            .Where(s => s.Status is JobStatus.Completed or JobStatus.Failed)
-            .OrderBy(s => s.CompletedAt ?? DateTime.MinValue)
-            .ThenBy(s => s.Id)
-            .ToList();
-
-        for (var i = 0; i < excess; i++)
+        var partial = $"{Path.GetFullPath(job.DestinationPath)}.partial";
+        try
         {
-            var stale = completed[i];
-            _jobs.TryRemove(stale.Id, out _);
+            if (File.Exists(partial))
+            {
+                File.Delete(partial);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Vice.Log.Emit(ViceLogLevel.Debug, $"abandoned partial cleanup failed: '{partial}'", ex);
         }
     }
 
@@ -343,6 +374,7 @@ internal sealed class JobManager : IJobManager
             return;
         }
 
+        var retry = false;
         try
         {
             await runner.RunAsync(holder.Read(), CreateProgressReporter(holder), linkedCts.Token).ConfigureAwait(false);
@@ -354,11 +386,16 @@ internal sealed class JobManager : IJobManager
         }
         catch (Exception ex)
         {
-            await OnFailureAsync(holder, jobId, ex).ConfigureAwait(false);
+            retry = OnFailure(holder, jobId, ex);
         }
         finally
         {
             CleanupJobCts(jobId, linkedCts);
+        }
+
+        if (retry)
+        {
+            await RetryAfterTransientAsync(holder, jobId).ConfigureAwait(false);
         }
     }
 
@@ -379,9 +416,7 @@ internal sealed class JobManager : IJobManager
     {
         var errorMsg = $"No runner found for job kind: {kind}";
         TryTransitionToFailed(holder, errorMsg);
-        var failed = holder.Read();
-        EmitFailedTelemetry(failed, errorMsg);
-        JobFailed?.Invoke(failed, errorMsg);
+        FailJob(holder, errorMsg);
         return Task.CompletedTask;
     }
 
@@ -391,6 +426,7 @@ internal sealed class JobManager : IJobManager
         if (transitioned)
         {
             var completed = holder.Read();
+            RecordTerminal(completed.Id);
             EmitCompletedTelemetry(completed);
             JobCompleted?.Invoke(completed);
         }
@@ -417,16 +453,30 @@ internal sealed class JobManager : IJobManager
         Vice.Log.Emit(ViceLogLevel.Info, $"job {jobId} cancelled");
         if (!alreadyFailed)
         {
-            var failed = holder.Read();
-            EmitFailedTelemetry(failed, reason);
-            JobFailed?.Invoke(failed, reason);
+            FailJob(holder, reason);
         }
 
         return Task.CompletedTask;
     }
 
-    private Task OnFailureAsync(JobStateHolder holder, int jobId, Exception ex)
+    private bool OnFailure(JobStateHolder holder, int jobId, Exception ex)
     {
+        var current = holder.Read();
+        if (IsTransient(ex) && current.Attempt < MAX_JOB_ATTEMPTS - 1
+            && !_shutdownCts.IsCancellationRequested
+            && current.Status == JobStatus.Running)
+        {
+            var attempt = holder.Update(s => s with
+            {
+                Attempt = s.Attempt + 1,
+                ErrorMessage = ex.Message,
+            }).Attempt;
+
+            Vice.Log.Emit(ViceLogLevel.Warn,
+                          $"job {jobId} transient failure (attempt {attempt}/{MAX_JOB_ATTEMPTS}); scheduling retry: {ex.Message}");
+            return true;
+        }
+
         holder.TryUpdate(s => JobStateTransitions.IsValid(s.Status, JobStatus.Failed)
             ? s with
             {
@@ -437,10 +487,51 @@ internal sealed class JobManager : IJobManager
             : s with { ErrorMessage = ex.Message });
 
         Vice.Log.Emit(ViceLogLevel.Warn, $"job {jobId} failed: {ex.Message}", ex);
-        var failed = holder.Read();
-        EmitFailedTelemetry(failed, ex.Message);
-        JobFailed?.Invoke(failed, ex.Message);
-        return Task.CompletedTask;
+        FailJob(holder, ex.Message);
+        return false;
+    }
+
+    private async Task RetryAfterTransientAsync(JobStateHolder holder, int jobId)
+    {
+        var attempt = holder.Read().Attempt;
+        var backoff = TimeSpan.FromMilliseconds(RETRY_BASE_BACKOFF_MS * Math.Pow(2, attempt - 1));
+
+        try
+        {
+            await Task.Delay(backoff, _shutdownCts.Token).ConfigureAwait(false);
+            await _workerPool.EnqueueAsync(holder, _shutdownCts.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            var reason = holder.Read().ErrorMessage ?? "cancelled during retry backoff";
+            holder.TryUpdate(s => JobStateTransitions.IsValid(s.Status, JobStatus.Failed)
+                ? s with
+                {
+                    Status = JobStatus.Failed,
+                    CompletedAt = DateTime.UtcNow,
+                    ErrorMessage = reason,
+                }
+                : null);
+            FailJob(holder, reason);
+        }
+    }
+
+    private static bool IsTransient(Exception ex)
+    {
+        Exception? current = ex;
+        while (current is not null)
+        {
+            if (current is TimeoutException || current is IOException
+                || current.GetType().Name == "SocketException"
+                || current.GetType().Name == "HttpRequestException")
+            {
+                return true;
+            }
+
+            current = current.InnerException;
+        }
+
+        return false;
     }
 
     private static void EmitCompletedTelemetry(JobState job)
@@ -450,6 +541,18 @@ internal sealed class JobManager : IJobManager
     private static void EmitFailedTelemetry(JobState job, string reason)
         => Vice.Log.Emit(ViceLogLevel.Warn,
                          $"job terminal id={job.Id} kind={job.Kind} status=Failed source={job.Source} error={reason}");
+
+    private void FailJob(JobStateHolder holder, string reason)
+    {
+        var failed = holder.Read();
+        if (failed.Status is JobStatus.Failed or JobStatus.Completed)
+        {
+            RecordTerminal(failed.Id);
+        }
+
+        EmitFailedTelemetry(failed, reason);
+        JobFailed?.Invoke(failed, reason);
+    }
 
     private static bool TryTransitionToFailed(JobStateHolder holder, string reason) =>
         holder.TryUpdate(s => JobStateTransitions.IsValid(s.Status, JobStatus.Failed)
@@ -469,7 +572,7 @@ internal sealed class JobManager : IJobManager
         }
         catch (ObjectDisposedException ode)
         {
-            System.Diagnostics.Debug.WriteLine(ode);
+            Quietly.Swallow(ode);
         }
     }
 
@@ -481,7 +584,7 @@ internal sealed class JobManager : IJobManager
         }
         catch (ObjectDisposedException ode)
         {
-            System.Diagnostics.Debug.WriteLine(ode);
+            Quietly.Swallow(ode);
         }
     }
 

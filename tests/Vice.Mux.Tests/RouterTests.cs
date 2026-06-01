@@ -1,8 +1,149 @@
 using System.Text;
+using CsCheck;
 using Vice.Mux.Routing;
 using Xunit;
 
 namespace Vice.Mux.Tests;
+
+public class ConditionPropertyTests
+{
+    private const long ITERATIONS = 10_000;
+
+    private static readonly Gen<int[]> CodeList =
+        Gen.Int[-1000, 1000].Array[1, 8];
+
+    private static readonly Gen<int> AnyCode =
+        Gen.Int[-2000, 2000];
+
+    [Fact]
+    public void CommaList_MatchesEveryListedCode()
+    {
+        CodeList.Sample(codes =>
+            {
+                var spec = string.Join(',', codes);
+
+                var condition = Condition.Parse(spec);
+
+                Assert.False(condition.IsWildcard);
+                for (int i = 0; i < codes.Length; i++)
+                {
+                    Assert.True(condition.Matches(codes[i]));
+                }
+            },
+            iter: ITERATIONS,
+            seed: "0000CondListMatch0");
+    }
+
+    [Fact]
+    public void CommaList_MatchesIffMemberOfSet()
+    {
+        Gen.Select(CodeList,
+                   AnyCode,
+                   (codes, probe) => (codes, probe)).Sample(pair =>
+            {
+                var (codes, probe) = pair;
+                var spec = string.Join(',', codes);
+
+                var condition = Condition.Parse(spec);
+
+                Assert.Equal(Array.IndexOf(codes, probe) >= 0, condition.Matches(probe));
+            },
+            iter: ITERATIONS,
+            seed: "0000CondMemberSet0");
+    }
+
+    [Fact]
+    public void Wildcard_MatchesEveryCode()
+    {
+        AnyCode.Sample(code =>
+            {
+                Assert.True(Condition.Parse("*").Matches(code));
+                Assert.True(Condition.Parse("all").Matches(code));
+            },
+            iter: ITERATIONS,
+            seed: "0000CondWildcard00");
+    }
+
+    [Fact]
+    public void Parse_IntegerCommaList_NeverThrows()
+    {
+        CodeList.Sample(codes =>
+            {
+                var spec = string.Join(',', codes);
+
+                var ex = Record.Exception(() => Condition.Parse(spec));
+
+                Assert.Null(ex);
+            },
+            iter: ITERATIONS,
+            seed: "0000CondNoThrow000");
+    }
+
+    private static readonly Gen<int[]> FullRangeCodeList =
+        Gen.Int.Array[1, 8];
+
+    [Fact]
+    public void FullRangeCommaList_RoundTrips()
+    {
+        FullRangeCodeList.Sample(codes =>
+            {
+                var spec = string.Join(',', codes);
+
+                var condition = Condition.Parse(spec);
+
+                Assert.False(condition.IsWildcard);
+                for (int i = 0; i < codes.Length; i++)
+                {
+                    Assert.True(condition.Matches(codes[i]));
+                }
+            },
+            iter: ITERATIONS,
+            seed: "0000CondFullRange0");
+    }
+
+    [Theory]
+    [InlineData(int.MinValue)]
+    [InlineData(int.MaxValue)]
+    public void BoundaryCode_RoundTrips(int code)
+    {
+        var condition = Condition.Parse($"{code}");
+
+        Assert.False(condition.IsWildcard);
+        Assert.True(condition.Matches(code));
+    }
+
+    private static readonly Gen<string> SpecFragment =
+        Gen.OneOf(Gen.Int.Select(static n => $"{n}"),
+                  Gen.OneOfConst($"{int.MinValue}",
+                                 $"{int.MaxValue}",
+                                 "9999999999999999999",
+                                 "-9999999999999999999",
+                                 "",
+                                 "   ",
+                                 "+5",
+                                 "nope",
+                                 "*",
+                                 "all",
+                                 "0x1F",
+                                 " 7 "),
+                  Gen.String[Gen.Char[" ,*-+0123abAB"], 0, 6]);
+
+    private static readonly Gen<string> ArbitrarySpec =
+        SpecFragment.Array[0, 6].Select(static parts => string.Join(',', parts));
+
+    [Fact]
+    public void Parse_ArbitrarySpec_ThrowsOnlyArgumentException()
+    {
+        ArbitrarySpec.Sample(spec =>
+            {
+                var ex = Record.Exception(() => Condition.Parse(spec));
+
+                Assert.True(ex is null || ex is ArgumentException);
+            },
+            iter: ITERATIONS,
+            seed: "0000CondArbSpec00");
+    }
+}
 
 public class ConditionTests
 {

@@ -49,7 +49,7 @@ vice> search "transformer" on source arxiv --limit 5
 vice> exit
 ```
 
-In a session, long-running work (downloads, server-streaming gRPC calls) runs as a background **job**; `jobs`, `pause`, `resume`, and `cancel` manage them, and closing the REPL with jobs still running detaches them into a daemon.
+In a session, long-running work (downloads, server-streaming gRPC calls) runs as a background **job**; `jobs`, `pause`, `resume`, and `cancel` manage them. Closing the REPL with jobs still running keeps them running in the same process while the terminal stays open; closing the terminal sends `SIGHUP` and stops them. For terminal-independent persistence, run under `nohup`/`systemd`/`supervisord` or start `vice daemon`.
 
 ---
 
@@ -113,13 +113,11 @@ Add the framework package:
 dotnet add package Vice
 ```
 
-Define a group of commands as a `[ViceCommandPack]`. Each command is a grammar (verb, optional nouns, bound targets) plus a handler:
+Define a group of commands. Each command is a grammar (verb, optional nouns, bound targets) plus a handler. Register them by hand when wiring a single app:
 
 ```csharp
-using Vice.Composition;
 using static Vice.Dsl;
 
-[ViceCommandPack]
 internal static class GreetCommands
 {
     private static readonly TargetDef Name = new("name");
@@ -152,7 +150,7 @@ GreetCommands.Register(app);
 return await app.RunAsync(args, CancellationToken.None);
 ```
 
-`mytool greet world` prints `Hello, world!`; `mytool` with no arguments opens a REPL. Neither is hand-written.
+`mytool greet world` prints `Hello, world!`; `mytool` with no arguments opens a REPL. The parser, pipelines, and REPL are all inherited — only the command grammar and handler above are yours.
 
 The grammar composes with operators: `>` sequences words, `*` binds a target, and `Verbs`/`Nouns`/`Connectors`/`Targets` provide a shared vocabulary:
 
@@ -163,15 +161,15 @@ app.Register(
     async (ctx, ct) => { /* ... */ });
 ```
 
-Mark packs with `[ViceCommandPack]` and call `ComposeFromAttributes()` to have the **[Vice.Generators](src/Vice.Generators/README.md)** source generator discover and wire every pack at compile time — no runtime reflection. That's how the `vice` tool itself is assembled.
+Hand-registration suits a single app. To scale across many packs without hand-wiring each one, mark each pack class with `[ViceCommandPack]`, then build the app as `ComposeFromAttributes(host).Build().RegisterDiscoveredPacks(host)` — passing the host services object — and the **[Vice.Generators](src/Vice.Generators/README.md)** source generator discovers and wires every pack at compile time, with no runtime reflection and no hand calls to each pack's `Register`. That's how the `vice` tool itself is assembled.
 
 What you inherit by building on Vice:
 
 - Natural-language lexer and parser with synonyms and aliases
 - Typed, backpressured streaming channels between piped stages
-- A session REPL with job management, history, and daemon detachment
+- A session REPL with job management, history, and a `daemon` mode for terminal-independent runs
 - Git-style external plugins: any executable named `<app>-<verb>` on the trusted plugin path dispatches as a verb
-- Pluggable, opt-in framework services (`IViceLogger`, `IKeyring`, update checks) with safe `Null` defaults
+- Pluggable, opt-in framework services (`IViceLogger`, `IKeyring`) with safe `Null` defaults
 - POSIX exit codes, pager wrapping, `--json`/`--format` conventions, and an SSRF-guarded `HttpClient`
 
 The framework API is summarized in [src/Vice/README.md](src/Vice/README.md); the knobs are in [docs/env-and-config.md](docs/env-and-config.md).
@@ -206,7 +204,7 @@ Vice is configured through environment variables — log level, allowed write ro
 
 Vice is usable without color, motion, or Unicode, and conveys every outcome textually.
 
-- **Disable motion.** `--no-status` turns off the animated status spinner; progress is still reported in plain text.
+- **Disable motion.** `--no-status` turns off the animated status spinner; progress is still reported in plain text. For a persistent setting, set `VICE_NO_STATUS` or `VICE_REDUCED_MOTION` to a truthy value; Vice also honors the cross-tool `ACCESSIBLE` reduced-motion convention (see [docs/env-and-config.md](docs/env-and-config.md)).
 - **Disable color.** `--no-color`, or the standard `NO_COLOR` environment variable, drops all ANSI color. `FORCE_COLOR` and `CLICOLOR_FORCE` opt color back in for redirected output, and `NO_COLOR` always wins (see [docs/env-and-config.md](docs/env-and-config.md)).
 - **Unicode / ASCII fallback.** When the terminal does not advertise Unicode support, table borders and decorations fall back to ASCII automatically; no flag is required.
 - **No color-only signals.** Status and error semantics are always carried in the text itself — error messages, `hint:` lines, and POSIX exit codes — not by color alone, so screen readers and color-blind users lose no information.
@@ -240,18 +238,20 @@ Vice is usable without color, motion, or Unicode, and conveys every outcome text
 
 Requires the .NET 10 SDK.
 
-`scripts/bench.sh` runs every benchmark by default and writes BenchmarkDotNet JSON, Markdown, and log artifacts under `BenchmarkDotNet.Artifacts/` in the repository root (override the location with `VICE_BENCH_ARTIFACTS`). Persist those JSON files as a baseline to compare throughput run-over-run. Pass BenchmarkDotNet arguments through, e.g. `./scripts/bench.sh --filter '*RouteStrategy*'`.
+`scripts/bench.sh` runs every benchmark by default and writes BenchmarkDotNet JSON, Markdown, and log artifacts under `BenchmarkDotNet.Artifacts/` in the repository root (override the location with `VICE_BENCH_ARTIFACTS`). Pass BenchmarkDotNet arguments through, e.g. `./scripts/bench.sh --filter '*RouteStrategy*'`.
+
+To compare throughput run-over-run automatically, pass `--gate`: the harness diffs each benchmark's mean against the committed `bench/Vice.Benchmarks/baseline.json` and exits non-zero when any benchmark slows past the tolerance (`VICE_BENCH_TOLERANCE`, default `0.10` for 10%); a missing baseline is seeded from the current run. Pass `--update-baseline` to rewrite the baseline from the current run when an intended change shifts the numbers.
 
 ---
 
 ## Releasing
 
-The two tool projects — `Vice.Cli` (the `vice` tool) and `Vice.Mux.Cli` (the `vice-mux` tool) — are packable; `Vice.Net` and the other libraries are not. The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); the shipped version is `<Version>` in `Directory.Build.props`, and each release is an annotated git tag `v<version>`.
+Four projects are packable: the two tool projects — `Vice.Cli` (the `vice` tool) and `Vice.Mux.Cli` (the `vice-mux` tool) — and the two framework libraries `Vice` and `Vice.Parser`; `Vice.Net` and the other libraries are not. The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); the shipped version is `<Version>` in `Directory.Build.props`, and each release is an annotated git tag `v<version>`.
 
 To cut a release: bump `<Version>`, update [CHANGELOG.md](CHANGELOG.md), tag the commit (`git tag -a v<version> -m "v<version>"`), then pack and publish:
 
 ```bash
-scripts/release.sh --verify-tag                       # pack both tools into artifacts/release/<version>/
+scripts/release.sh --verify-tag                       # pack all four packages into artifacts/release/<version>/
 NUGET_API_KEY=<key> scripts/release.sh --verify-tag --push   # publish to $VICE_NUGET_FEED (default nuget.org)
 ```
 

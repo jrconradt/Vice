@@ -5,21 +5,21 @@ public static class CommandResolver
     public static ParseResult Resolve(string[] args, IReadOnlyList<IChainDescriptor> registrations,
         IReadOnlySet<string>? valueBearingOptions = null,
         IReadOnlySet<string>? knownFlags = null,
-        bool PartialsEnabled = true,
-        bool ImplicitPipelinesEnabled = true)
+        bool partialsEnabled = true,
+        bool implicitPipelinesEnabled = true)
     {
         var tokens = Lexer.Tokenize(args);
-        return ResolveTokens(tokens, registrations, valueBearingOptions, knownFlags, PartialsEnabled, ImplicitPipelinesEnabled);
+        return ResolveTokens(tokens, registrations, valueBearingOptions, knownFlags, partialsEnabled, implicitPipelinesEnabled);
     }
 
     public static ParseResult Resolve(string input, IReadOnlyList<IChainDescriptor> registrations,
         IReadOnlySet<string>? valueBearingOptions = null,
         IReadOnlySet<string>? knownFlags = null,
-        bool PartialsEnabled = true,
-        bool ImplicitPipelinesEnabled = true)
+        bool partialsEnabled = true,
+        bool implicitPipelinesEnabled = true)
     {
         var tokens = Lexer.Tokenize(input);
-        return ResolveTokens(tokens, registrations, valueBearingOptions, knownFlags, PartialsEnabled, ImplicitPipelinesEnabled);
+        return ResolveTokens(tokens, registrations, valueBearingOptions, knownFlags, partialsEnabled, implicitPipelinesEnabled);
     }
 
     public static ParseResult Resolve(string[] args, IReadOnlyList<IChainDescriptor> registrations,
@@ -151,8 +151,8 @@ public static class CommandResolver
         return ParseResult.Error(globals, $"Unknown command: '{remaining[0].Value}'.");
     }
 
-    private static readonly HashSet<string> PipingWords =
-        new(StringComparer.OrdinalIgnoreCase) { "then", "pipe", "send", "and", "or" };
+    public static readonly IReadOnlySet<string> PipingWords =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "then", "pipe", "send", "and", "or" };
 
     private static bool ContainsPipingToken(IReadOnlyList<Token> tokens)
     {
@@ -575,6 +575,23 @@ public static class CommandResolver
         Word_AfterNext,
     }
 
+    private struct BranchState
+    {
+        public MatchOutcome Best;
+        public bool HaveBest;
+    }
+
+    private struct RepState
+    {
+        public int Count;
+        public int Min;
+        public int Max;
+        public int CurPos;
+        public int CurDepth;
+        public MatchOutcome LastFailure;
+        public bool HaveFailure;
+    }
+
     private sealed class MatchFrame
     {
         public MatchStep Step;
@@ -586,15 +603,8 @@ public static class CommandResolver
         public IChainDescriptor? Inner;
         public IChainDescriptor? Next;
         public int AltIndex;
-        public MatchOutcome Best;
-        public bool HaveBest;
-        public int RepCount;
-        public int RepMin;
-        public int RepMax;
-        public int CurPos;
-        public int CurDepth;
-        public MatchOutcome LastFailure;
-        public bool HaveFailure;
+        public BranchState Branch;
+        public RepState Rep;
     }
 
     private static MatchOutcome MatchNode(
@@ -621,255 +631,283 @@ public static class CommandResolver
             switch (frame.Step)
             {
                 case MatchStep.Enter:
-                {
-                    if (frame.Node is null)
                     {
-                        result = new MatchOutcome(true, frame.Pos, frame.Depth, frame.Acc, null);
-                        haveResult = true;
-                        stack.Pop();
-                        break;
-                    }
-
-                    switch (frame.Node.Kind)
-                    {
-                        case ChainNodeKind.Word:
+                        var enter = EnterNode(ctx, frame, stack);
+                        if (enter.HasOutcome)
                         {
-                            var local = MatchWordNodeLocal(ctx, frame.Pos, frame.Node, frame.Depth, frame.Acc, frame.IsHead);
-                            if (!local.Success)
-                            {
-                                result = local;
-                                haveResult = true;
-                                stack.Pop();
-                                break;
-                            }
-
-                            frame.Step = MatchStep.Word_AfterNext;
-                            PushEval(stack, frame.Node.Next, local.Pos, local.MatchedDepth, local.Resolved!, isHead: false);
-                            break;
-                        }
-                        case ChainNodeKind.Conjunctive:
-                        {
-                            var local = MatchConjunctiveNodeLocal(ctx, frame.Pos, frame.Node, frame.Depth, frame.Acc);
-                            if (!local.Success)
-                            {
-                                result = local;
-                                haveResult = true;
-                                stack.Pop();
-                                break;
-                            }
-
-                            frame.Step = MatchStep.Word_AfterNext;
-                            PushEval(stack, frame.Node.Next, local.Pos, local.MatchedDepth, local.Resolved!, isHead: false);
-                            break;
-                        }
-                        case ChainNodeKind.Optional:
-                        {
-                            frame.Inner = frame.Node.OptionalInner;
-                            frame.Next = frame.Node.Next;
-                            if (frame.Inner is not null && frame.Pos < ctx.Tokens.Count)
-                            {
-                                frame.Step = MatchStep.Optional_AfterTake;
-                                PushInnerThenNext(stack, frame.Inner, frame.Next, frame.Pos, frame.Depth, frame.Acc);
-                            }
-                            else
-                            {
-                                frame.Step = MatchStep.Optional_AfterSkip;
-                                frame.HaveBest = false;
-                                PushEval(stack, frame.Next, frame.Pos, frame.Depth, frame.Acc, isHead: false);
-                            }
-                            break;
-                        }
-                        case ChainNodeKind.Alternation:
-                        {
-                            frame.Next = frame.Node.Next;
-                            frame.AltIndex = 0;
-                            frame.HaveBest = false;
-                            if (frame.Node.Alternatives.Count == 0)
-                            {
-                                result = Fail(ctx, frame.Pos, frame.Depth);
-                                haveResult = true;
-                                stack.Pop();
-                                break;
-                            }
-
-                            frame.Step = MatchStep.Alternation_Next;
-                            PushInnerThenNext(stack, frame.Node.Alternatives[0], frame.Next, frame.Pos, frame.Depth, frame.Acc);
-                            break;
-                        }
-                        case ChainNodeKind.Repetition:
-                        {
-                            frame.CurPos = frame.Pos;
-                            frame.CurDepth = frame.Depth;
-                            frame.RepCount = 0;
-                            var (min, max) = frame.Node.RepetitionBounds;
-                            frame.RepMin = min;
-                            frame.RepMax = max;
-                            frame.HaveFailure = false;
-                            var repResult = DriveRepetition(ctx, frame, stack);
-                            if (repResult is { } repValue)
-                            {
-                                result = repValue;
-                                haveResult = true;
-                                stack.Pop();
-                            }
-                            break;
-                        }
-                        default:
-                        {
-                            result = Fail(ctx, frame.Pos, frame.Depth);
+                            result = enter.Outcome;
                             haveResult = true;
                             stack.Pop();
-                            break;
                         }
+                        break;
                     }
-                    break;
-                }
                 case MatchStep.InnerThenNext_AfterInner:
-                {
-                    var innerOutcome = result;
-                    haveResult = false;
-                    if (!innerOutcome.Success)
                     {
-                        result = innerOutcome;
-                        haveResult = true;
+                        var innerOutcome = result;
+                        haveResult = false;
+                        if (!innerOutcome.Success)
+                        {
+                            result = innerOutcome;
+                            haveResult = true;
+                            stack.Pop();
+                            break;
+                        }
+
                         stack.Pop();
+                        PushEval(stack, frame.Next, innerOutcome.Pos, innerOutcome.MatchedDepth, innerOutcome.Resolved!, isHead: false);
                         break;
                     }
-
-                    stack.Pop();
-                    PushEval(stack, frame.Next, innerOutcome.Pos, innerOutcome.MatchedDepth, innerOutcome.Resolved!, isHead: false);
-                    break;
-                }
                 case MatchStep.Optional_AfterTake:
-                {
-                    var take = result;
-                    haveResult = false;
-                    if (take.Success)
                     {
-                        result = take;
-                        haveResult = true;
-                        stack.Pop();
+                        var take = result;
+                        haveResult = false;
+                        if (take.Success)
+                        {
+                            result = take;
+                            haveResult = true;
+                            stack.Pop();
+                            break;
+                        }
+
+                        frame.Branch.Best = take;
+                        frame.Branch.HaveBest = true;
+                        frame.Step = MatchStep.Optional_AfterSkip;
+                        PushEval(stack, frame.Next, frame.Pos, frame.Depth, frame.Acc, isHead: false);
                         break;
                     }
-
-                    frame.Best = take;
-                    frame.HaveBest = true;
-                    frame.Step = MatchStep.Optional_AfterSkip;
-                    PushEval(stack, frame.Next, frame.Pos, frame.Depth, frame.Acc, isHead: false);
-                    break;
-                }
                 case MatchStep.Optional_AfterSkip:
-                {
-                    var skip = result;
-                    haveResult = false;
-                    if (skip.Success)
                     {
-                        result = skip;
+                        var skip = result;
+                        haveResult = false;
+                        if (skip.Success)
+                        {
+                            result = skip;
+                            haveResult = true;
+                            stack.Pop();
+                            break;
+                        }
+
+                        result = frame.Branch.HaveBest ? DeeperDiag(frame.Branch.Best, skip) : skip;
                         haveResult = true;
                         stack.Pop();
                         break;
                     }
-
-                    result = frame.HaveBest ? DeeperDiag(frame.Best, skip) : skip;
-                    haveResult = true;
-                    stack.Pop();
-                    break;
-                }
                 case MatchStep.Alternation_Next:
-                {
-                    var outcome = result;
-                    haveResult = false;
-                    if (outcome.Success)
                     {
-                        result = outcome;
+                        var outcome = result;
+                        haveResult = false;
+                        if (outcome.Success)
+                        {
+                            result = outcome;
+                            haveResult = true;
+                            stack.Pop();
+                            break;
+                        }
+
+                        if (!frame.Branch.HaveBest || outcome.MatchedDepth > frame.Branch.Best.MatchedDepth)
+                        {
+                            frame.Branch.Best = outcome;
+                            frame.Branch.HaveBest = true;
+                        }
+
+                        frame.AltIndex++;
+                        if (frame.AltIndex < frame.Node!.Alternatives.Count)
+                        {
+                            PushInnerThenNext(stack, frame.Node.Alternatives[frame.AltIndex], frame.Next, frame.Pos, frame.Depth, frame.Acc);
+                            break;
+                        }
+
+                        result = frame.Branch.HaveBest ? frame.Branch.Best : Fail(ctx, frame.Pos, frame.Depth);
                         haveResult = true;
                         stack.Pop();
                         break;
                     }
-
-                    if (!frame.HaveBest || outcome.MatchedDepth > frame.Best.MatchedDepth)
-                    {
-                        frame.Best = outcome;
-                        frame.HaveBest = true;
-                    }
-
-                    frame.AltIndex++;
-                    if (frame.AltIndex < frame.Node!.Alternatives.Count)
-                    {
-                        PushInnerThenNext(stack, frame.Node.Alternatives[frame.AltIndex], frame.Next, frame.Pos, frame.Depth, frame.Acc);
-                        break;
-                    }
-
-                    result = frame.HaveBest ? frame.Best : Fail(ctx, frame.Pos, frame.Depth);
-                    haveResult = true;
-                    stack.Pop();
-                    break;
-                }
                 case MatchStep.Repetition_AfterSeparator:
-                {
-                    var sep = result;
-                    haveResult = false;
-                    if (!sep.Success)
                     {
-                        frame.LastFailure = sep;
-                        frame.HaveFailure = true;
-                        var finished = FinishRepetition(ctx, frame, stack);
-                        if (finished is { } finishedValue)
+                        var sep = result;
+                        haveResult = false;
+                        if (!sep.Success)
                         {
-                            result = finishedValue;
-                            haveResult = true;
-                            stack.Pop();
+                            frame.Rep.LastFailure = sep;
+                            frame.Rep.HaveFailure = true;
+                            var finished = FinishRepetition(ctx, frame, stack);
+                            if (finished is { } finishedValue)
+                            {
+                                result = finishedValue;
+                                haveResult = true;
+                                stack.Pop();
+                            }
+                            break;
                         }
+
+                        ReplaceAcc(frame.Acc, sep.Resolved!);
+                        frame.Rep.CurDepth = sep.MatchedDepth;
+                        PushEval(stack, frame.Node!.RepetitionInner, sep.Pos, frame.Rep.CurDepth, new List<ResolvedCommand>(frame.Acc), isHead: false);
+                        frame.Step = MatchStep.Repetition_AfterInner;
                         break;
                     }
-
-                    ReplaceAcc(frame.Acc, sep.Resolved!);
-                    frame.CurDepth = sep.MatchedDepth;
-                    PushEval(stack, frame.Node!.RepetitionInner, sep.Pos, frame.CurDepth, new List<ResolvedCommand>(frame.Acc), isHead: false);
-                    frame.Step = MatchStep.Repetition_AfterInner;
-                    break;
-                }
                 case MatchStep.Repetition_AfterInner:
-                {
-                    var inner = result;
-                    haveResult = false;
-                    if (!inner.Success)
                     {
-                        frame.LastFailure = inner;
-                        frame.HaveFailure = true;
-                        var finished = FinishRepetition(ctx, frame, stack);
-                        if (finished is { } finishedValue)
+                        var inner = result;
+                        haveResult = false;
+                        if (!inner.Success)
                         {
-                            result = finishedValue;
+                            frame.Rep.LastFailure = inner;
+                            frame.Rep.HaveFailure = true;
+                            var finished = FinishRepetition(ctx, frame, stack);
+                            if (finished is { } finishedValue)
+                            {
+                                result = finishedValue;
+                                haveResult = true;
+                                stack.Pop();
+                            }
+                            break;
+                        }
+
+                        frame.Rep.CurPos = inner.Pos;
+                        frame.Rep.CurDepth = inner.MatchedDepth;
+                        ReplaceAcc(frame.Acc, inner.Resolved!);
+                        frame.Rep.Count++;
+                        var continued = DriveRepetition(ctx, frame, stack);
+                        if (continued is { } continuedValue)
+                        {
+                            result = continuedValue;
                             haveResult = true;
                             stack.Pop();
                         }
                         break;
                     }
-
-                    frame.CurPos = inner.Pos;
-                    frame.CurDepth = inner.MatchedDepth;
-                    ReplaceAcc(frame.Acc, inner.Resolved!);
-                    frame.RepCount++;
-                    var continued = DriveRepetition(ctx, frame, stack);
-                    if (continued is { } continuedValue)
+                case MatchStep.Word_AfterNext:
                     {
-                        result = continuedValue;
                         haveResult = true;
                         stack.Pop();
+                        break;
                     }
-                    break;
-                }
-                case MatchStep.Word_AfterNext:
-                {
-                    haveResult = true;
-                    stack.Pop();
-                    break;
-                }
             }
         }
 
         return haveResult ? result : default;
+    }
+
+    private readonly record struct EnterResult(bool HasOutcome, MatchOutcome Outcome)
+    {
+        public static EnterResult Pending => new(false, default);
+
+        public static EnterResult Terminal(MatchOutcome outcome) => new(true, outcome);
+    }
+
+    private static EnterResult EnterNode(MatchCtx ctx, MatchFrame frame, Stack<MatchFrame> stack)
+    {
+        if (frame.Node is null)
+        {
+            return EnterResult.Terminal(new MatchOutcome(true, frame.Pos, frame.Depth, frame.Acc, null));
+        }
+
+        switch (frame.Node.Kind)
+        {
+            case ChainNodeKind.Word:
+                {
+                    return EnterWord(ctx, frame, stack);
+                }
+            case ChainNodeKind.Conjunctive:
+                {
+                    return EnterConjunctive(ctx, frame, stack);
+                }
+            case ChainNodeKind.Optional:
+                {
+                    return EnterOptional(ctx, frame, stack);
+                }
+            case ChainNodeKind.Alternation:
+                {
+                    return EnterAlternation(ctx, frame, stack);
+                }
+            case ChainNodeKind.Repetition:
+                {
+                    return EnterRepetition(ctx, frame, stack);
+                }
+            default:
+                {
+                    return EnterResult.Terminal(Fail(ctx, frame.Pos, frame.Depth));
+                }
+        }
+    }
+
+    private static EnterResult EnterWord(MatchCtx ctx, MatchFrame frame, Stack<MatchFrame> stack)
+    {
+        var local = MatchWordNodeLocal(ctx, frame.Pos, frame.Node!, frame.Depth, frame.Acc, frame.IsHead);
+        if (!local.Success)
+        {
+            return EnterResult.Terminal(local);
+        }
+
+        frame.Step = MatchStep.Word_AfterNext;
+        PushEval(stack, frame.Node!.Next, local.Pos, local.MatchedDepth, local.Resolved!, isHead: false);
+        return EnterResult.Pending;
+    }
+
+    private static EnterResult EnterConjunctive(MatchCtx ctx, MatchFrame frame, Stack<MatchFrame> stack)
+    {
+        var local = MatchConjunctiveNodeLocal(ctx, frame.Pos, frame.Node!, frame.Depth, frame.Acc);
+        if (!local.Success)
+        {
+            return EnterResult.Terminal(local);
+        }
+
+        frame.Step = MatchStep.Word_AfterNext;
+        PushEval(stack, frame.Node!.Next, local.Pos, local.MatchedDepth, local.Resolved!, isHead: false);
+        return EnterResult.Pending;
+    }
+
+    private static EnterResult EnterOptional(MatchCtx ctx, MatchFrame frame, Stack<MatchFrame> stack)
+    {
+        frame.Inner = frame.Node!.OptionalInner;
+        frame.Next = frame.Node.Next;
+        if (frame.Inner is not null && frame.Pos < ctx.Tokens.Count)
+        {
+            frame.Step = MatchStep.Optional_AfterTake;
+            PushInnerThenNext(stack, frame.Inner, frame.Next, frame.Pos, frame.Depth, frame.Acc);
+        }
+        else
+        {
+            frame.Step = MatchStep.Optional_AfterSkip;
+            frame.Branch.HaveBest = false;
+            PushEval(stack, frame.Next, frame.Pos, frame.Depth, frame.Acc, isHead: false);
+        }
+
+        return EnterResult.Pending;
+    }
+
+    private static EnterResult EnterAlternation(MatchCtx ctx, MatchFrame frame, Stack<MatchFrame> stack)
+    {
+        frame.Next = frame.Node!.Next;
+        frame.AltIndex = 0;
+        frame.Branch.HaveBest = false;
+        if (frame.Node.Alternatives.Count == 0)
+        {
+            return EnterResult.Terminal(Fail(ctx, frame.Pos, frame.Depth));
+        }
+
+        frame.Step = MatchStep.Alternation_Next;
+        PushInnerThenNext(stack, frame.Node.Alternatives[0], frame.Next, frame.Pos, frame.Depth, frame.Acc);
+        return EnterResult.Pending;
+    }
+
+    private static EnterResult EnterRepetition(MatchCtx ctx, MatchFrame frame, Stack<MatchFrame> stack)
+    {
+        frame.Rep.CurPos = frame.Pos;
+        frame.Rep.CurDepth = frame.Depth;
+        frame.Rep.Count = 0;
+        var (min, max) = frame.Node!.RepetitionBounds;
+        frame.Rep.Min = min;
+        frame.Rep.Max = max;
+        frame.Rep.HaveFailure = false;
+        var repResult = DriveRepetition(ctx, frame, stack);
+        if (repResult is { } repValue)
+        {
+            return EnterResult.Terminal(repValue);
+        }
+
+        return EnterResult.Pending;
     }
 
     private static void PushEval(
@@ -899,15 +937,15 @@ public static class CommandResolver
 
     private static MatchOutcome? DriveRepetition(MatchCtx ctx, MatchFrame frame, Stack<MatchFrame> stack)
     {
-        if (frame.RepMax != 0 && frame.RepCount >= frame.RepMax)
+        if (frame.Rep.Max != 0 && frame.Rep.Count >= frame.Rep.Max)
         {
             return FinishRepetition(ctx, frame, stack);
         }
 
-        if (frame.RepCount > 0 && frame.Node!.RepetitionSeparator is not null)
+        if (frame.Rep.Count > 0 && frame.Node!.RepetitionSeparator is not null)
         {
             frame.Step = MatchStep.Repetition_AfterSeparator;
-            PushEval(stack, frame.Node.RepetitionSeparator, frame.CurPos, frame.CurDepth, new List<ResolvedCommand>(frame.Acc), isHead: false);
+            PushEval(stack, frame.Node.RepetitionSeparator, frame.Rep.CurPos, frame.Rep.CurDepth, new List<ResolvedCommand>(frame.Acc), isHead: false);
             return null;
         }
 
@@ -917,19 +955,19 @@ public static class CommandResolver
         }
 
         frame.Step = MatchStep.Repetition_AfterInner;
-        PushEval(stack, frame.Node.RepetitionInner, frame.CurPos, frame.CurDepth, new List<ResolvedCommand>(frame.Acc), isHead: false);
+        PushEval(stack, frame.Node.RepetitionInner, frame.Rep.CurPos, frame.Rep.CurDepth, new List<ResolvedCommand>(frame.Acc), isHead: false);
         return null;
     }
 
     private static MatchOutcome? FinishRepetition(MatchCtx ctx, MatchFrame frame, Stack<MatchFrame> stack)
     {
-        if (frame.RepCount < frame.RepMin)
+        if (frame.Rep.Count < frame.Rep.Min)
         {
-            return frame.HaveFailure ? frame.LastFailure : Fail(ctx, frame.CurPos, frame.CurDepth);
+            return frame.Rep.HaveFailure ? frame.Rep.LastFailure : Fail(ctx, frame.Rep.CurPos, frame.Rep.CurDepth);
         }
 
         frame.Step = MatchStep.Word_AfterNext;
-        PushEval(stack, frame.Node!.Next, frame.CurPos, frame.CurDepth, frame.Acc, isHead: false);
+        PushEval(stack, frame.Node!.Next, frame.Rep.CurPos, frame.Rep.CurDepth, frame.Acc, isHead: false);
         return null;
     }
 
@@ -1159,45 +1197,70 @@ public static class CommandResolver
 
     private static bool IsChainNodeMatch(string token, IChainDescriptor descriptor)
     {
-        if (descriptor.Kind == ChainNodeKind.Conjunctive)
-        {
-            return string.Equals(token, descriptor.Name, StringComparison.OrdinalIgnoreCase);
-        }
+        var stack = new Stack<IChainDescriptor>();
+        stack.Push(descriptor);
 
-        if (descriptor.Kind == ChainNodeKind.Optional)
+        while (stack.Count > 0)
         {
-            if (descriptor.OptionalInner is not null && IsChainNodeMatch(token, descriptor.OptionalInner))
+            var current = stack.Pop();
+
+            if (current.Kind == ChainNodeKind.Conjunctive)
             {
-                return true;
-            }
-
-            return descriptor.Next is not null && IsChainNodeMatch(token, descriptor.Next);
-        }
-
-        if (descriptor.Kind == ChainNodeKind.Alternation)
-        {
-            foreach (var alt in descriptor.Alternatives)
-            {
-                if (IsChainNodeMatch(token, alt))
+                if (string.Equals(token, current.Name, StringComparison.OrdinalIgnoreCase))
                 {
                     return true;
                 }
+
+                continue;
             }
 
-            return false;
-        }
+            if (current.Kind == ChainNodeKind.Optional)
+            {
+                if (current.OptionalInner is not null)
+                {
+                    stack.Push(current.OptionalInner);
+                }
 
-        if (descriptor.Kind == ChainNodeKind.Repetition)
-        {
-            if (descriptor.RepetitionInner is not null && IsChainNodeMatch(token, descriptor.RepetitionInner))
+                if (current.Next is not null)
+                {
+                    stack.Push(current.Next);
+                }
+
+                continue;
+            }
+
+            if (current.Kind == ChainNodeKind.Alternation)
+            {
+                foreach (var alt in current.Alternatives)
+                {
+                    stack.Push(alt);
+                }
+
+                continue;
+            }
+
+            if (current.Kind == ChainNodeKind.Repetition)
+            {
+                if (current.RepetitionInner is not null)
+                {
+                    stack.Push(current.RepetitionInner);
+                }
+
+                if (current.Next is not null)
+                {
+                    stack.Push(current.Next);
+                }
+
+                continue;
+            }
+
+            if (MatchesWord(token, current))
             {
                 return true;
             }
-
-            return descriptor.Next is not null && IsChainNodeMatch(token, descriptor.Next);
         }
 
-        return MatchesWord(token, descriptor);
+        return false;
     }
 
     private static string GetTokenValue(Token token) => token.Value;

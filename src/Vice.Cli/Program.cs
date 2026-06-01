@@ -1,16 +1,18 @@
 using System.Reflection;
 using Vice;
 using Vice.Build.Dotnet;
+using Vice.Cli;
 using Vice.Execution;
 using Vice.Logging;
-using Vice.Cli;
-using Vice.Network.gRPC;
+using Vice.Net.Requests.Grpc;
 
-var logLevel = ParseLogLevel(Environment.GetEnvironmentVariable("VICE_LOG_LEVEL"));
-IViceLogger logger = new ConsoleViceLogger(logLevel);
+var daemonMode = args.Contains("--daemon");
+var logLevel = LogLevelEnv.Resolve("vice");
+var logSink = LogDestination.Resolve(daemonMode, "vice");
+await using var logger = new ConsoleViceLogger(logLevel, logSink);
 
 var connections = new GrpcConnectionManager(logger);
-await using var buildQueue = new DotnetBuildQueue(logger);
+var buildQueue = new DotnetBuildQueue(logger);
 
 using var cts = Vice.Signals.HookGracefulShutdown();
 
@@ -29,7 +31,7 @@ await using var app = ViceApp.Create("vice", ResolveVersion())
 
 try
 {
-    if (args.Contains("--daemon"))
+    if (daemonMode)
     {
         return await app.RunDaemonAsync(cts.Token);
     }
@@ -80,45 +82,6 @@ static ViceError TranslateTopLevel(Exception ex) => ex switch
     DirectoryNotFoundException dnf => new FileMissing("<directory>", dnf),
     _ => new Unhandled(ex),
 };
-
-static ViceLogLevel ParseLogLevel(string? raw)
-{
-    if (string.IsNullOrWhiteSpace(raw))
-    {
-        return ViceLogLevel.Warn;
-    }
-
-    var normalized = raw.Trim().ToLowerInvariant();
-    switch (normalized)
-    {
-        case "trace":
-        {
-            return ViceLogLevel.Trace;
-        }
-        case "debug":
-        {
-            return ViceLogLevel.Debug;
-        }
-        case "info":
-        {
-            return ViceLogLevel.Info;
-        }
-        case "warn":
-        case "warning":
-        {
-            return ViceLogLevel.Warn;
-        }
-        case "error":
-        {
-            return ViceLogLevel.Error;
-        }
-        default:
-        {
-            Console.Error.WriteLine($"vice: unknown VICE_LOG_LEVEL '{raw.Trim()}', defaulting to warn.");
-            return ViceLogLevel.Warn;
-        }
-    }
-}
 
 static string ResolveVersion()
 {

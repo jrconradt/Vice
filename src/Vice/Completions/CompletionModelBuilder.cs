@@ -234,67 +234,76 @@ internal static class CompletionModelBuilder
         }
 
         var result = inner.Clone();
+        var tail = result;
+        while (tail.NextNode is not null)
+        {
+            tail = tail.NextNode;
+        }
+
         for (var i = 1; i < count; i++)
         {
             var next = separator is null ? inner.Clone() : SpliceBefore(separator, inner)!;
-            var tail = result;
+            tail.NextNode = next;
             while (tail.NextNode is not null)
             {
                 tail = tail.NextNode;
             }
-
-            tail.NextNode = next;
         }
         return result;
     }
 
     private static void Insert(CompletionNode parent, ChainNode? chain, string description)
     {
-        if (chain is null)
+        var current = parent;
+        var link = chain;
+        while (link is not null)
         {
-            return;
-        }
-
-        var token = chain.Name;
-        if (!parent.Children.TryGetValue(token, out var child))
-        {
-            child = parent.Children[token] = new CompletionNode { Token = token };
-            child.Synonyms.AddRange(chain.SynonymList);
-            child.TargetCount = chain.TargetList.Count;
-        }
-        else
-        {
-            foreach (var syn in chain.SynonymList)
+            var token = link.Name;
+            if (!current.Children.TryGetValue(token, out var child))
             {
-                if (!child.Synonyms.Contains(syn))
+                child = current.Children[token] = new CompletionNode { Token = token };
+                child.Synonyms.AddRange(link.SynonymList);
+                child.TargetCount = link.TargetList.Count;
+            }
+            else
+            {
+                foreach (var syn in link.SynonymList)
                 {
-                    child.Synonyms.Add(syn);
+                    if (!child.Synonyms.Contains(syn))
+                    {
+                        child.Synonyms.Add(syn);
+                    }
+                }
+
+                if (link.TargetList.Count > child.TargetCount)
+                {
+                    child.TargetCount = link.TargetList.Count;
                 }
             }
 
-            if (chain.TargetList.Count > child.TargetCount)
+            if (link.NextNode is null)
             {
-                child.TargetCount = chain.TargetList.Count;
+                child.IsTerminal = true;
+                child.Description ??= description;
             }
-        }
 
-        if (chain.NextNode is null)
-        {
-            child.IsTerminal = true;
-            child.Description ??= description;
-        }
-        else
-        {
-            Insert(child, chain.NextNode, description);
+            current = child;
+            link = link.NextNode;
         }
     }
 
     private static void AssignStateIds(CompletionNode node, string id)
     {
-        node.StateId = id;
-        foreach (var (token, child) in node.Children)
+        var stack = new Stack<(CompletionNode Node, string Id)>();
+        stack.Push((node, id));
+        while (stack.Count > 0)
         {
-            AssignStateIds(child, $"{id}__{SanitizeStateSegment(token)}");
+            var (current, currentId) = stack.Pop();
+            current.StateId = currentId;
+            foreach (var (token, child) in current.Children)
+            {
+                stack.Push((child, $"{currentId}__{SanitizeStateSegment(token)}"));
+            }
         }
     }
 

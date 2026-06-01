@@ -57,7 +57,7 @@ public sealed class PagerSession : IAsyncDisposable, IDisposable
         }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or IOException)
         {
-            System.Diagnostics.Debug.WriteLine(ex);
+            Quietly.Swallow(ex);
             return Disabled();
         }
     }
@@ -72,7 +72,7 @@ public sealed class PagerSession : IAsyncDisposable, IDisposable
         }
         catch (IOException ex)
         {
-            System.Diagnostics.Debug.WriteLine(ex);
+            Quietly.Swallow(ex);
             return false;
         }
     }
@@ -144,7 +144,7 @@ public sealed class PagerSession : IAsyncDisposable, IDisposable
         }
         catch (Exception ex) when (ex is IOException or ObjectDisposedException)
         {
-            System.Diagnostics.Debug.WriteLine(ex);
+            Quietly.Swallow(ex);
         }
         try
         {
@@ -152,7 +152,7 @@ public sealed class PagerSession : IAsyncDisposable, IDisposable
         }
         catch (Exception ex) when (ex is IOException or ObjectDisposedException or InvalidOperationException)
         {
-            System.Diagnostics.Debug.WriteLine(ex);
+            Quietly.Swallow(ex);
         }
         var gracefulExited = false;
         try
@@ -162,7 +162,7 @@ public sealed class PagerSession : IAsyncDisposable, IDisposable
         }
         catch (Exception ex) when (ex is TimeoutException or InvalidOperationException or System.ComponentModel.Win32Exception)
         {
-            System.Diagnostics.Debug.WriteLine(ex);
+            Quietly.Swallow(ex);
         }
 
         if (!gracefulExited)
@@ -173,7 +173,7 @@ public sealed class PagerSession : IAsyncDisposable, IDisposable
             }
             catch (Exception killEx) when (killEx is InvalidOperationException or NotSupportedException or System.ComponentModel.Win32Exception)
             {
-                System.Diagnostics.Debug.WriteLine(killEx);
+                Quietly.Swallow(killEx);
             }
 
             try
@@ -182,7 +182,7 @@ public sealed class PagerSession : IAsyncDisposable, IDisposable
             }
             catch (Exception waitEx) when (waitEx is TimeoutException or InvalidOperationException or System.ComponentModel.Win32Exception)
             {
-                System.Diagnostics.Debug.WriteLine(waitEx);
+                Quietly.Swallow(waitEx);
             }
         }
         try
@@ -191,7 +191,7 @@ public sealed class PagerSession : IAsyncDisposable, IDisposable
         }
         catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException)
         {
-            System.Diagnostics.Debug.WriteLine(ex);
+            Quietly.Swallow(ex);
         }
     }
 }

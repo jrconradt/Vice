@@ -1,19 +1,22 @@
 using System.Text;
+using Vice.Display.Rendering;
 
 namespace Vice;
 
 internal sealed class ConsoleOutputSink : IOutputSink, IDisposable
 {
-    private const int BufferBytes = 1 << 16;
+    private const int BUFFER_BYTES = 1 << 16;
 
     private readonly StreamWriter _writer;
+    private readonly bool _sanitize;
     private bool _disposed;
 
     public ConsoleOutputSink()
     {
         var stdout = System.Console.OpenStandardOutput();
         var encoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
-        _writer = new StreamWriter(stdout, encoding, BufferBytes)
+        _sanitize = !System.Console.IsOutputRedirected;
+        _writer = new StreamWriter(stdout, encoding, BUFFER_BYTES)
         {
             AutoFlush = false,
         };
@@ -21,7 +24,7 @@ internal sealed class ConsoleOutputSink : IOutputSink, IDisposable
 
     public void Line(string text)
     {
-        _writer.Write(text);
+        _writer.Write(_sanitize ? AnsiStripper.Strip(text) : text);
         _writer.Write(_writer.NewLine);
     }
 
@@ -32,7 +35,7 @@ internal sealed class ConsoleOutputSink : IOutputSink, IDisposable
 
     public void Write(string text)
     {
-        _writer.Write(text);
+        _writer.Write(_sanitize ? AnsiStripper.Strip(text) : text);
     }
 
     public void Error(string text)

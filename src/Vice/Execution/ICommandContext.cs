@@ -1,6 +1,6 @@
-using Vice.Logging;
 using Vice.Display;
 using Vice.Display.Rendering;
+using Vice.Logging;
 using Vice.Options;
 using Vice.Parser;
 using Vice.Session;
@@ -24,6 +24,7 @@ public interface ICommandContext
     IProgress<double>? ProgressReporter { get; }
     SessionContext? Session { get; }
     IViceLogger Logger { get; }
+    string InvocationId { get; }
     CancellationToken CancellationToken { get; }
 
     IReadOnlyList<ResolvedCommand> ResolvedNodes { get; }

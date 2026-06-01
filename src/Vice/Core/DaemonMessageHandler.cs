@@ -1,10 +1,11 @@
 using System.Text.Json;
-using Vice.Ipc;
-using Vice.Jobs;
 using Vice.Display;
 using Vice.Execution;
-using Vice.Session;
+using Vice.Ipc;
+using Vice.Jobs;
 using Vice.Logging;
+using Vice.Parser;
+using Vice.Session;
 
 namespace Vice;
 
@@ -15,6 +16,20 @@ internal sealed class DaemonMessageHandler
     private readonly SessionContext _sessionCtx;
     private readonly IConsoleWriter _nullWriter;
     private readonly IReadOnlySet<string>? _verbAllowlist;
+    private readonly DateTime _startedUtc;
+    private Func<DaemonLiveness>? _livenessProbe;
+
+    public static readonly IReadOnlySet<string> DaemonControlVerbs =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "jobs",
+            "status",
+            "pause",
+            "resume",
+            "cancel",
+            "history",
+            "clear",
+        };
 
     public DaemonMessageHandler(
         ViceApp app,
@@ -28,6 +43,12 @@ internal sealed class DaemonMessageHandler
         _sessionCtx = sessionCtx;
         _nullWriter = nullWriter;
         _verbAllowlist = verbAllowlist;
+        _startedUtc = DateTime.UtcNow;
+    }
+
+    public void BindLiveness(Func<DaemonLiveness> livenessProbe)
+    {
+        _livenessProbe = livenessProbe;
     }
 
     public async Task<PipeMessage?> HandleAsync(PipeMessage message, CancellationToken ct)
@@ -36,6 +57,8 @@ internal sealed class DaemonMessageHandler
         {
             if (!IsAuthorized(cmd.CommandLine, out var deniedVerb))
             {
+                Vice.Audit.Emit(ViceLogLevel.Warn,
+                                $"daemon rejected disallowed verb '{deniedVerb}' over IPC control channel");
                 Vice.Log.Emit(ViceLogLevel.Warn,
                               $"daemon rejected disallowed verb '{deniedVerb}' over IPC");
                 return new CommandResponse
@@ -74,31 +97,86 @@ internal sealed class DaemonMessageHandler
             return new JobStatusResponse { Jobs = statuses };
         }
 
+        if (message is HealthRequest)
+        {
+            var poolHealth = _jobManager.GetWorkerPoolHealth();
+            var liveness = _livenessProbe?.Invoke() ?? new DaemonLiveness(true,
+                                                                          false,
+                                                                          null);
+            return new HealthResponse
+            {
+                Version = _app.Version,
+                Listening = liveness.Listening,
+                AcceptLoopCrashed = liveness.AcceptLoopCrashed,
+                FaultSummary = liveness.FaultSummary,
+                UptimeSeconds = (DateTime.UtcNow - _startedUtc).TotalSeconds,
+                ConfiguredWorkers = poolHealth.ConfiguredConcurrency,
+                LiveWorkers = poolHealth.LiveWorkerCount,
+                WorkerPoolDegraded = poolHealth.IsDegraded,
+                JobCount = _jobManager.GetJobs().Count
+            };
+        }
+
         return null;
     }
 
     private bool IsAuthorized(string commandLine, out string verb)
     {
-        verb = LeadingVerb(commandLine);
+        verb = string.Empty;
         if (_verbAllowlist is null)
         {
             return true;
         }
 
-        return _verbAllowlist.Contains(verb);
-    }
-
-    private static string LeadingVerb(string commandLine)
-    {
-        var span = commandLine.AsSpan().TrimStart();
-        var end = 0;
-        while (end < span.Length
-            && !char.IsWhiteSpace(span[end]))
+        foreach (var stageVerb in StageVerbs(commandLine))
         {
-            end++;
+            if (!_verbAllowlist.Contains(stageVerb)
+                && !_app.Registry.HasLeadingVerb(stageVerb))
+            {
+                verb = stageVerb;
+                return false;
+            }
         }
 
-        return span[..end].ToString();
+        return true;
+    }
+
+    private static IReadOnlyList<string> StageVerbs(string commandLine)
+    {
+        var tokens = Lexer.Tokenize(commandLine);
+        var verbs = new List<string>();
+        var stageStarted = false;
+
+        foreach (var token in tokens)
+        {
+            if (token.Kind == TokenKind.Word
+                && CommandResolver.PipingWords.Contains(token.Value))
+            {
+                stageStarted = false;
+                continue;
+            }
+
+            if (stageStarted)
+            {
+                continue;
+            }
+
+            if (token.Kind == TokenKind.GlobalOption
+                || token.Kind == TokenKind.CommaSeparator)
+            {
+                continue;
+            }
+
+            verbs.Add(token.Value);
+            stageStarted = true;
+        }
+
+        if (verbs.Count == 0)
+        {
+            verbs.Add(string.Empty);
+        }
+
+        return verbs;
     }
 
     private static CommandResponse BoundResponse(int exitCode, string output, string? error)

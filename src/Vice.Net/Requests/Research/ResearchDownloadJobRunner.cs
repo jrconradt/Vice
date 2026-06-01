@@ -1,12 +1,15 @@
 using Vice.Jobs;
 using Vice.Logging;
 using Vice.Net.Http;
-using Vice.Persistence;
 
 namespace Vice.Net.Research;
 
-internal sealed class ResearchDownloadJobRunner : IJobRunner
+public sealed class ResearchDownloadJobRunner : IJobRunner
 {
+    private const int MAX_DOWNLOAD_RETRIES = 5;
+    private static readonly TimeSpan BASE_RETRY_BACKOFF = TimeSpan.FromMilliseconds(500);
+    private static readonly TimeSpan MAX_RETRY_BACKOFF = TimeSpan.FromSeconds(30);
+
     private readonly ResearchSourceRegistry _registry;
     private readonly Func<HttpClient> _httpFactory;
 
@@ -32,7 +35,22 @@ internal sealed class ResearchDownloadJobRunner : IJobRunner
         var format = ExtensionToFormat(Path.GetExtension(job.DestinationPath));
 
         using var http = _httpFactory();
-        var target = await source.ResolveDownloadAsync(http, job.ResourceId, format, ct).ConfigureAwait(false);
+
+        DownloadTarget target;
+        try
+        {
+            target = await source.ResolveDownloadAsync(http, job.ResourceId, format, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Vice.Log.Emit(ViceLogLevel.Warn,
+                          $"research download could not resolve upstream for {job.Source}/{job.ResourceId}",
+                          ex);
+            throw;
+        }
+
+        Vice.Log.Emit(ViceLogLevel.Debug,
+                      $"research download resolved {job.Source}/{job.ResourceId} to {target.Uri} (resume offset {job.BytesDownloaded}) -> {job.DestinationPath}");
 
         var reporter = new Progress<DownloadProgress>(p =>
         {
@@ -42,86 +60,94 @@ internal sealed class ResearchDownloadJobRunner : IJobRunner
                 Label: $"{job.Source}/{job.ResourceId} -> {job.DestinationPath}"));
         });
 
-        await DownloadResumableAsync(http,
-                                     target.Uri,
-                                     job.DestinationPath,
-                                     job.BytesDownloaded,
-                                     reporter,
-                                     ct).ConfigureAwait(false);
+        try
+        {
+            var written = await DownloadResumableAsync(http,
+                                                       target.Uri,
+                                                       job.DestinationPath,
+                                                       job.BytesDownloaded,
+                                                       reporter,
+                                                       ct).ConfigureAwait(false);
+            Vice.Log.Emit(ViceLogLevel.Debug,
+                          $"research download completed {job.Source}/{job.ResourceId} from {target.Uri}: wrote {written} bytes to {job.DestinationPath}");
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Vice.Log.Emit(ViceLogLevel.Warn,
+                          $"research download failed {job.Source}/{job.ResourceId} from {target.Uri} -> {job.DestinationPath}",
+                          ex);
+            throw;
+        }
     }
 
-    private static async Task DownloadResumableAsync(HttpClient http,
-                                                     Uri uri,
-                                                     string destinationPath,
-                                                     long recordedOffset,
-                                                     IProgress<DownloadProgress> progress,
-                                                     CancellationToken ct)
+    private static async Task<long> DownloadResumableAsync(HttpClient http,
+                                                           Uri uri,
+                                                           string destinationPath,
+                                                           long recordedOffset,
+                                                           IProgress<DownloadProgress> progress,
+                                                           CancellationToken ct)
     {
-        var fullPath = Path.GetFullPath(destinationPath);
-        if (!SafeWriteRoots.IsAllowed(fullPath, out var reason))
-        {
-            throw new BadArgument($"Destination '{fullPath}' is outside allowed write roots: {reason}.");
-        }
-
-        var directory = Path.GetDirectoryName(fullPath);
-        if (!string.IsNullOrEmpty(directory))
-        {
-            Directory.CreateDirectory(directory);
-        }
-
+        var fullPath = AtomicDownload.ResolveDestination(destinationPath);
         var partial = $"{fullPath}.partial";
         var resumable = new ResumableHttpStream(http, uri);
 
-        var startOffset = ResolveResumeOffset(partial, recordedOffset);
-        if (startOffset > 0
-            && !await resumable.SupportsResumeAsync(ct).ConfigureAwait(false))
+        var attempt = 0;
+        while (true)
         {
-            startOffset = 0;
-        }
-
-        try
-        {
-            long written;
-            var observed = new ExpectedLengthObserver(progress);
-            await using (var file = new FileStream(partial,
-                                                   FileMode.OpenOrCreate,
-                                                   FileAccess.ReadWrite,
-                                                   FileShare.None))
+            var startOffset = ResolveResumeOffset(partial, recordedOffset);
+            if (startOffset > 0
+                && !await resumable.SupportsResumeAsync(ct).ConfigureAwait(false))
             {
-                if (startOffset > 0)
-                {
-                    file.SetLength(startOffset);
-                    file.Seek(startOffset, SeekOrigin.Begin);
-                }
-                else
-                {
-                    file.SetLength(0);
-                    file.Seek(0, SeekOrigin.Begin);
-                }
-
-                await resumable.DownloadAsync(file, startOffset, observed, ct).ConfigureAwait(false);
-                await file.FlushAsync(ct).ConfigureAwait(false);
-                written = file.Length;
+                startOffset = 0;
             }
 
-            if (observed.ExpectedTotal is long expected
-                && written != expected)
+            if (startOffset > 0)
             {
-                throw new InvalidDataException(
-                    $"Download of '{uri}' is incomplete: wrote {written} bytes but the server advertised {expected}; refusing to promote a truncated file.");
+                Vice.Log.Emit(ViceLogLevel.Debug,
+                              $"research download resuming {uri} at byte offset {startOffset}");
             }
 
-            File.Move(partial, fullPath, overwrite: true);
+            try
+            {
+                return await AtomicDownload.RunAsync(resumable,
+                                                     uri,
+                                                     fullPath,
+                                                     partial,
+                                                     FileMode.OpenOrCreate,
+                                                     startOffset,
+                                                     progress,
+                                                     ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex) when (IsTransient(ex)
+                                       && attempt < MAX_DOWNLOAD_RETRIES)
+            {
+                attempt++;
+                var backoff = ComputeBackoff(attempt);
+                Vice.Log.Emit(ViceLogLevel.Warn,
+                              $"research download transient failure for {uri} (retry {attempt}/{MAX_DOWNLOAD_RETRIES} after {backoff.TotalMilliseconds:0}ms)",
+                              ex);
+                await Task.Delay(backoff, ct).ConfigureAwait(false);
+            }
         }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch
-        {
-            TryDelete(partial);
-            throw;
-        }
+    }
+
+    private static bool IsTransient(Exception ex)
+    {
+        return ex is HttpRequestException
+            || ex is IOException
+            || (ex is TaskCanceledException && ex.InnerException is TimeoutException);
+    }
+
+    private static TimeSpan ComputeBackoff(int attempt)
+    {
+        var scaled = BASE_RETRY_BACKOFF.TotalMilliseconds * Math.Pow(2, attempt - 1);
+        var capped = Math.Min(scaled, MAX_RETRY_BACKOFF.TotalMilliseconds);
+        var jittered = capped * (0.5 + Random.Shared.NextDouble() * 0.5);
+        return TimeSpan.FromMilliseconds(jittered);
     }
 
     private static long ResolveResumeOffset(string partial, long recordedOffset)
@@ -138,23 +164,6 @@ internal sealed class ResearchDownloadJobRunner : IJobRunner
         }
 
         return Math.Min(info.Length, recordedOffset);
-    }
-
-    private static void TryDelete(string path)
-    {
-        try
-        {
-            if (File.Exists(path))
-            {
-                File.Delete(path);
-            }
-        }
-        catch (IOException)
-        {
-        }
-        catch (UnauthorizedAccessException)
-        {
-        }
     }
 
     private static string? ExtensionToFormat(string extension)
@@ -177,34 +186,10 @@ internal sealed class ResearchDownloadJobRunner : IJobRunner
             _ => ext,
         };
     }
-
-    private sealed class ExpectedLengthObserver : IProgress<DownloadProgress>
-    {
-        private readonly IProgress<DownloadProgress>? _inner;
-        private long _expected = -1;
-
-        public ExpectedLengthObserver(IProgress<DownloadProgress>? inner)
-        {
-            _inner = inner;
-        }
-
-        public long? ExpectedTotal => _expected >= 0 ? _expected : null;
-
-        public void Report(DownloadProgress value)
-        {
-            if (value.TotalBytes is long total
-                && total >= 0)
-            {
-                Volatile.Write(ref _expected, total);
-            }
-
-            _inner?.Report(value);
-        }
-    }
 }
 
 public static class ResearchJobFactory
 {
     [Vice.Composition.ViceJobRunner]
-    public static IJobRunner ResearchDownload() => new ResearchDownloadJobRunner();
+    public static ResearchDownloadJobRunner ResearchDownload() => new ResearchDownloadJobRunner();
 }

@@ -8,6 +8,12 @@
         "resolved": "6.0.4",
         "contentHash": "lkhqpF8Pu2Y7IiN7OntbsTtdbpR1syMsm2F3IgX6ootA4ffRqWL5jF7XipHuZQTdVuWG/gVAAcf8mjk8Tz0xPg=="
       },
+      "CsCheck": {
+        "type": "Direct",
+        "requested": "[4.4.0, )",
+        "resolved": "4.4.0",
+        "contentHash": "G/0YT8iTg27ZMORS3GGCyVjDavtmGX18b4PjEmrTfcPtjkmwS0OJD6cK7p7EiX8HooTHmQN9B+3qoCQ2WqOayg=="
+      },
       "JunitXml.TestLogger": {
         "type": "Direct",
         "requested": "[6.0.0, )",

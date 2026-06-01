@@ -1,10 +1,9 @@
 using Grpc.Core;
-using Grpc.Net.Client;
-using Vice.Logging;
-using Vice.Network.gRPC;
 using Vice.Display;
+using Vice.Logging;
+using Vice.Net.Requests.Grpc;
 
-namespace Vice.Network.gRPC;
+namespace Vice.Net.Requests.Grpc;
 
 internal sealed class GrpcBidiSession
 {
@@ -12,7 +11,9 @@ internal sealed class GrpcBidiSession
 
     private static readonly TimeSpan CallDeadline = TimeSpan.FromMinutes(30);
 
-    private static readonly TimeSpan ReconnectBackoff = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan BaseReconnectBackoff = TimeSpan.FromSeconds(1);
+
+    private static readonly TimeSpan MaxReconnectBackoff = TimeSpan.FromSeconds(30);
 
     private readonly GrpcConnectionManager _connections;
     private readonly TextReader _reader;
@@ -41,10 +42,10 @@ internal sealed class GrpcBidiSession
 
         while (true)
         {
-            GrpcChannel channel;
+            GrpcConnectionManager.ConnectionLease lease;
             try
             {
-                channel = _connections.GetChannel(endpoint);
+                lease = _connections.LeaseChannel(endpoint);
             }
             catch (InvalidOperationException ex)
             {
@@ -54,7 +55,12 @@ internal sealed class GrpcBidiSession
                 break;
             }
 
-            var leg = await RunLegAsync(channel, methodDef, ct).ConfigureAwait(false);
+            LegResult leg;
+            using (lease)
+            {
+                leg = await RunLegAsync(lease, methodDef, ct).ConfigureAwait(false);
+            }
+
             totalSent += leg.Sent;
             totalReceived += leg.Received;
 
@@ -85,7 +91,7 @@ internal sealed class GrpcBidiSession
             }
 
             Vice.Output.Error($"Connection lost, reconnecting (attempt {attempt}/{MaxReconnectAttempts})...");
-            if (!await TryReestablishAsync(endpoint, ct).ConfigureAwait(false))
+            if (!await TryReestablishAsync(endpoint, attempt, ct).ConfigureAwait(false))
             {
                 Vice.Output.Error($"Reconnect to {endpoint} failed.");
                 exitCode = Vice.Execution.ViceExitCode.FAILURE;
@@ -98,11 +104,11 @@ internal sealed class GrpcBidiSession
     }
 
     private async Task<LegResult> RunLegAsync(
-        GrpcChannel channel,
+        GrpcConnectionManager.ConnectionLease lease,
         Method<byte[], byte[]> methodDef,
         CancellationToken ct)
     {
-        var invoker = channel.CreateCallInvoker();
+        var invoker = lease.Channel.CreateCallInvoker();
         var callOptions = new CallOptions(cancellationToken: ct)
             .WithDeadline(DateTime.UtcNow.Add(CallDeadline));
 
@@ -118,6 +124,7 @@ internal sealed class GrpcBidiSession
         {
             await foreach (var response in call.ResponseStream.ReadAllAsync(ct))
             {
+                lease.Renew();
                 var json = System.Text.Encoding.UTF8.GetString(response);
                 Vice.Output.Line($"<- {json}");
                 Interlocked.Increment(ref received);
@@ -133,7 +140,10 @@ internal sealed class GrpcBidiSession
                 string? line;
                 try
                 {
-                    line = await Task.Run(() => _reader.ReadLine(), ct).WaitAsync(ct).ConfigureAwait(false);
+                    line = await Task.Factory.StartNew(() => _reader.ReadLine(),
+                                                       ct,
+                                                       TaskCreationOptions.LongRunning,
+                                                       TaskScheduler.Default).WaitAsync(ct).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException)
                 {
@@ -157,6 +167,7 @@ internal sealed class GrpcBidiSession
                 {
                     var bytes = System.Text.Encoding.UTF8.GetBytes(trimmed);
                     await call.RequestStream.WriteAsync(bytes, ct);
+                    lease.Renew();
                     sent++;
                 }
                 catch (RpcException ex) when (IsTransient(ex))
@@ -219,11 +230,11 @@ internal sealed class GrpcBidiSession
         return new LegResult(sent, received, transientFault, hardFault, userEnded);
     }
 
-    private async Task<bool> TryReestablishAsync(string endpoint, CancellationToken ct)
+    private async Task<bool> TryReestablishAsync(string endpoint, int attempt, CancellationToken ct)
     {
         try
         {
-            await Task.Delay(ReconnectBackoff, ct).ConfigureAwait(false);
+            await Task.Delay(ComputeReconnectBackoff(attempt), ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -240,6 +251,14 @@ internal sealed class GrpcBidiSession
             Vice.Log.Emit(ViceLogLevel.Warn, $"bidi session: reconnect to {endpoint} found no channel", ex);
             return false;
         }
+    }
+
+    private static TimeSpan ComputeReconnectBackoff(int attempt)
+    {
+        var scaled = BaseReconnectBackoff.TotalMilliseconds * Math.Pow(2, attempt - 1);
+        var capped = Math.Min(scaled, MaxReconnectBackoff.TotalMilliseconds);
+        var jittered = capped * (0.5 + Random.Shared.NextDouble() * 0.5);
+        return TimeSpan.FromMilliseconds(jittered);
     }
 
     private static Method<byte[], byte[]> BuildMethod(string method)

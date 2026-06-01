@@ -19,7 +19,9 @@ public class SinkFactoryTests
             var read = await File.ReadAllBytesAsync(path);
             Assert.Equal(new byte[] { 1, 2, 3, 4 }, read);
         }
-        finally { if (File.Exists(path))
+        finally
+        {
+            if (File.Exists(path))
             {
                 File.Delete(path);
             }
@@ -41,7 +43,9 @@ public class SinkFactoryTests
             var read = await File.ReadAllBytesAsync(path);
             Assert.Equal(new byte[] { 0xFF, 1, 2 }, read);
         }
-        finally { if (File.Exists(path))
+        finally
+        {
+            if (File.Exists(path))
             {
                 File.Delete(path);
             }

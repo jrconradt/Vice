@@ -33,13 +33,22 @@ public class DotnetRunnerTests : IDisposable
     }
 
     [Fact]
+    public async Task RealDotnetVersion_CapturesOutput_AndReturnsZero()
+    {
+        var code = await DotnetRunner.RunAsync(
+            "dotnet",
+            verbose: false,
+            ct: default,
+            "--version");
+
+        Assert.Equal(0, code);
+        Assert.Empty(_capture.Errors);
+        Assert.Contains(_capture.Lines, l => l.Length > 0);
+    }
+
+    [UnixOnlyFact]
     public async Task Cancellation_KillsRunningProcessPromptly()
     {
-        if (OperatingSystem.IsWindows() || !File.Exists("/bin/sleep"))
-        {
-            return;
-        }
-
         using var cts = new CancellationTokenSource();
         var run = DotnetRunner.RunAsync("/bin/sleep", verbose: false, ct: cts.Token, "30");
 

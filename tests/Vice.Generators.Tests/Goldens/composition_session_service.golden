@@ -1,0 +1,35 @@
+#nullable enable
+using System;
+using Vice;
+
+namespace MyApp;
+
+internal static class ViceComposition
+{
+    internal static global::Vice.ViceAppBuilder ComposeFromAttributes(this global::Vice.ViceAppBuilder builder, global::MyApp.HostServices host)
+    {
+        if (builder is null)
+        {
+            throw new global::System.ArgumentNullException(nameof(builder));
+        }
+        if (host is null)
+        {
+            throw new global::System.ArgumentNullException(nameof(host));
+        }
+        builder.WithSessionService<global::MyApp.IMyService>(global::MyApp.Factories.BuildSvc(host.Svc));
+        return builder;
+    }
+
+    internal static global::Vice.IViceApp RegisterDiscoveredPacks(this global::Vice.IViceApp app, global::MyApp.HostServices host)
+    {
+        if (app is null)
+        {
+            throw new global::System.ArgumentNullException(nameof(app));
+        }
+        if (host is null)
+        {
+            throw new global::System.ArgumentNullException(nameof(host));
+        }
+        return app;
+    }
+}

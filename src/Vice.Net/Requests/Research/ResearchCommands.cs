@@ -90,6 +90,10 @@ public static class ResearchCommands
         {
             return CommandErrorHandler.HandleStreamingError(ctx, error);
         }
+        catch (HttpRequestException ex)
+        {
+            return CommandErrorHandler.HandleStreamingError(ctx, new HttpFailure(ex));
+        }
         catch (Exception ex)
         {
             ctx.Stream.Fault(ex);
@@ -129,6 +133,10 @@ public static class ResearchCommands
         {
             return CommandErrorHandler.Handle(ctx, error);
         }
+        catch (HttpRequestException ex)
+        {
+            return CommandErrorHandler.Handle(ctx, new HttpFailure(ex));
+        }
     }
 
     private static async Task<int> FetchAsync(CommandContext ctx,
@@ -165,7 +173,7 @@ public static class ResearchCommands
         }
         catch (HttpRequestException ex)
         {
-            return CommandErrorHandler.Handle(ctx, new BadArgument($"Fetch failed: {ex.Message}", ex));
+            return CommandErrorHandler.Handle(ctx, new HttpFailure(ex));
         }
     }
 
@@ -204,7 +212,7 @@ public static class ResearchCommands
         }
         catch (HttpRequestException ex)
         {
-            return CommandErrorHandler.Handle(ctx, new BadArgument($"Download failed: {ex.Message}", ex));
+            return CommandErrorHandler.Handle(ctx, new HttpFailure(ex));
         }
     }
 
@@ -244,7 +252,13 @@ public static class ResearchCommands
                     if (TrySubmitJob(ctx, source.Name, hit.Id, destination, target.Extension, timeout, ct, out var jobTask))
                     {
                         Vice.Output.Line($"Queued {source.Name}/{hit.Id} -> {destination}.");
-                        _ = await jobTask.ConfigureAwait(false);
+                        var exitCode = await jobTask.ConfigureAwait(false);
+                        if (exitCode != ViceExitCode.SUCCESS)
+                        {
+                            failures++;
+                            Vice.Output.Error($"Failed {source.Name}/{hit.Id}: queued download exited with code {exitCode}.");
+                        }
+
                         continue;
                     }
 
@@ -284,6 +298,10 @@ public static class ResearchCommands
         {
             return CommandErrorHandler.Handle(ctx, error);
         }
+        catch (HttpRequestException ex)
+        {
+            return CommandErrorHandler.Handle(ctx, new HttpFailure(ex));
+        }
     }
 
     private static async Task<int> RawDownloadAsync(CommandContext ctx,
@@ -317,7 +335,7 @@ public static class ResearchCommands
         }
         catch (HttpRequestException ex)
         {
-            return CommandErrorHandler.Handle(ctx, new BadArgument($"Download failed: {ex.Message}", ex));
+            return CommandErrorHandler.Handle(ctx, new HttpFailure(ex));
         }
     }
 

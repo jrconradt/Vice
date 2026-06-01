@@ -1,0 +1,34 @@
+[1mvice v9.9.9 - test app[0m
+
+[1m[33mCOMMANDS:[0m
+  [36mexit|quit           [0m Exit the session
+  [36mjobs                [0m List background jobs
+  [36mpause {id}          [0m Pause a background job
+  [36mresume {id}         [0m Resume a paused job
+  [36mcancel {id}         [0m Cancel a background job
+  [36mhistory             [0m Show command history
+  [36mclear               [0m Clear the screen
+  [36malpha|a             [0m alpha description
+  [36mbeta things {path}  [0m beta description
+
+[1m[33mGLOBAL OPTIONS:[0m
+  [36m--chunk-size <chunk-size>  [0m Byte-stream chunk size in bytes
+  [36m--color <color>            [0m Force or suppress color output (auto|always|never)
+  [36m--depth <depth>            [0m Maximum recursion depth
+  [36m--dry-run                  [0m Show what would happen without making changes
+  [36m--encoding <encoding>      [0m Text encoding (utf8|ascii)
+  [36m--format <format>          [0m Output or content format (text|hex|json|...)
+  [36m--help                     [0m Show help
+  [36m--limit <limit>            [0m Maximum results to return
+  [36m--locale <locale>          [0m BCP-47 locale tag for output formatting (e.g. en-US, de-DE)
+  [36m--metadata <metadata>      [0m Per-call metadata as JSON
+  [36m--no-color                 [0m Disable ANSI color output
+  [36m--no-pager                 [0m Disable PAGER wrapping for long output
+  [36m--no-status                [0m Disable status spinner
+  [36m--non-interactive          [0m Refuse to prompt; fail fast on missing input
+  [36m--offset <offset>          [0m Skip this many results
+  [36m--page <page>              [0m 1-based page number (alternative to offset)
+  [36m--quiet                    [0m Suppress non-error output
+  [36m--timeout <timeout>        [0m Maximum I/O wait time in milliseconds
+  [36m--verbose                  [0m Verbose output
+  [36m--version                  [0m Show version

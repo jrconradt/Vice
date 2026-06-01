@@ -1,11 +1,11 @@
 using System.Collections.Frozen;
 using System.Diagnostics;
 using Vice.Commands;
+using Vice.Display;
+using Vice.Display.Rendering;
 using Vice.Execution;
 using Vice.Help;
 using Vice.Logging;
-using Vice.Display;
-using Vice.Display.Rendering;
 using Vice.Options;
 using Vice.Parser;
 

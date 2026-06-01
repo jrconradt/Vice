@@ -3,6 +3,8 @@ using Vice.Composition;
 using Vice.Display;
 using Vice.Execution;
 using Vice.Lexicon;
+using Vice.Logging;
+using Vice.Net.Requests.Grpc;
 using static Vice.Dsl;
 
 namespace Vice.Net.Commands.Network;
@@ -116,8 +118,10 @@ public static class TcpUdpCommands
 
         try
         {
+            var addresses = await SafeOutboundConnection.CheckEndpointAsync(host, timeoutCts.Token);
+
             using var client = new TcpClient();
-            await client.ConnectAsync(host, port, timeoutCts.Token);
+            await client.ConnectAsync(addresses, port, timeoutCts.Token);
 
             var stream = client.GetStream();
             await stream.WriteAsync(payload, timeoutCts.Token);
@@ -137,10 +141,14 @@ public static class TcpUdpCommands
         {
             return ViceExitCode.INTERRUPTED;
         }
+        catch (SafeNetBlockedException ex)
+        {
+            Vice.Output.Error(ex.Message);
+            return ViceExitCode.FAILURE;
+        }
         catch (SocketException ex)
         {
-            Vice.Output.Error($"TCP error talking to {host}:{port}: {ex.Message}");
-            return ViceExitCode.FAILURE;
+            return CommandErrorHandler.Handle(ctx, new SocketFailure("tcp", ex));
         }
         catch (IOException ex)
         {
@@ -173,8 +181,10 @@ public static class TcpUdpCommands
 
         try
         {
+            var addresses = await SafeOutboundConnection.CheckEndpointAsync(host, timeoutCts.Token);
+
             using var client = new UdpClient();
-            await client.Client.ConnectAsync(host, port, timeoutCts.Token);
+            await client.Client.ConnectAsync(addresses, port, timeoutCts.Token);
             await client.Client.SendAsync(payload, SocketFlags.None, timeoutCts.Token);
 
             if (noReply)
@@ -195,10 +205,14 @@ public static class TcpUdpCommands
         {
             return ViceExitCode.INTERRUPTED;
         }
+        catch (SafeNetBlockedException ex)
+        {
+            Vice.Output.Error(ex.Message);
+            return ViceExitCode.FAILURE;
+        }
         catch (SocketException ex)
         {
-            Vice.Output.Error($"UDP error talking to {host}:{port}: {ex.Message}");
-            return ViceExitCode.FAILURE;
+            return CommandErrorHandler.Handle(ctx, new SocketFailure("udp", ex));
         }
     }
 

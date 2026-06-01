@@ -1,6 +1,7 @@
 using Vice.Composition;
 using Vice.Execution;
 using Vice.Lexicon;
+using Vice.Mux;
 
 namespace Vice.Mux.Commands;
 
@@ -18,7 +19,7 @@ public static class InspectCommands
     private static async Task<int> HandleAsync(CommandContext ctx, CancellationToken ct)
     {
         var peek = ctx.GetGlobalOption("peek").AsPositiveInt() ?? 0;
-        var bufferSize = ctx.GetGlobalOption("chunk-size").AsPositiveInt() ?? 65536;
+        var bufferSize = ctx.GetGlobalOption("chunk-size").AsPositiveInt() ?? MuxDefaults.DefaultChunkSize;
 
         var stdin = Console.OpenStandardInput();
         var stdout = Console.OpenStandardOutput();

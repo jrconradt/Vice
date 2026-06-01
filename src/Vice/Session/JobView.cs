@@ -22,7 +22,7 @@ public static class JobViewFormatters
 {
     private static readonly ConcurrentDictionary<JobKind, JobViewFormatter> _formatters = new();
 
-    private static readonly JobViewFormatter _fallback = new(FallbackLabel, FallbackProgress);
+    private static readonly JobViewFormatter Fallback = new(FallbackLabel, FallbackProgress);
 
     static JobViewFormatters()
     {
@@ -43,7 +43,7 @@ public static class JobViewFormatters
     {
         return _formatters.TryGetValue(kind, out var formatter)
             ? formatter
-            : _fallback;
+            : Fallback;
     }
 
     private static string DownloadProgress(JobState job)
