@@ -17,7 +17,7 @@ public sealed partial class ViceCompositionGenerator : IIncrementalGenerator
     const string PACK_ATTR = "Vice.Composition.ViceCommandPackAttribute";
     const string JOB_RUNNER_ATTR = "Vice.Composition.ViceJobRunnerAttribute";
     const string SESSION_SERVICE_ATTR = "Vice.Composition.ViceSessionServiceAttribute";
-    const string OPTION_ATTR = "Vice.Composition.ViceOptionAttribute";
+    const string OPTION_ATTR = "Vice.Options.ViceOptionAttribute";
 
     static readonly DiagnosticDescriptor MissingHost = new(
         "VICE001", "No [ViceHost] type found",

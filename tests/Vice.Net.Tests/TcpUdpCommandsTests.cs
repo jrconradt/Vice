@@ -1,4 +1,5 @@
 using System.Text;
+using Vice.Contracts;
 using Vice.Execution;
 using Vice.Net.Commands.Network;
 using Xunit;

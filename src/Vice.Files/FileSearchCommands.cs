@@ -1,6 +1,7 @@
 using System.IO.Enumeration;
 using System.Text.RegularExpressions;
 using Vice.Composition;
+using Vice.Contracts;
 using Vice.Execution;
 using Vice.Lexicon;
 using Vice.Logging;

@@ -2,14 +2,14 @@
 
 namespace MyApp;
 
-public static class Handle_9773ce53_Targets
+public static class Handle_51829aa6_Targets
 {
-    public static TargetSet Of(global::Vice.Execution.CommandContext ctx) => new(ctx);
+    public static TargetSet Of(global::Vice.Contracts.CommandContext ctx) => new(ctx);
 
     public readonly struct TargetSet
     {
-        private readonly global::Vice.Execution.CommandContext _ctx;
-        public TargetSet(global::Vice.Execution.CommandContext ctx) { _ctx = ctx; }
+        private readonly global::Vice.Contracts.CommandContext _ctx;
+        public TargetSet(global::Vice.Contracts.CommandContext ctx) { _ctx = ctx; }
         public string Foo => _ctx["foo"] ?? throw new global::System.InvalidOperationException("Target 'foo' not bound for Handle.");
     }
 }

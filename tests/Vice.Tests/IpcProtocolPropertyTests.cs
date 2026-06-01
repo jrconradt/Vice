@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using CsCheck;
+using Vice.Contracts;
 using Vice.Ipc;
 using Xunit;
 
@@ -159,7 +160,7 @@ public class IpcProtocolPropertyTests
     private static byte[] WithLengthPrefix(byte[] body, int declaredLength)
     {
         var frame = new byte[8 + body.Length];
-        BinaryPrimitives.WriteInt32BigEndian(frame.AsSpan(0, 4), Vice.Session.SessionState.ProtocolVersion);
+        BinaryPrimitives.WriteInt32BigEndian(frame.AsSpan(0, 4), Vice.Contracts.SessionState.ProtocolVersion);
         BinaryPrimitives.WriteInt32BigEndian(frame.AsSpan(4, 4), declaredLength);
         body.CopyTo(frame.AsSpan(8));
         return frame;

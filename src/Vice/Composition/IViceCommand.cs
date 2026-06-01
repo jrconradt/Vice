@@ -1,3 +1,4 @@
+using Vice.Contracts;
 using Vice.Execution;
 
 namespace Vice.Composition;

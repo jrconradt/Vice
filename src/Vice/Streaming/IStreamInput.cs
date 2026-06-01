@@ -1,4 +1,4 @@
-namespace Vice.Streaming;
+namespace Vice.Contracts;
 
 public interface IStreamInput<T>
 {

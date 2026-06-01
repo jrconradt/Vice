@@ -1,5 +1,3 @@
-using Vice.Execution;
-
 namespace Vice.Logging;
 
 public sealed class CommandCompleted(string command, int exitCode, TimeSpan duration)
@@ -8,7 +6,7 @@ public sealed class CommandCompleted(string command, int exitCode, TimeSpan dura
     public string Command { get; } = command;
     public int ExitCodeValue { get; } = exitCode;
     public TimeSpan Duration { get; } = duration;
-    public string? InvocationId { get; } = CommandContext.CurrentInvocationId;
+    public string? InvocationId { get; } = InvocationScope.Current;
     public override ViceLogLevel LogLevel => ViceLogLevel.Info;
     public override string ToString() =>
         InvocationId is null

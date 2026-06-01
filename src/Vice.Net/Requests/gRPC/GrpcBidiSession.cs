@@ -1,5 +1,5 @@
 using Grpc.Core;
-using Vice.Display;
+using Vice.Display.Rendering;
 using Vice.Logging;
 using Vice.Net.Requests.Grpc;
 

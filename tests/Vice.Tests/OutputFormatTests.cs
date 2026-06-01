@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Vice;
+using Vice.Contracts;
 using Vice.Display;
 using Vice.Execution;
 using Xunit;

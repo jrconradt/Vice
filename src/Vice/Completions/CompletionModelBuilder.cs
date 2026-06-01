@@ -1,4 +1,5 @@
 using Vice.Commands;
+using Vice.Contracts;
 using Vice.Nodes;
 using Vice.Options;
 

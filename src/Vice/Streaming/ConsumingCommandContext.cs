@@ -1,4 +1,5 @@
-using Vice.Display;
+using Vice.Contracts;
+using Vice.Display.Rendering;
 using Vice.Execution;
 
 namespace Vice.Streaming;

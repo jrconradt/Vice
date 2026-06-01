@@ -1,27 +1,12 @@
-using Vice.Display;
 using Vice.Display.Rendering;
 using Vice.Logging;
 using Vice.Options;
 using Vice.Parser;
-using Vice.Session;
 
-namespace Vice.Execution;
+namespace Vice.Contracts;
 
 public sealed class CommandContext : ICommandContext
 {
-    private static readonly AsyncLocal<string?> AmbientInvocationId = new();
-
-    public static string? CurrentInvocationId => AmbientInvocationId.Value;
-
-    public static string MintInvocationId() => Guid.NewGuid().ToString("N").Substring(0, 12);
-
-    public static string BeginInvocationScope()
-    {
-        var id = MintInvocationId();
-        AmbientInvocationId.Value = id;
-        return id;
-    }
-
     private readonly IReadOnlyDictionary<string, string> _targetValues;
     private readonly IReadOnlyDictionary<string, string?> _globalOptions;
     private readonly IReadOnlyList<ResolvedCommand> _resolvedNodes;
@@ -44,7 +29,7 @@ public sealed class CommandContext : ICommandContext
     public string? PipelineInput { get; }
     public IProgress<string>? StatusUpdater { get; }
     public IProgress<double>? ProgressReporter { get; }
-    public SessionContext? Session { get; }
+    public ISessionContext? Session { get; }
     public IViceLogger Logger { get; }
     public CancellationToken CancellationToken { get; init; }
 
@@ -56,15 +41,14 @@ public sealed class CommandContext : ICommandContext
         IProgress<string>? statusUpdater,
         RenderContext? render,
         IProgress<double>? progressReporter,
-        SessionContext? session,
+        ISessionContext? session,
         IViceLogger logger,
         IReadOnlyList<ResolvedCommand>? resolvedNodes = null)
     {
         _targetValues = targetValues;
         _globalOptions = globalOptions;
         _resolvedNodes = resolvedNodes ?? Array.Empty<ResolvedCommand>();
-        InvocationId = AmbientInvocationId.Value ?? MintInvocationId();
-        AmbientInvocationId.Value = InvocationId;
+        InvocationId = InvocationScope.Adopt(InvocationScope.Current);
         OutputFormat = OutputFormatKindParser.Parse(
             globalOptions.TryGetValue(new FormatOption().Name, out var rawFormat) ? rawFormat : null);
         Console = console;

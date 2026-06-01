@@ -2,6 +2,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Vice;
+using Vice.Contracts;
 using Vice.Display;
 using Vice.Ipc;
 using Vice.Session;

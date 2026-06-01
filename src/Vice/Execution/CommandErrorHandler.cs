@@ -1,3 +1,4 @@
+using Vice.Contracts;
 using Vice.Logging;
 using Vice.Streaming;
 

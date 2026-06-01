@@ -2,7 +2,7 @@ using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using Grpc.Net.Client;
-using Vice.Display;
+using Vice.Display.Rendering;
 using Vice.Logging;
 
 namespace Vice.Net.Requests.Grpc;

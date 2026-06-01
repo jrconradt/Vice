@@ -1,6 +1,7 @@
 using System.Threading.Tasks;
 using Vice;
 using Vice.Commands;
+using Vice.Contracts;
 using Vice.Execution;
 using Vice.Lexicon;
 using Vice.Parser;

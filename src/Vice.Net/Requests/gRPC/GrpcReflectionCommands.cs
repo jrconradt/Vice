@@ -6,6 +6,7 @@ using Grpc.Core;
 using Grpc.Net.Client;
 using Grpc.Reflection.V1Alpha;
 using Vice.Composition;
+using Vice.Contracts;
 using Vice.Execution;
 using Vice.Lexicon;
 using Vice.Logging;

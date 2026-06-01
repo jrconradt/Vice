@@ -1,3 +1,5 @@
+using Vice.Display.Rendering;
+
 namespace Vice.Display;
 
 public interface IStatusDisplay

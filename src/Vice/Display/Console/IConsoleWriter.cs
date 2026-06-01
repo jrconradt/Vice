@@ -1,4 +1,4 @@
-namespace Vice.Display;
+namespace Vice.Display.Rendering;
 
 public interface IConsoleWriter
 {

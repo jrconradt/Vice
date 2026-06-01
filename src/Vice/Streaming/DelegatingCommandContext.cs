@@ -1,3 +1,4 @@
+using Vice.Contracts;
 using Vice.Display;
 using Vice.Display.Rendering;
 using Vice.Execution;
@@ -37,7 +38,7 @@ internal abstract class DelegatingCommandContext : ICommandContext
     public string? PipelineInput => Inner.PipelineInput;
     public IProgress<string>? StatusUpdater => Inner.StatusUpdater;
     public IProgress<double>? ProgressReporter => Inner.ProgressReporter;
-    public SessionContext? Session => Inner.Session;
+    public ISessionContext? Session => Inner.Session;
     public IViceLogger Logger => Inner.Logger;
     public CancellationToken CancellationToken => Inner.CancellationToken;
     public string InvocationId => Inner.InvocationId;

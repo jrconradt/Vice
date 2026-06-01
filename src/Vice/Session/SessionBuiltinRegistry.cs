@@ -1,4 +1,4 @@
-using Vice.Execution;
+using Vice.Contracts;
 using Vice.Jobs;
 using Vice.Logging;
 

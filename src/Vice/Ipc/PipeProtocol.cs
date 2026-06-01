@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Text.Json;
+using Vice.Contracts;
 using Vice.Session;
 
 namespace Vice.Ipc;

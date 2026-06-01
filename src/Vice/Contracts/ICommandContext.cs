@@ -1,11 +1,9 @@
-using Vice.Display;
 using Vice.Display.Rendering;
 using Vice.Logging;
 using Vice.Options;
 using Vice.Parser;
-using Vice.Session;
 
-namespace Vice.Execution;
+namespace Vice.Contracts;
 
 public interface ICommandContext
 {
@@ -22,7 +20,7 @@ public interface ICommandContext
     string? PipelineInput { get; }
     IProgress<string>? StatusUpdater { get; }
     IProgress<double>? ProgressReporter { get; }
-    SessionContext? Session { get; }
+    ISessionContext? Session { get; }
     IViceLogger Logger { get; }
     string InvocationId { get; }
     CancellationToken CancellationToken { get; }

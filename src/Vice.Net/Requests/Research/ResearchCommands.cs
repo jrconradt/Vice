@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Vice.Composition;
+using Vice.Contracts;
 using Vice.Execution;
 using Vice.Jobs;
 using Vice.Lexicon;

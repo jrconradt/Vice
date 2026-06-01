@@ -1,4 +1,4 @@
-using Vice.Commands;
+using Vice.Contracts;
 using Vice.Display;
 using Vice.Display.Rendering;
 using Vice.Options;

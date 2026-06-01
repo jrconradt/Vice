@@ -1,4 +1,5 @@
 using Vice.Composition;
+using Vice.Contracts;
 using Vice.Execution;
 using Vice.Lexicon;
 using Vice.Mux;

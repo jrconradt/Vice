@@ -1,8 +1,6 @@
-using Vice.Execution;
 using Vice.Nodes;
-using Vice.Streaming;
 
-namespace Vice.Commands;
+namespace Vice.Contracts;
 
 internal sealed class CommandRegistration
 {

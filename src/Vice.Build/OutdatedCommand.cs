@@ -1,5 +1,6 @@
 using Vice.Build.Dotnet;
 using Vice.Composition;
+using Vice.Contracts;
 using Vice.Execution;
 
 namespace Vice.Build;

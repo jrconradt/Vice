@@ -1,5 +1,6 @@
 using System.Threading.Channels;
 using Vice.Display;
+using Vice.Display.Rendering;
 using Vice.Jobs;
 using Vice.Logging;
 

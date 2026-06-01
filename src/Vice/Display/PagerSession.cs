@@ -1,5 +1,5 @@
 using System.Diagnostics;
-using Vice.Execution;
+using Vice.Contracts;
 
 namespace Vice.Display;
 

@@ -1,4 +1,3 @@
-using Vice.Composition;
 using Vice.Options;
 
 namespace Vice.Mux;

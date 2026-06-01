@@ -1,4 +1,5 @@
 using System.Text;
+using Vice.Contracts;
 using Vice.Display;
 using Vice.Execution;
 using Vice.Logging;

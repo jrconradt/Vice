@@ -1,6 +1,4 @@
-using Vice.Jobs;
-
-namespace Vice.Session;
+namespace Vice.Jobs;
 
 public interface IJobSubmitter
 {

@@ -1,18 +1,18 @@
 using System.Diagnostics;
+using Vice.Contracts;
 using Vice.Display;
 using Vice.Display.Rendering;
 using Vice.Logging;
-using Vice.Session;
 using Vice.Streaming;
 
 namespace Vice.Execution;
 
 internal sealed class PipelineExecutor
 {
-    private readonly SessionContext? _session;
+    private readonly ISessionContext? _session;
     private readonly IViceLogger _logger;
 
-    public PipelineExecutor(SessionContext? session, IViceLogger logger)
+    public PipelineExecutor(ISessionContext? session, IViceLogger logger)
     {
         _session = session;
         _logger = logger ?? NullViceLogger.Instance;

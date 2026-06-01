@@ -1,4 +1,5 @@
 using Microsoft.CodeAnalysis;
+using Vice.Contracts;
 using Xunit;
 
 namespace Vice.Generators.Tests;
@@ -141,6 +142,7 @@ public class ViceCompositionGeneratorTests
     {
         const string SOURCE = """
             using Vice.Composition;
+            using Vice.Options;
             namespace MyApp;
 
             [ViceHost]

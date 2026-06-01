@@ -2,6 +2,7 @@ using System.Buffers;
 using System.Diagnostics;
 using System.Threading.Channels;
 using Vice.Commands;
+using Vice.Contracts;
 using Vice.Execution;
 using Vice.Logging;
 

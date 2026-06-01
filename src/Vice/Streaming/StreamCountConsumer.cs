@@ -1,5 +1,5 @@
 using System.Text;
-using Vice.Streaming;
+using Vice.Contracts;
 
 namespace Vice.Streaming;
 

@@ -1,4 +1,4 @@
-namespace Vice.Execution;
+namespace Vice.Contracts;
 
 public static class CommandContextExtensions
 {

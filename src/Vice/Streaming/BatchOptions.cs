@@ -1,4 +1,4 @@
-namespace Vice.Streaming;
+namespace Vice.Contracts;
 
 public sealed record BatchOptions(
     int BatchSize = 10,

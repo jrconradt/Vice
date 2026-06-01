@@ -1,5 +1,6 @@
 using System.Net.Sockets;
 using Vice.Composition;
+using Vice.Contracts;
 using Vice.Display;
 using Vice.Execution;
 using Vice.Lexicon;

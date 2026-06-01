@@ -1,9 +1,7 @@
-using Vice.Execution;
 using Vice.Nodes;
 using Vice.Parser;
-using Vice.Streaming;
 
-namespace Vice.Commands;
+namespace Vice.Contracts;
 
 internal interface ICommandRegistry
 {

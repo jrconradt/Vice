@@ -1,11 +1,11 @@
 using Vice.Completions;
+using Vice.Contracts;
 using Vice.Execution;
 using Vice.Help;
 using Vice.Ipc;
 using Vice.Lexicon;
 using Vice.Manpages;
 using Vice.Options;
-using Vice.Session;
 using static Vice.Dsl;
 
 namespace Vice.Commands;

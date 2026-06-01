@@ -1,9 +1,10 @@
+using Vice.Contracts;
 using Vice.Jobs;
 using Vice.Logging;
 
 namespace Vice.Session;
 
-public sealed class SessionContext
+public sealed class SessionContext : ISessionContext
 {
     private readonly IReadOnlyDictionary<Type, object> _services;
 

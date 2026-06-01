@@ -411,7 +411,7 @@ public sealed partial class ViceCompositionGenerator
                 continue;
             }
 
-            if (method.Parameters[0].Type.ToDisplayString() == "Vice.Execution.CommandContext"
+            if (method.Parameters[0].Type.ToDisplayString() == "Vice.Contracts.CommandContext"
                 && method.Parameters[1].Type.ToDisplayString() == "System.Threading.CancellationToken")
             {
                 return true;
@@ -495,10 +495,10 @@ public sealed partial class ViceCompositionGenerator
             $"#nullable enable\n\n" +
             $"{namespaceBlock}" +
             $"{visibility} static class {className}\n{{\n" +
-            $"    public static TargetSet Of(global::Vice.Execution.CommandContext ctx) => new(ctx);\n\n" +
+            $"    public static TargetSet Of(global::Vice.Contracts.CommandContext ctx) => new(ctx);\n\n" +
             $"    public readonly struct TargetSet\n    {{\n" +
-            $"        private readonly global::Vice.Execution.CommandContext _ctx;\n" +
-            $"        public TargetSet(global::Vice.Execution.CommandContext ctx) {{ _ctx = ctx; }}\n" +
+            $"        private readonly global::Vice.Contracts.CommandContext _ctx;\n" +
+            $"        public TargetSet(global::Vice.Contracts.CommandContext ctx) {{ _ctx = ctx; }}\n" +
             $"{propBody}" +
             $"    }}\n" +
             $"}}\n";
@@ -531,10 +531,10 @@ public sealed partial class ViceCompositionGenerator
 
         var classBlock =
             $"{indent}{visibility} partial class {type.Name}{typeParams}{baseList}\n{indent}{{\n" +
-            $"{indent}    public TargetSet Targets(global::Vice.Execution.CommandContext ctx) => new(ctx);\n\n" +
+            $"{indent}    public TargetSet Targets(global::Vice.Contracts.CommandContext ctx) => new(ctx);\n\n" +
             $"{indent}    public readonly struct TargetSet\n{indent}    {{\n" +
-            $"{indent}        private readonly global::Vice.Execution.CommandContext _ctx;\n" +
-            $"{indent}        public TargetSet(global::Vice.Execution.CommandContext ctx) {{ _ctx = ctx; }}\n" +
+            $"{indent}        private readonly global::Vice.Contracts.CommandContext _ctx;\n" +
+            $"{indent}        public TargetSet(global::Vice.Contracts.CommandContext ctx) {{ _ctx = ctx; }}\n" +
             $"{propBody}" +
             $"{indent}    }}\n{indent}}}\n";
 

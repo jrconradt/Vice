@@ -1,4 +1,5 @@
 using Vice.Display;
+using Vice.Display.Rendering;
 
 namespace Vice;
 

@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Vice.Commands;
+using Vice.Contracts;
 using Vice.Logging;
 
 namespace Vice.Plugins;

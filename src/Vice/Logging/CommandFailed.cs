@@ -1,5 +1,3 @@
-using Vice.Execution;
-
 namespace Vice.Logging;
 
 public sealed class CommandFailed(string command, Exception cause, TimeSpan duration)
@@ -7,7 +5,7 @@ public sealed class CommandFailed(string command, Exception cause, TimeSpan dura
 {
     public string Command { get; } = command;
     public TimeSpan Duration { get; } = duration;
-    public string? InvocationId { get; } = CommandContext.CurrentInvocationId;
+    public string? InvocationId { get; } = InvocationScope.Current;
     public override ViceLogLevel LogLevel => ViceLogLevel.Error;
     public override string ToString() =>
         InvocationId is null

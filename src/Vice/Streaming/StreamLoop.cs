@@ -1,3 +1,5 @@
+using Vice.Contracts;
+
 namespace Vice.Streaming;
 
 internal static class StreamLoop

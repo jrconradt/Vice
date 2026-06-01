@@ -3,6 +3,7 @@ using System.IO.Pipes;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Security.Principal;
+using Vice.Contracts;
 using Vice.Logging;
 
 namespace Vice.Ipc;
@@ -434,7 +435,7 @@ internal sealed class PipeServer : IPipeServer
 
                 if (message is CommandMessage commandMessage)
                 {
-                    var invocationId = Vice.Execution.CommandContext.BeginInvocationScope();
+                    var invocationId = Vice.Logging.InvocationScope.Begin();
                     EmitAudit(
                         $"pipe command on '{_pipeName}': client={clientId} invocation={invocationId} command={Vice.Session.InputHistory.Redact(commandMessage.CommandLine)}");
                 }

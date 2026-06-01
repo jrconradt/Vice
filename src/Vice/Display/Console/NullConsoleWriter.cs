@@ -1,3 +1,5 @@
+using Vice.Display.Rendering;
+
 namespace Vice.Display;
 
 internal sealed class NullConsoleWriter : IConsoleWriter

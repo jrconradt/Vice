@@ -1,5 +1,5 @@
 using Vice;
-using Vice.Display;
+using Vice.Display.Rendering;
 
 namespace Vice.Tests;
 

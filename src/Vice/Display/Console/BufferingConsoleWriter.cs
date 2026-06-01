@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Vice.Display.Rendering;
 
 namespace Vice.Display;
 

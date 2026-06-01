@@ -1,6 +1,6 @@
 using System.Collections.Concurrent;
 
-namespace Vice.Execution;
+namespace Vice.Contracts;
 
 public enum OutputFormatKind
 {

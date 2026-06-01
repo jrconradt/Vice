@@ -1,4 +1,4 @@
-using Vice.Commands;
+using Vice.Contracts;
 using Vice.Parser;
 
 namespace Vice.Execution;

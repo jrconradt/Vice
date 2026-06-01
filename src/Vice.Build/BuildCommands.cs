@@ -1,5 +1,6 @@
 using Vice.Build.Dotnet;
 using Vice.Composition;
+using Vice.Contracts;
 using Vice.Lexicon;
 using static Vice.Dsl;
 
@@ -34,7 +35,7 @@ public static class BuildCommands
     private static Task<int> Dispatch(
         DotnetBuildQueue queue,
         string verb,
-        Vice.Execution.CommandContext ctx,
+        Vice.Contracts.CommandContext ctx,
         CancellationToken ct)
     {
         var canonical = CanonicalPath(ctx["path"]);

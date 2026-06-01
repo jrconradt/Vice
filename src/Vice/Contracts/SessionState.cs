@@ -1,4 +1,4 @@
-namespace Vice.Session;
+namespace Vice.Contracts;
 
 public sealed class SessionState
 {

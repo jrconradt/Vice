@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Vice.Contracts;
 using Vice.Streaming;
 
 namespace Vice.Net.Http;
