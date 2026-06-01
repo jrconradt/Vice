@@ -64,11 +64,6 @@ internal static class ResearchOptions
         return TimeSpan.FromMilliseconds(ms);
     }
 
-    public static bool NoCache(ICommandContext ctx)
-    {
-        return ctx.HasGlobalOption("no-cache");
-    }
-
     private static int? ParsePositive(string? value,
                                       string name)
     {

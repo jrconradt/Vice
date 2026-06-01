@@ -36,9 +36,8 @@ public class DaemonJobStatusProjectionTests
     [Fact]
     public async Task RunDaemonAsync_ProjectsSubmittedJob_IntoJobStatusEntry()
     {
-        using var tmp = new TempDir();
         var pipeName = "vice-test-daemon-" + Guid.NewGuid().ToString("N");
-        var state = new SessionState(tmp.Path, pipeName);
+        var state = new SessionState("vice-test", pipeName);
 
         var runner = new BlockingRunner();
         var app = new ViceApp("vice",

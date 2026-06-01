@@ -30,9 +30,6 @@ Show command history
 .B clear
 Clear the screen
 .TP
-.B set {key} to {value}
-Set a session configuration value
-.TP
 .B alpha
 alpha description
 .TP

@@ -38,11 +38,6 @@ _vice() {
             "root:manpage") state="root__manpage"; ;;
             "root:pause") state="root__pause"; skip=1; ;;
             "root:resume") state="root__resume"; skip=1; ;;
-            "root:set") state="root__set"; skip=1; ;;
-            "root__set:to") state="root__set__to"; skip=1; ;;
-            "root:sources") state="root__sources"; ;;
-            "root__sources:add") state="root__sources__add"; skip=1; ;;
-            "root__sources:remove") state="root__sources__remove"; skip=1; ;;
             "root:status") state="root__status"; ;;
             "root:version") state="root__version"; ;;
             *) state="unknown" ;;
@@ -56,11 +51,9 @@ _vice() {
     fi
 
     case "$state" in
-        "root") COMPREPLY=( $(compgen -W "alpha a beta cancel clear completions daemon exit quit gamma help history jobs list manpage pause resume set sources status version" -- "$cur") ) ;;
+        "root") COMPREPLY=( $(compgen -W "alpha a beta cancel clear completions daemon exit quit gamma help history jobs list manpage pause resume status version" -- "$cur") ) ;;
         "root__beta") COMPREPLY=( $(compgen -W "things" -- "$cur") ) ;;
         "root__list") COMPREPLY=( $(compgen -W "commands" -- "$cur") ) ;;
-        "root__set") COMPREPLY=( $(compgen -W "to" -- "$cur") ) ;;
-        "root__sources") COMPREPLY=( $(compgen -W "add remove" -- "$cur") ) ;;
         *) COMPREPLY=( $(compgen -f -- "$cur") ) ;;
     esac
     return 0

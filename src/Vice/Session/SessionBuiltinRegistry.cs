@@ -8,16 +8,13 @@ internal sealed class SessionBuiltinRegistry
 {
     private readonly Dictionary<string, Func<CommandContext, CancellationToken, Task<int>>> _handlers;
     private readonly JobManager _jobManager;
-    private readonly SessionState _state;
     private readonly InputHistory _history;
 
     public SessionBuiltinRegistry(
         JobManager jobManager,
-        SessionState state,
         InputHistory history)
     {
         _jobManager = jobManager;
-        _state = state;
         _history = history;
 
         _handlers = new Dictionary<string, Func<CommandContext, CancellationToken, Task<int>>>(StringComparer.OrdinalIgnoreCase)
@@ -30,7 +27,6 @@ internal sealed class SessionBuiltinRegistry
             ["cancel"] = HandleCancel,
             ["history"] = HandleHistory,
             ["clear"] = HandleClear,
-            ["set"] = HandleSet,
         };
     }
 
@@ -121,27 +117,5 @@ internal sealed class SessionBuiltinRegistry
     {
         Vice.Output.Write("\x1b[2J\x1b[H");
         return Task.FromResult(0);
-    }
-
-    private async Task<int> HandleSet(CommandContext ctx, CancellationToken ct)
-    {
-        var key = ctx["key"] ?? throw new InvalidOperationException("Target 'key' not bound.");
-        var value = ctx["value"] ?? throw new InvalidOperationException("Target 'value' not bound.");
-
-        if (key == "concurrency")
-        {
-            if (!int.TryParse(value, out var n) || n < 1)
-            {
-                throw new BadArgument("Concurrency must be a positive integer.");
-            }
-            await _state.SetConcurrencyAsync(n, ct).ConfigureAwait(false);
-            Vice.Output.Line($"concurrency = {n} (applies on next session start)");
-        }
-        else
-        {
-            await _state.SetStringConfigAsync(key, value, ct).ConfigureAwait(false);
-            Vice.Output.Line($"{key} = {value}");
-        }
-        return 0;
     }
 }

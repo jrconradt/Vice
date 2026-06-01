@@ -91,7 +91,7 @@ vice unarchive <archive>                       # extracts to a temp directory
 vice unarchive <archive> to dir <dest>         # extracts to <dest>
 ```
 
-The destination, if given, must lie inside one of the standard write roots: the user home directory, the XDG `data` / `cache` / `state` directories, the system temp directory, or the current working directory. Destinations outside every root are refused.
+The destination, if given, must lie inside one of the standard write roots: the user home directory, the system temp directory, or the current working directory. Destinations outside every root are refused.
 
 ## search files / search folders
 

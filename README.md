@@ -1,8 +1,8 @@
 # Vice
 
-**A .NET CLI framework whose commands read like English — and the tools built on it.**
+**A .NET CLI framework with a natural-language command grammar, and the tools built on it.**
 
-Most command-line tools make you memorize flags. Vice lets you (and your users) write what you mean:
+Vice parses natural-language command lines:
 
 ```bash
 vice search "graph neural networks" on source arxiv --limit 20
@@ -10,12 +10,12 @@ vice tcp send "PING" to endpoint localhost:6379
 vice search files by type csharp in ./src then write to file ./inventory.txt
 ```
 
-Those sentences aren't a gimmick. A real lexer and parser turn them into typed commands that pipe into one another through backpressured streaming channels, run as background jobs, and share a session REPL — all provided by the framework, for free.
+A lexer and parser turn them into typed commands that pipe into one another through backpressured streaming channels, run as background jobs, and share a session REPL, provided by the framework.
 
 Vice is two things:
 
-- **`vice` — a ready-to-use CLI tool** for network probes, scientific-literature search, filesystem work, and `dotnet` build orchestration. Commands read like English and pipe into each other.
-- **Vice — the framework** underneath it. Define your own commands as a small composable grammar, and inherit the parser, the pipelines, the REPL, jobs, history, plugins, and configuration without writing any of it yourself.
+- **`vice` — a CLI tool** for network probes, scientific-literature search, filesystem work, and `dotnet` build orchestration. Commands use the natural-language grammar and pipe into each other.
+- **Vice — the framework** underneath it. Define your own commands as a composable grammar, and inherit the parser, the pipelines, the REPL, jobs, history, plugins, and configuration without implementing them.
 
 Apache-2.0 · targets .NET 10 · current release `0.1.0` (see [CHANGELOG.md](CHANGELOG.md)).
 
@@ -23,7 +23,7 @@ Apache-2.0 · targets .NET 10 · current release `0.1.0` (see [CHANGELOG.md](CHA
 
 ## Quick start
 
-The fastest way to try the `vice` tool is to build and install it from this repo:
+To try the `vice` tool, build and install it from this repo:
 
 ```bash
 ./scripts/install-local.sh    # packs Vice.Cli and installs it as a global `vice` tool
@@ -64,7 +64,7 @@ vice grpc list services on endpoint localhost:50051
 vice grpc call helloworld.Greeter/SayHello on endpoint localhost:50051 with data '{"name":"World"}'
 ```
 
-**Research** — search, fetch, download, and bulk-archive across five scientific sources (arXiv, Project Gutenberg, PubMed, UniProt, AlphaFold), with an on-disk cache and a polite per-host rate limiter. ([docs/research-commands.md](docs/research-commands.md) · [docs/sources.md](docs/sources.md))
+**Research** — search, fetch, download, and bulk-archive across five scientific sources (arXiv, Project Gutenberg, PubMed, UniProt, AlphaFold), with a per-host rate limiter. ([docs/research-commands.md](docs/research-commands.md))
 
 ```bash
 vice fetch 2401.00001 from source arxiv
@@ -85,7 +85,7 @@ vice build ./MyApp.sln
 vice test ./tests/MyLib.Tests/
 ```
 
-**Pipelines** — any producing command pipes into a consuming one through a real streaming channel:
+**Pipelines** — any producing command pipes into a consuming one through a streaming channel:
 
 ```bash
 vice search "graph" on source arxiv --limit 50 then write to file ./graph-papers.txt
@@ -144,7 +144,7 @@ Build the app and run it:
 using Vice;
 
 await using var app = ViceApp.Create("mytool", "0.1.0")
-    .WithDescription("A friendly little CLI")
+    .WithDescription("An example CLI")
     .Build();
 
 GreetCommands.Register(app);
@@ -152,9 +152,9 @@ GreetCommands.Register(app);
 return await app.RunAsync(args, CancellationToken.None);
 ```
 
-Now `mytool greet world` prints `Hello, world!`, and `mytool` with no arguments opens a REPL — you didn't write either.
+`mytool greet world` prints `Hello, world!`; `mytool` with no arguments opens a REPL. Neither is hand-written.
 
-The grammar composes with operators: `>` sequences words, `*` binds a target, and `Verbs`/`Nouns`/`Connectors`/`Targets` provide a shared vocabulary so commands read naturally:
+The grammar composes with operators: `>` sequences words, `*` binds a target, and `Verbs`/`Nouns`/`Connectors`/`Targets` provide a shared vocabulary:
 
 ```csharp
 app.Register(
@@ -171,8 +171,8 @@ What you inherit by building on Vice:
 - Typed, backpressured streaming channels between piped stages
 - A session REPL with job management, history, and daemon detachment
 - Git-style external plugins: any executable named `<app>-<verb>` on the trusted plugin path dispatches as a verb
-- Pluggable, opt-in framework services (`IViceLogger`, `IKeyring`, update checks, telemetry) with safe `Null` defaults
-- POSIX exit codes, XDG-compliant state directories, pager wrapping, `--json`/`--format` conventions, and an SSRF-guarded `HttpClient`
+- Pluggable, opt-in framework services (`IViceLogger`, `IKeyring`, update checks) with safe `Null` defaults
+- POSIX exit codes, pager wrapping, `--json`/`--format` conventions, and an SSRF-guarded `HttpClient`
 
 The framework API is summarized in [src/Vice/README.md](src/Vice/README.md); the knobs are in [docs/env-and-config.md](docs/env-and-config.md).
 
@@ -198,7 +198,7 @@ The framework API is summarized in [src/Vice/README.md](src/Vice/README.md); the
 
 ## Configuration
 
-Vice is configured through environment variables, XDG-standard directories, and optional settings files — log level, allowed write roots for downloads, cache and state locations, color control, outbound-connection allow/deny lists, and plugin discovery. The complete reference is in **[docs/env-and-config.md](docs/env-and-config.md)**.
+Vice is configured through environment variables — log level, allowed write roots for downloads, color control, outbound-connection allow/deny lists, and plugin discovery. The complete reference is in **[docs/env-and-config.md](docs/env-and-config.md)**.
 
 ---
 
@@ -219,11 +219,10 @@ Vice is usable without color, motion, or Unicode, and conveys every outcome text
 - [Getting started](docs/getting-started.md) — install, verify, first commands, one-shot vs. session mode
 - [Network commands](docs/network-commands.md) — TCP, UDP, gRPC
 - [Research commands](docs/research-commands.md) — search, fetch, download, archive
-- [Research sources](docs/sources.md) — per-source query syntax, aliases, formats
 - [File commands](docs/file-commands.md) — read, write, stream, archives, filesystem search
 - [Build commands](docs/build-commands.md) — `dotnet` wrappers and build deduplication
 - [vice-mux commands](docs/mux-commands.md) — the companion stream inspect/route/tee tool, its exit-code conditions and sinks
-- [Environment and configuration](docs/env-and-config.md) — env vars, XDG paths, plugins, services, exit codes
+- [Environment and configuration](docs/env-and-config.md) — env vars, plugins, services, exit codes
 - [Releasing](docs/releasing.md) — versioning policy, tagging, publishing, rollback
 - [Licensing](docs/licensing.md) — Apache-2.0 coverage, SPDX provenance, third-party notices
 - [Troubleshooting](docs/troubleshooting.md)

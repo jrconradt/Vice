@@ -107,36 +107,6 @@ public class SafeNetPolicyTests
     }
 
     [Fact]
-    public void FromFile_CorruptJson_Throws()
-    {
-        var path = Path.Combine(Path.GetTempPath(), $"safenet-corrupt-{Guid.NewGuid():N}.json");
-        File.WriteAllText(path, "{ this is not json ");
-        try
-        {
-            Assert.Throws<InvalidOperationException>(() => SafeNetPolicy.FromFile(path));
-        }
-        finally
-        {
-            File.Delete(path);
-        }
-    }
-
-    [Fact]
-    public void FromFile_UnparsableCidrEntry_Throws()
-    {
-        var path = Path.Combine(Path.GetTempPath(), $"safenet-badcidr-{Guid.NewGuid():N}.json");
-        File.WriteAllText(path, "{ \"deny\": [\"10.0.0.0/33\", \"169.254.169.254/\"] }");
-        try
-        {
-            Assert.Throws<InvalidOperationException>(() => SafeNetPolicy.FromFile(path));
-        }
-        finally
-        {
-            File.Delete(path);
-        }
-    }
-
-    [Fact]
     public void EvaluateAddress_DenyBeforeAllow()
     {
         Assert.True(IpRange.TryParse("10.0.0.0/8", out var allow));

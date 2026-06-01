@@ -1,8 +1,5 @@
 using System.Net;
 using System.Net.Sockets;
-using System.Text.Json;
-using System.Text.Json.Serialization;
-using Vice.Configuration;
 using Vice.Logging;
 
 namespace Vice.Network.gRPC;
@@ -17,7 +14,6 @@ public sealed record SafeNetPolicy(
     public const string DenyIpsEnvVar = "VICE_SAFE_NET_DENY";
     public const string AllowHostsEnvVar = "VICE_SAFE_NET_ALLOW_HOSTS";
     public const string DenyHostsEnvVar = "VICE_SAFE_NET_DENY_HOSTS";
-    public const string SettingsFileName = "safenet.json";
 
     public static readonly SafeNetPolicy Empty = new(
         Array.Empty<IpRange>(), Array.Empty<IpRange>(),
@@ -81,64 +77,9 @@ public sealed record SafeNetPolicy(
         return new SafeNetPolicy(allowIps, denyIps, allowHosts, denyHosts);
     }
 
-    private sealed record DefaultCacheEntry(string Key, SafeNetPolicy Policy);
-
-    private static readonly object _defaultCacheLock = new();
-    private static DefaultCacheEntry? _defaultCacheEntry;
-
     public static SafeNetPolicy LoadDefault()
     {
-        var path = ResolveSettingsPath();
-        var key = ComputeDefaultCacheKey(path);
-
-        var cached = Volatile.Read(ref _defaultCacheEntry);
-        if (cached is not null && string.Equals(cached.Key, key, StringComparison.Ordinal))
-        {
-            return cached.Policy;
-        }
-
-        lock (_defaultCacheLock)
-        {
-            var current = Volatile.Read(ref _defaultCacheEntry);
-            if (current is not null && string.Equals(current.Key, key, StringComparison.Ordinal))
-            {
-                return current.Policy;
-            }
-
-            var fresh = Combine(FromEnvironment(), FromFile(path));
-            Volatile.Write(ref _defaultCacheEntry, new DefaultCacheEntry(key, fresh));
-            return fresh;
-        }
-    }
-
-    private static string ComputeDefaultCacheKey(string? path)
-    {
-        var mtimeTicks = 0L;
-        var exists = false;
-        if (!string.IsNullOrEmpty(path))
-        {
-            try
-            {
-                var info = new FileInfo(path);
-                if (info.Exists)
-                {
-                    exists = true;
-                    mtimeTicks = info.LastWriteTimeUtc.Ticks;
-                }
-            }
-            catch (IOException)
-            {
-            }
-            catch (UnauthorizedAccessException)
-            {
-            }
-        }
-
-        var allow = Environment.GetEnvironmentVariable(AllowIpsEnvVar) ?? "";
-        var deny = Environment.GetEnvironmentVariable(DenyIpsEnvVar) ?? "";
-        var allowHosts = Environment.GetEnvironmentVariable(AllowHostsEnvVar) ?? "";
-        var denyHosts = Environment.GetEnvironmentVariable(DenyHostsEnvVar) ?? "";
-        return $"{path ?? ""}|{exists}|{mtimeTicks}|{allow}|{deny}|{allowHosts}|{denyHosts}";
+        return FromEnvironment();
     }
 
     public static SafeNetPolicy FromEnvironment()
@@ -147,60 +88,6 @@ public sealed record SafeNetPolicy(
             ParseIpList(Environment.GetEnvironmentVariable(DenyIpsEnvVar), DenyIpsEnvVar),
             ParseHostList(Environment.GetEnvironmentVariable(AllowHostsEnvVar), AllowHostsEnvVar),
             ParseHostList(Environment.GetEnvironmentVariable(DenyHostsEnvVar), DenyHostsEnvVar));
-
-    public static SafeNetPolicy FromFile(string? path)
-    {
-        if (string.IsNullOrEmpty(path) || !File.Exists(path))
-        {
-            return Empty;
-        }
-
-        try
-        {
-            var json = File.ReadAllText(path);
-            var doc = JsonSerializer.Deserialize(json, SafeNetPolicyJsonContext.Default.SafeNetPolicyDocument);
-            if (doc is null)
-            {
-                return Empty;
-            }
-
-            var rejected = new List<string>();
-            var policy = new SafeNetPolicy(
-                ParseIpList(doc.AllowIps, "allow", rejected),
-                ParseIpList(doc.DenyIps, "deny", rejected),
-                ParseHostList(doc.AllowHosts, "allow_hosts", rejected),
-                ParseHostList(doc.DenyHosts, "deny_hosts", rejected));
-
-            if (rejected.Count > 0)
-            {
-                throw new InvalidOperationException(
-                    $"SafeNet policy file '{path}' contains {rejected.Count} unparsable entr{(rejected.Count == 1 ? "y" : "ies")}: {string.Join(", ", rejected)}; refusing to proceed with a partially-applied network policy.");
-            }
-
-            return policy;
-        }
-        catch (JsonException ex)
-        {
-            throw new InvalidOperationException(
-                $"SafeNet policy file '{path}' is corrupt and cannot be parsed; refusing to proceed without a valid network policy.", ex);
-        }
-        catch (IOException ex)
-        {
-            throw new InvalidOperationException(
-                $"SafeNet policy file '{path}' could not be read; refusing to proceed without a valid network policy.", ex);
-        }
-    }
-
-    public static string? ResolveSettingsPath()
-    {
-        var configDir = new ViceDirectories("vice").ConfigDir;
-        if (string.IsNullOrEmpty(configDir))
-        {
-            return null;
-        }
-
-        return Path.Combine(configDir, SettingsFileName);
-    }
 
     private static List<IpRange> ParseIpList(string? raw, string envVar)
     {
@@ -222,34 +109,6 @@ public sealed record SafeNetPolicy(
                 Vice.Log.Emit(
                     ViceLogLevel.Warn,
                     $"SafeNet: ignoring unparsable IP range '{token}' from {envVar}; this entry will not be enforced.");
-            }
-        }
-        return result;
-    }
-
-    private static List<IpRange> ParseIpList(IReadOnlyList<string>? items, string field, List<string> rejected)
-    {
-        var result = new List<IpRange>();
-        if (items is null)
-        {
-            return result;
-        }
-
-        foreach (var item in items)
-        {
-            if (string.IsNullOrWhiteSpace(item))
-            {
-                continue;
-            }
-
-            var token = item.Trim();
-            if (IpRange.TryParse(token, out var range))
-            {
-                result.Add(range);
-            }
-            else
-            {
-                rejected.Add($"{field}: '{token}'");
             }
         }
         return result;
@@ -280,33 +139,6 @@ public sealed record SafeNetPolicy(
         return result;
     }
 
-    private static List<HostPattern> ParseHostList(IReadOnlyList<string>? items, string field, List<string> rejected)
-    {
-        var result = new List<HostPattern>();
-        if (items is null)
-        {
-            return result;
-        }
-
-        foreach (var item in items)
-        {
-            if (string.IsNullOrWhiteSpace(item))
-            {
-                continue;
-            }
-
-            var token = item.Trim();
-            if (HostPattern.TryParse(token, out var pat))
-            {
-                result.Add(pat);
-            }
-            else
-            {
-                rejected.Add($"{field}: '{token}'");
-            }
-        }
-        return result;
-    }
 }
 
 public enum SafeNetDecision
@@ -450,14 +282,3 @@ public sealed record HostPattern(string Value, bool IsWildcard)
         return true;
     }
 }
-
-public sealed class SafeNetPolicyDocument
-{
-    [JsonPropertyName("allow")] public List<string>? AllowIps { get; set; }
-    [JsonPropertyName("deny")] public List<string>? DenyIps { get; set; }
-    [JsonPropertyName("allow_hosts")] public List<string>? AllowHosts { get; set; }
-    [JsonPropertyName("deny_hosts")] public List<string>? DenyHosts { get; set; }
-}
-
-[JsonSerializable(typeof(SafeNetPolicyDocument))]
-internal partial class SafeNetPolicyJsonContext : JsonSerializerContext { }

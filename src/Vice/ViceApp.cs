@@ -200,7 +200,7 @@ public sealed class ViceApp : IViceApp, IAsyncDisposable
             return await PluginDispatcher.RunAsync(pluginPath, pluginArgs, ct).ConfigureAwait(false);
         }
 
-        await using var state = SessionState.For(_name, logger: _logger);
+        var state = SessionState.For(_name);
         var session = SessionContext.OneShot(state, _sessionServices, _logger);
         return await CreateExecutor(session: session).ExecuteAsync(args, ct).ConfigureAwait(false);
     }
@@ -250,16 +250,13 @@ public sealed class ViceApp : IViceApp, IAsyncDisposable
 
     public async Task<int> RunSessionAsync(CancellationToken ct = default)
     {
-        await using var state = SessionState.For(_name, logger: _logger);
-        var persistence = new JobPersistence(state.JobsPath);
-
-        await using var jobManager = await JobManager.CreateAsync(_jobRunners, persistence, _concurrency, _logger, ct, _shutdownTimeout);
+        var state = SessionState.For(_name);
+        await using var jobManager = new JobManager(_jobRunners, _concurrency, _logger, ct, _shutdownTimeout);
 
         var sessionCtx = new SessionContext(jobManager, state, _sessionServices, _logger);
-        await using var history = new InputHistory(state.HistoryPath);
-        history.Load();
+        await using var history = new InputHistory();
 
-        var builtins = new SessionBuiltinRegistry(jobManager, state, history);
+        var builtins = new SessionBuiltinRegistry(jobManager, history);
 
         var executor = CreateExecutor(sessionCtx, builtins: builtins);
         using var loop = new SessionLoop(executor, jobManager, history, _console, System.Console.In, _logger);
@@ -277,15 +274,13 @@ public sealed class ViceApp : IViceApp, IAsyncDisposable
 
     public async Task<int> RunDaemonAsync(CancellationToken ct = default)
     {
-        await using var state = SessionState.For(_name, logger: _logger);
+        var state = SessionState.For(_name);
         return await RunDaemonAsync(state, ct).ConfigureAwait(false);
     }
 
     internal async Task<int> RunDaemonAsync(SessionState state, CancellationToken ct = default)
     {
-        var persistence = new JobPersistence(state.JobsPath);
-
-        await using var jobManager = await JobManager.CreateAsync(_jobRunners, persistence, _concurrency, _logger, ct, _shutdownTimeout);
+        await using var jobManager = new JobManager(_jobRunners, _concurrency, _logger, ct, _shutdownTimeout);
 
         var sessionCtx = new SessionContext(jobManager, state, _sessionServices, _logger, isInteractive: false);
 

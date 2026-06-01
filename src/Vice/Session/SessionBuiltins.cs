@@ -59,12 +59,5 @@ internal static class SessionBuiltins
             (ctx, ct) => { Vice.Output.Write("\x1b[2J\x1b[H"); return Task.FromResult(0); },
             isBuiltin: true,
             showInHelp: true);
-
-        registry.Register(
-            Verbs.Set() * Targets.Key > Connectors.To() * Targets.Value,
-            "Set a session configuration value",
-            (ctx, ct) => Task.FromResult(0),
-            isBuiltin: true,
-            showInHelp: true);
     }
 }

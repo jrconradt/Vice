@@ -14,21 +14,18 @@ namespace Vice.Tests;
 
 public class SessionLoopTests
 {
-    private static (SessionLoop Loop, JobManager Jobs, RecordingConsole Console, InputHistory History, TempDir Tmp)
+    private static (SessionLoop Loop, JobManager Jobs, RecordingConsole Console, InputHistory History)
         Build(string input, Action<CommandRegistry>? configure = null)
     {
-        var tmp = new TempDir();
         var registry = new CommandRegistry();
         configure?.Invoke(registry);
 
         var console = new RecordingConsole();
-        var persistence = new JobPersistence(System.IO.Path.Combine(tmp.Path, "jobs.json"));
-        var jobs = new JobManager(Array.Empty<IJobRunner>(), persistence);
-        var state = new SessionState(tmp.Path, pipeName: "vice-test-" + Guid.NewGuid().ToString("N"));
-        var history = new InputHistory(state.HistoryPath);
+        var jobs = new JobManager(Array.Empty<IJobRunner>());
+        var history = new InputHistory();
 
         SessionBuiltins.RegisterChains(registry);
-        var builtins = new SessionBuiltinRegistry(jobs, state, history);
+        var builtins = new SessionBuiltinRegistry(jobs, history);
 
         var executor = new CommandExecutor(
             registry, TestOptions.All, console,
@@ -38,14 +35,13 @@ public class SessionLoopTests
         var loop = new SessionLoop(executor, jobs, history, console,
             new StringReader(input), prompt: "vice> ");
 
-        return (loop, jobs, console, history, tmp);
+        return (loop, jobs, console, history);
     }
 
     [Fact]
     public async Task Eof_ExitsCleanly()
     {
-        var (loop, jobs, _, _, tmp) = Build("");
-        using (tmp)
+        var (loop, jobs, _, _) = Build("");
         await using (jobs)
         {
             var transitionToDaemon = await loop.RunAsync(CancellationToken.None);
@@ -56,8 +52,7 @@ public class SessionLoopTests
     [Fact]
     public async Task ExitCommand_StopsLoop()
     {
-        var (loop, jobs, console, _, tmp) = Build("exit\n");
-        using (tmp)
+        var (loop, jobs, console, _) = Build("exit\n");
         await using (jobs)
         {
             var transitionToDaemon = await loop.RunAsync(CancellationToken.None);
@@ -69,8 +64,7 @@ public class SessionLoopTests
     [Fact]
     public async Task QuitSynonym_AlsoExits()
     {
-        var (loop, jobs, _, _, tmp) = Build("quit\n");
-        using (tmp)
+        var (loop, jobs, _, _) = Build("quit\n");
         await using (jobs)
         {
             await loop.RunAsync(CancellationToken.None);
@@ -80,8 +74,7 @@ public class SessionLoopTests
     [Fact]
     public async Task BlankLine_IsSkipped_AndPromptReprints()
     {
-        var (loop, jobs, console, history, tmp) = Build("\n\nexit\n");
-        using (tmp)
+        var (loop, jobs, console, history) = Build("\n\nexit\n");
         await using (jobs)
         {
             await loop.RunAsync(CancellationToken.None);
@@ -97,11 +90,10 @@ public class SessionLoopTests
     [Fact]
     public async Task UserCommand_IsHistoryAppended()
     {
-        var (loop, jobs, _, history, tmp) = Build("ping\nexit\n",
+        var (loop, jobs, _, history) = Build("ping\nexit\n",
             registry => registry.Register(verb("ping"), "ping",
                 (ctx, ct) => Task.FromResult(0)));
 
-        using (tmp)
         await using (jobs)
         {
             await loop.RunAsync(CancellationToken.None);

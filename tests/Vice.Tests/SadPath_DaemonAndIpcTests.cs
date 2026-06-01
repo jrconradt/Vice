@@ -16,9 +16,8 @@ public class SadPath_DaemonAndIpcTests
     [Fact]
     public async Task Daemon_UnknownCommand_ReturnsCapturedError_NonZeroExit()
     {
-        using var tmp = new TempDir();
         var pipeName = UniquePipe();
-        var state = new SessionState(tmp.Path, pipeName);
+        var state = new SessionState("vice-test", pipeName);
 
         var app = new ViceApp("vice", "1.0.0", description: null,
             console: new RecordingConsole(), status: NullStatusDisplay.Instance);

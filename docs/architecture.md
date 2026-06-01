@@ -50,14 +50,14 @@ higher layers; a higher layer may use any lower layer. Listed lowest first.
 | --- | --- | --- |
 | Foundation | `Concurrency`, `Display`, `Nodes`, `Composition` | Primitives: wait-free helpers, terminal rendering, DSL node tree, expression composition. |
 | Parsing surface | `Lexicon`, `Options`, `Core` | Connector vocabulary, typed option registries, the public `Dsl` / `TargetDef` builder surface — all thin layers over `Vice.Parser`. |
-| Persistence and telemetry | `Persistence`, `Logging`, `Configuration`, `Sinks` | Atomic-file writes with safe-root guards, structured telemetry, keyring/config, log sinks. |
+| Logging and configuration | `Logging`, `Configuration`, `Sinks` | Structured logging, keyring/config, log sinks. |
 | Execution | `Commands`, `Execution`, `Help`, `Completions`, `Manpages` | Command registry, pipeline execution, help rendering, shell-completion and man-page generation. |
 | Runtime services | `Ipc`, `Jobs`, `Session`, `Streaming`, `Output`, `Plugins` | Pipe-server IPC, job/daemon management, the session REPL, typed streaming, output sinks, external-plugin dispatch. |
 | Host | `ViceApp`, `ViceAppBuilder`, `Signals` | Wires the layers into a runnable application. |
 
 ## Subsystems that intentionally stay in core
 
-`Completions`, `Manpages`, and `Persistence` are self-contained in purpose but
+`Completions` and `Manpages` are self-contained in purpose but
 are not extractable to their own assemblies without introducing a project cycle.
 They stay in `Vice`; the layering table above is the contract that keeps their
 coupling from spreading.
@@ -67,18 +67,16 @@ coupling from spreading.
   of the boundary.
 - `Manpages` consumes `Commands`, `Help`, and `Options`, and is consumed only by
   `Commands`. Same cycle as `Completions`.
-- `Persistence` consumes `Logging` and the `Log` sink, and the `Sinks` layer in
-  turn consumes `Persistence`. The two are mutually dependent.
 
 If one of these is to be extracted later, the cycle has to be broken first — for
-example by inverting the `Persistence`/`Sinks` dependency through an interface
+example by inverting the `Commands` dependency through an interface
 owned by the lower layer — not by moving files across an assembly boundary that
 the type graph still spans.
 
 ## Rule for new feature work
 
 A new feature module references `Vice` and nothing below it directly; it reaches
-parsing, persistence, or execution only through the public surface those layers
+parsing or execution only through the public surface those layers
 expose. When a feature needs a capability that today lives deep in core, surface
 it on the owning layer rather than reaching across layers — that keeps the
 acyclic assembly graph and the internal layering both intact.

@@ -6,7 +6,6 @@ using Vice.Lexicon;
 using Vice.Logging;
 using Vice.Net.Http;
 using Vice.Streaming;
-using static Vice.Dsl;
 
 namespace Vice.Net.Research;
 
@@ -358,28 +357,10 @@ public static class ResearchCommands
         }
 
         var paging = ResearchOptions.GetPaging(ctx);
-        var noCache = ResearchOptions.NoCache(ctx);
         var timeout = ResearchOptions.GetTimeout(ctx);
-        var cache = new ResearchCache();
-        var cacheKey = ResearchCache.ComputeKey(query, paging.Limit, paging.Offset);
-
-        if (!noCache)
-        {
-            var cached = await cache.ReadSearchAsync(source.Name, cacheKey, ct).ConfigureAwait(false);
-            if (cached is not null)
-            {
-                return cached;
-            }
-        }
-
-        if (noCache)
-        {
-            return await FetchSearchAsync(source, query, paging, cache, cacheKey, noCache, timeout, ct).ConfigureAwait(false);
-        }
-
-        var inflightKey = $"{source.Name}|{cacheKey}";
+        var inflightKey = $"{source.Name}|{query}|{paging.Limit}|{paging.Offset}";
         var lazy = InFlightSearches.GetOrAdd(inflightKey, k => new Lazy<Task<IReadOnlyList<SearchHit>>>(
-            () => CoalescedFetchAsync(source, query, paging, cache, cacheKey, noCache, timeout, k),
+            () => CoalescedFetchAsync(source, query, paging, timeout, k),
             LazyThreadSafetyMode.ExecutionAndPublication));
 
         return await lazy.Value.WaitAsync(ct).ConfigureAwait(false);
@@ -388,15 +369,12 @@ public static class ResearchCommands
     private static async Task<IReadOnlyList<SearchHit>> CoalescedFetchAsync(IResearchSource source,
                                                                             string query,
                                                                             ResearchPaging paging,
-                                                                            ResearchCache cache,
-                                                                            string cacheKey,
-                                                                            bool noCache,
                                                                             TimeSpan timeout,
                                                                             string inflightKey)
     {
         try
         {
-            return await FetchSearchAsync(source, query, paging, cache, cacheKey, noCache, timeout, CancellationToken.None).ConfigureAwait(false);
+            return await FetchSearchAsync(source, query, paging, timeout, CancellationToken.None).ConfigureAwait(false);
         }
         finally
         {
@@ -410,22 +388,12 @@ public static class ResearchCommands
     private static async Task<IReadOnlyList<SearchHit>> FetchSearchAsync(IResearchSource source,
                                                                          string query,
                                                                          ResearchPaging paging,
-                                                                         ResearchCache cache,
-                                                                         string cacheKey,
-                                                                         bool noCache,
                                                                          TimeSpan timeout,
                                                                          CancellationToken ct)
     {
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         cts.CancelAfter(timeout);
-        var hits = await source.SearchAsync(Http, query, paging.Limit, paging.Offset, cts.Token).ConfigureAwait(false);
-
-        if (!noCache)
-        {
-            await cache.WriteSearchAsync(source.Name, cacheKey, hits, cts.Token).ConfigureAwait(false);
-        }
-
-        return hits;
+        return await source.SearchAsync(Http, query, paging.Limit, paging.Offset, cts.Token).ConfigureAwait(false);
     }
 
     private static (IResearchSource source, string query) ResolveSearch(ICommandContext ctx)

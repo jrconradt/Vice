@@ -232,39 +232,18 @@ internal sealed class CommandExecutor : ICommandExecutor
         IStatusHandle handle)
     {
         Vice.Log.Emit(new CommandStarted(commandName));
-        Vice.Telemetry.Track(
-            "command.started",
-            new Dictionary<string, string>
-            {
-                ["command"] = commandName,
-            });
         var sw = Stopwatch.StartNew();
         try
         {
             var result = await handler(ctx, ct).ConfigureAwait(false);
             sw.Stop();
             Vice.Log.Emit(new CommandCompleted(commandName, result, sw.Elapsed));
-            Vice.Telemetry.Track(
-                "command.completed",
-                new Dictionary<string, string>
-                {
-                    ["command"] = commandName,
-                    ["exitCode"] = result.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    ["durationMs"] = sw.Elapsed.TotalMilliseconds.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture),
-                });
             return result;
         }
         catch (Exception ex)
         {
             sw.Stop();
             Vice.Log.Emit(new CommandFailed(commandName, ex, sw.Elapsed));
-            Vice.Telemetry.TrackException(
-                ex,
-                new Dictionary<string, string>
-                {
-                    ["command"] = commandName,
-                    ["durationMs"] = sw.Elapsed.TotalMilliseconds.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture),
-                });
             handle.Fail();
             throw;
         }

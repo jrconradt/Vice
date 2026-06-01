@@ -62,11 +62,6 @@ _vice() {
             "root:manpage") state="root__manpage"; ;;
             "root:pause") state="root__pause"; skip=1; ;;
             "root:resume") state="root__resume"; skip=1; ;;
-            "root:set") state="root__set"; skip=1; ;;
-            "root__set:to") state="root__set__to"; skip=1; ;;
-            "root:sources") state="root__sources"; ;;
-            "root__sources:add") state="root__sources__add"; skip=1; ;;
-            "root__sources:remove") state="root__sources__remove"; skip=1; ;;
             "root:status") state="root__status"; ;;
             "root:version") state="root__version"; ;;
             *) state="unknown" ;;
@@ -100,8 +95,6 @@ _vice() {
                 'manpage:Emit a groff(7) man page for this tool to stdout.'
                 'pause:Pause a background job'
                 'resume:Resume a paused job'
-                'set:Set a session configuration value'
-                'sources:List configured research sources.'
                 'status:Query a running daemon for job status (if any).'
                 'version:Show version'
             )
@@ -118,21 +111,6 @@ _vice() {
             local -a candidates
             candidates=(
                 'commands:List all commands'
-            )
-            _describe -t subcommand 'subcommand' candidates
-            ;;
-        "root__set")
-            local -a candidates
-            candidates=(
-                'to:Set a session configuration value'
-            )
-            _describe -t subcommand 'subcommand' candidates
-            ;;
-        "root__sources")
-            local -a candidates
-            candidates=(
-                'add:Add a research source to the configured list.'
-                'remove:Remove a research source from the configured list.'
             )
             _describe -t subcommand 'subcommand' candidates
             ;;

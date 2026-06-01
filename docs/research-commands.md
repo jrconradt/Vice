@@ -1,8 +1,8 @@
 # Research commands
 
-Four verbs over a registry of five sources (arXiv, Project Gutenberg, PubMed, UniProt, AlphaFold). All four take a `source` target identifying which backend to use. See [sources.md](sources.md) for per-source query syntax, aliases, and supported formats.
+Four verbs over a registry of five sources (arXiv, Project Gutenberg, PubMed, UniProt, AlphaFold). All four take a `source` target identifying which backend to use.
 
-The default per-call timeout is 30 s. Results are cached on disk; see [env-and-config.md](env-and-config.md) for cache location and [--no-cache](#global-options) to bypass.
+The default per-call timeout is 30 s.
 
 ## search / find
 
@@ -90,4 +90,3 @@ Requires the source to support both `search` and `download`. AlphaFold therefore
 | `--page <n>` | (none) | search, archive | Convenience for `--offset (n-1)*limit`. Ignored if `--offset` is also set. |
 | `--format <fmt>` | source-specific | fetch, download, archive | Per-source format override (e.g. `epub` for Gutenberg, `cif` for AlphaFold). |
 | `--timeout <ms>` | 30000 | all | Per-call timeout. |
-| `--no-cache` | off | all | Bypass the on-disk research cache for this call. |

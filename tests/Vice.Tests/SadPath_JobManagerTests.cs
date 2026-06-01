@@ -18,10 +18,8 @@ public class SadPath_JobManagerTests
     [Fact]
     public async Task Runner_ThrowsException_TransitionsToFailed_WithMessage()
     {
-        using var tmp = new TempDir();
-        var persistence = new JobPersistence(Path.Combine(tmp.Path, "jobs.json"));
         var runner = new DelegatingRunner((_, _, _) => throw new InvalidOperationException("downstream blew up"));
-        await using var mgr = new JobManager(new[] { (IJobRunner)runner }, persistence);
+        await using var mgr = new JobManager(new[] { (IJobRunner)runner });
 
         var failed = new TaskCompletionSource<(JobState, string)>(TaskCreationOptions.RunContinuationsAsynchronously);
         mgr.JobFailed += (job, msg) => failed.TrySetResult((job, msg));
@@ -36,9 +34,6 @@ public class SadPath_JobManagerTests
     [Fact]
     public async Task Pause_Then_Resume_Roundtrips()
     {
-        using var tmp = new TempDir();
-        var persistence = new JobPersistence(Path.Combine(tmp.Path, "jobs.json"));
-
         var iteration = 0;
         var startedFirstTime = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var startedSecondTime = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -57,7 +52,7 @@ public class SadPath_JobManagerTests
             }
         });
 
-        await using var mgr = new JobManager(new[] { (IJobRunner)runner }, persistence);
+        await using var mgr = new JobManager(new[] { (IJobRunner)runner });
         var id = await mgr.SubmitAsync(JobDescriptor.ForDownload("s", "r", "/d", ".x"), default);
 
         await startedFirstTime.Task.WaitAsync(TimeSpan.FromSeconds(5));
@@ -72,9 +67,6 @@ public class SadPath_JobManagerTests
     [Fact]
     public async Task Cancel_QueuedJob_TransitionsToFailed()
     {
-        using var tmp = new TempDir();
-        var persistence = new JobPersistence(Path.Combine(tmp.Path, "jobs.json"));
-
         var firstRunnerStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var runner = new DelegatingRunner(async (job, prog, ct) =>
         {
@@ -82,7 +74,7 @@ public class SadPath_JobManagerTests
             await Task.Delay(Timeout.Infinite, ct);
         });
 
-        await using var mgr = new JobManager(new[] { (IJobRunner)runner }, persistence, maxConcurrency: 1);
+        await using var mgr = new JobManager(new[] { (IJobRunner)runner }, maxConcurrency: 1);
         await mgr.SubmitAsync(JobDescriptor.ForDownload("a", "a", "/a", ".x"), default);
         await firstRunnerStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
@@ -98,9 +90,6 @@ public class SadPath_JobManagerTests
     [Fact]
     public async Task DisposeAsync_CancelsRunningJobs()
     {
-        using var tmp = new TempDir();
-        var persistence = new JobPersistence(Path.Combine(tmp.Path, "jobs.json"));
-
         var runnerStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var runnerExited = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var runner = new DelegatingRunner(async (job, prog, ct) =>
@@ -116,7 +105,7 @@ public class SadPath_JobManagerTests
             }
         });
 
-        var mgr = new JobManager(new[] { (IJobRunner)runner }, persistence);
+        var mgr = new JobManager(new[] { (IJobRunner)runner });
         await mgr.SubmitAsync(JobDescriptor.ForDownload("s", "r", "/d", ".x"), default);
         await runnerStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
@@ -127,9 +116,7 @@ public class SadPath_JobManagerTests
     [Fact]
     public async Task Pause_UnknownId_DoesNotThrow()
     {
-        using var tmp = new TempDir();
-        var persistence = new JobPersistence(Path.Combine(tmp.Path, "jobs.json"));
-        await using var mgr = new JobManager(Array.Empty<IJobRunner>(), persistence);
+        await using var mgr = new JobManager(Array.Empty<IJobRunner>());
 
         await mgr.PauseAsync(9999, default);
         await mgr.ResumeAsync(9999, default);
