@@ -32,7 +32,7 @@ public sealed class ResearchDownloadJobRunner : IJobRunner
                                CancellationToken ct)
     {
         var source = _registry.Resolve(job.Source);
-        var format = ExtensionToFormat(Path.GetExtension(job.DestinationPath));
+        var format = job.Format ?? ExtensionToFormat(Path.GetExtension(job.DestinationPath));
 
         using var http = _httpFactory();
 

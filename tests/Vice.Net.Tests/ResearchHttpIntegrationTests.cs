@@ -203,6 +203,101 @@ public sealed class ResearchHttpIntegrationTests : IAsyncLifetime, IDisposable
         Assert.False(File.Exists($"{destination}.partial"));
     }
 
+    [Fact]
+    public async Task JobRunner_PrefersCarriedFormat_OverExtensionDerived()
+    {
+        var recorder = new FormatRecordingResearchSource(_server!.BaseUrl);
+        var registry = new ResearchSourceRegistry(new IResearchSource[] { recorder });
+        var runner = new ResearchDownloadJobRunner(registry, () => new HttpClient());
+        var destination = Path.Combine(_tempDir, "carried.xml");
+
+        var job = new JobState
+        {
+            Id = 21,
+            Kind = JobKind.Download,
+            Source = "recorder",
+            ResourceId = "doc-5",
+            DestinationPath = destination,
+            Format = "epub",
+        };
+
+        await runner.RunAsync(job, new Progress<JobProgress>(_ => { }), CancellationToken.None);
+
+        Assert.Equal("epub", recorder.LastFormat);
+    }
+
+    [Fact]
+    public async Task JobRunner_NoCarriedFormat_FallsBackToExtension()
+    {
+        var recorder = new FormatRecordingResearchSource(_server!.BaseUrl);
+        var registry = new ResearchSourceRegistry(new IResearchSource[] { recorder });
+        var runner = new ResearchDownloadJobRunner(registry, () => new HttpClient());
+        var destination = Path.Combine(_tempDir, "fallback.xml");
+
+        var job = new JobState
+        {
+            Id = 22,
+            Kind = JobKind.Download,
+            Source = "recorder",
+            ResourceId = "doc-6",
+            DestinationPath = destination,
+        };
+
+        await runner.RunAsync(job, new Progress<JobProgress>(_ => { }), CancellationToken.None);
+
+        Assert.Equal("xml", recorder.LastFormat);
+    }
+
+    private sealed class FormatRecordingResearchSource : IResearchSource
+    {
+        private readonly string _baseUrl;
+
+        public FormatRecordingResearchSource(string baseUrl)
+        {
+            _baseUrl = baseUrl;
+        }
+
+        public string? LastFormat
+        {
+            get;
+            private set;
+        }
+
+        public string Name => "recorder";
+
+        public IReadOnlyList<string> Aliases => Array.Empty<string>();
+
+        public bool Searchable => false;
+
+        public string DefaultExtension => "txt";
+
+        public Task<IReadOnlyList<SearchHit>> SearchAsync(HttpClient http,
+                                                          string query,
+                                                          int limit,
+                                                          int offset,
+                                                          CancellationToken ct)
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task<FetchResult> FetchAsync(HttpClient http,
+                                            string id,
+                                            CancellationToken ct)
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task<DownloadTarget> ResolveDownloadAsync(HttpClient http,
+                                                         string id,
+                                                         string? format,
+                                                         CancellationToken ct)
+        {
+            LastFormat = format;
+            var uri = new Uri($"{_baseUrl}blob/{id}.txt");
+            return Task.FromResult(new DownloadTarget(uri, DefaultExtension));
+        }
+    }
+
     private sealed class LoopbackResearchSource : IResearchSource
     {
         private readonly string _baseUrl;

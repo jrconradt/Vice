@@ -6,6 +6,7 @@ public record JobDescriptor(
     string? ResourceId,
     string? DestinationPath,
     string? Extension,
+    string? Format,
     string? Endpoint,
     string? Method,
     string? RequestData,
@@ -16,6 +17,7 @@ public record JobDescriptor(
     string resourceId,
     string destinationPath,
     string extension,
+    string? format = null,
     Dictionary<string, string?>? options = null)
     {
         return new JobDescriptor(
@@ -24,6 +26,7 @@ public record JobDescriptor(
             ResourceId: resourceId,
             DestinationPath: destinationPath,
             Extension: extension,
+            Format: format,
             Endpoint: null,
             Method: null,
             RequestData: null,
@@ -42,6 +45,7 @@ public record JobDescriptor(
             ResourceId: null,
             DestinationPath: null,
             Extension: null,
+            Format: null,
             Endpoint: endpoint,
             Method: method,
             RequestData: requestData,

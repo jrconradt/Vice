@@ -191,7 +191,7 @@ public static class ResearchCommands
             var target = await source.ResolveDownloadAsync(Http, id, format, cts.Token).ConfigureAwait(false);
             var destination = ResearchDownloader.BuildDestinationPath(ctx["path"], source.Name, id, target.Extension);
 
-            if (TrySubmitJob(ctx, source.Name, id, destination, target.Extension, timeout, ct, out var jobTask))
+            if (TrySubmitJob(ctx, source.Name, id, destination, target.Extension, format, timeout, ct, out var jobTask))
             {
                 Vice.Output.Line($"Queued download {source.Name}/{id} -> {destination}.");
                 return await jobTask.ConfigureAwait(false);
@@ -249,7 +249,7 @@ public static class ResearchCommands
                     var target = await source.ResolveDownloadAsync(Http, hit.Id, format, cts.Token).ConfigureAwait(false);
                     var destination = ResearchDownloader.BuildDestinationPath(directory, source.Name, hit.Id, target.Extension);
 
-                    if (TrySubmitJob(ctx, source.Name, hit.Id, destination, target.Extension, timeout, ct, out var jobTask))
+                    if (TrySubmitJob(ctx, source.Name, hit.Id, destination, target.Extension, format, timeout, ct, out var jobTask))
                     {
                         Vice.Output.Line($"Queued {source.Name}/{hit.Id} -> {destination}.");
                         var exitCode = await jobTask.ConfigureAwait(false);
@@ -428,6 +428,7 @@ public static class ResearchCommands
                                      string id,
                                      string destination,
                                      string extension,
+                                     string? format,
                                      TimeSpan timeout,
                                      CancellationToken ct,
                                      out Task<int> jobTask)
@@ -444,7 +445,12 @@ public static class ResearchCommands
             [TimeoutOptionKey] = ((long)timeout.TotalMilliseconds).ToString(System.Globalization.CultureInfo.InvariantCulture),
         };
 
-        var descriptor = JobDescriptor.ForDownload(source, id, destination, extension, options);
+        var descriptor = JobDescriptor.ForDownload(source,
+                                                   id,
+                                                   destination,
+                                                   extension,
+                                                   format,
+                                                   options);
         jobTask = session.Jobs.SubmitAsync(descriptor, ct);
         return true;
     }

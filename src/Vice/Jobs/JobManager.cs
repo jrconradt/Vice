@@ -283,6 +283,7 @@ internal sealed class JobManager : IJobManager
             Source = descriptor.Source ?? string.Empty,
             ResourceId = descriptor.ResourceId ?? string.Empty,
             DestinationPath = descriptor.DestinationPath ?? string.Empty,
+            Format = descriptor.Format,
             Endpoint = descriptor.Endpoint,
             Method = descriptor.Method,
             CreatedAt = DateTime.UtcNow,

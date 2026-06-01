@@ -29,6 +29,10 @@ public sealed record JobState
     public string DestinationPath { get; init; } = string.Empty;
 
     [JsonInclude]
+    [JsonPropertyName("format")]
+    public string? Format { get; init; }
+
+    [JsonInclude]
     [JsonPropertyName("bytesDownloaded")]
     public long BytesDownloaded { get; init; }
 
