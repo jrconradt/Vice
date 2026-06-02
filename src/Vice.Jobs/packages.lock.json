@@ -10,15 +10,6 @@
       },
       "vice.foundation": {
         "type": "Project"
-      },
-      "vice.jobs": {
-        "type": "Project",
-        "dependencies": {
-          "Vice.Foundation": "[0.1.0, )"
-        }
-      },
-      "vice.parser": {
-        "type": "Project"
       }
     }
   }

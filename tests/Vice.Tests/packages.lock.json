@@ -2,17 +2,17 @@
   "version": 2,
   "dependencies": {
     "net10.0": {
-      "CsCheck": {
-        "type": "Direct",
-        "requested": "[4.4.0, )",
-        "resolved": "4.4.0",
-        "contentHash": "G/0YT8iTg27ZMORS3GGCyVjDavtmGX18b4PjEmrTfcPtjkmwS0OJD6cK7p7EiX8HooTHmQN9B+3qoCQ2WqOayg=="
-      },
       "coverlet.collector": {
         "type": "Direct",
         "requested": "[6.0.4, )",
         "resolved": "6.0.4",
         "contentHash": "lkhqpF8Pu2Y7IiN7OntbsTtdbpR1syMsm2F3IgX6ootA4ffRqWL5jF7XipHuZQTdVuWG/gVAAcf8mjk8Tz0xPg=="
+      },
+      "CsCheck": {
+        "type": "Direct",
+        "requested": "[4.4.0, )",
+        "resolved": "4.4.0",
+        "contentHash": "G/0YT8iTg27ZMORS3GGCyVjDavtmGX18b4PjEmrTfcPtjkmwS0OJD6cK7p7EiX8HooTHmQN9B+3qoCQ2WqOayg=="
       },
       "JunitXml.TestLogger": {
         "type": "Direct",
@@ -114,7 +114,26 @@
       "vice": {
         "type": "Project",
         "dependencies": {
+          "Vice.Foundation": "[0.1.0, )",
+          "Vice.Jobs": "[0.1.0, )",
           "Vice.Parser": "[0.1.0, )"
+        }
+      },
+      "vice.foundation": {
+        "type": "Project"
+      },
+      "vice.host": {
+        "type": "Project",
+        "dependencies": {
+          "Vice": "[0.1.0, )",
+          "Vice.Foundation": "[0.1.0, )",
+          "Vice.Jobs": "[0.1.0, )"
+        }
+      },
+      "vice.jobs": {
+        "type": "Project",
+        "dependencies": {
+          "Vice.Foundation": "[0.1.0, )"
         }
       },
       "vice.parser": {

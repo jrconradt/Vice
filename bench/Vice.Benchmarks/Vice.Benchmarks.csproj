@@ -12,6 +12,8 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Vice/Vice.csproj" />
+    <ProjectReference Include="../../src/Vice.Host/Vice.Host.csproj" />
+    <ProjectReference Include="../../src/Vice.Foundation/Vice.Foundation.csproj" />
     <ProjectReference Include="../../src/Vice.Mux/Vice.Mux.csproj" />
   </ItemGroup>
 </Project>

@@ -10,6 +10,7 @@
     <IsTrimmable>true</IsTrimmable>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="Vice.Host" />
     <InternalsVisibleTo Include="Vice.Net" />
     <InternalsVisibleTo Include="Vice.Files" />
     <InternalsVisibleTo Include="Vice.Benchmarks" />
@@ -22,6 +23,8 @@
     <InternalsVisibleTo Include="Vice.Generators.Tests" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="../Vice.Foundation/Vice.Foundation.csproj" />
+    <ProjectReference Include="../Vice.Jobs/Vice.Jobs.csproj" />
     <ProjectReference Include="../Vice.Parser/Vice.Parser.csproj" />
     <ProjectReference Include="../Vice.Generators/Vice.Generators.csproj"
                       OutputItemType="Analyzer"

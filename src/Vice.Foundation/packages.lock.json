@@ -7,18 +7,6 @@
         "requested": "[10.0.3, )",
         "resolved": "10.0.3",
         "contentHash": "0B6nZyCHWXnvmlB559oduOspVdNOnpNXPjhpWVMovLPAsDVG7A4jJR9rzECf67JUzxP8/ee/wA8clwIzJcWNFA=="
-      },
-      "vice.foundation": {
-        "type": "Project"
-      },
-      "vice.jobs": {
-        "type": "Project",
-        "dependencies": {
-          "Vice.Foundation": "[0.1.0, )"
-        }
-      },
-      "vice.parser": {
-        "type": "Project"
       }
     }
   }

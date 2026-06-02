@@ -10,6 +10,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Vice/Vice.csproj" />
+    <ProjectReference Include="../Vice.Foundation/Vice.Foundation.csproj" />
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Vice.Mux.Tests" />

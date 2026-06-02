@@ -37,25 +37,47 @@
       "vice": {
         "type": "Project",
         "dependencies": {
+          "Vice.Foundation": "[0.1.0, )",
+          "Vice.Jobs": "[0.1.0, )",
           "Vice.Parser": "[0.1.0, )"
         }
       },
       "vice.build": {
         "type": "Project",
         "dependencies": {
-          "Vice": "[0.1.0, )"
+          "Vice": "[0.1.0, )",
+          "Vice.Foundation": "[0.1.0, )"
         }
       },
       "vice.files": {
         "type": "Project",
         "dependencies": {
-          "Vice": "[0.1.0, )"
+          "Vice": "[0.1.0, )",
+          "Vice.Foundation": "[0.1.0, )"
+        }
+      },
+      "vice.foundation": {
+        "type": "Project"
+      },
+      "vice.host": {
+        "type": "Project",
+        "dependencies": {
+          "Vice": "[0.1.0, )",
+          "Vice.Foundation": "[0.1.0, )",
+          "Vice.Jobs": "[0.1.0, )"
+        }
+      },
+      "vice.jobs": {
+        "type": "Project",
+        "dependencies": {
+          "Vice.Foundation": "[0.1.0, )"
         }
       },
       "vice.mux": {
         "type": "Project",
         "dependencies": {
-          "Vice": "[0.1.0, )"
+          "Vice": "[0.1.0, )",
+          "Vice.Foundation": "[0.1.0, )"
         }
       },
       "vice.net": {
@@ -64,7 +86,9 @@
           "Google.Protobuf": "[3.35.0, )",
           "Grpc.Net.Client": "[2.80.0, )",
           "Grpc.Reflection": "[2.80.0, )",
-          "Vice": "[0.1.0, )"
+          "Vice": "[0.1.0, )",
+          "Vice.Foundation": "[0.1.0, )",
+          "Vice.Jobs": "[0.1.0, )"
         }
       },
       "vice.parser": {

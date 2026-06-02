@@ -126,11 +126,30 @@
       "vice": {
         "type": "Project",
         "dependencies": {
+          "Vice.Foundation": "[0.1.0, )",
+          "Vice.Jobs": "[0.1.0, )",
           "Vice.Parser": "[0.1.0, )"
         }
       },
+      "vice.foundation": {
+        "type": "Project"
+      },
       "vice.generators": {
         "type": "Project"
+      },
+      "vice.host": {
+        "type": "Project",
+        "dependencies": {
+          "Vice": "[0.1.0, )",
+          "Vice.Foundation": "[0.1.0, )",
+          "Vice.Jobs": "[0.1.0, )"
+        }
+      },
+      "vice.jobs": {
+        "type": "Project",
+        "dependencies": {
+          "Vice.Foundation": "[0.1.0, )"
+        }
       },
       "vice.parser": {
         "type": "Project"

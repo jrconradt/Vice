@@ -4,7 +4,10 @@
     <Project Path="src/Vice.Build/Vice.Build.csproj" />
     <Project Path="src/Vice.Cli/Vice.Cli.csproj" />
     <Project Path="src/Vice.Files/Vice.Files.csproj" />
+    <Project Path="src/Vice.Foundation/Vice.Foundation.csproj" />
     <Project Path="src/Vice.Generators/Vice.Generators.csproj" />
+    <Project Path="src/Vice.Host/Vice.Host.csproj" />
+    <Project Path="src/Vice.Jobs/Vice.Jobs.csproj" />
     <Project Path="src/Vice.Mux/Vice.Mux.csproj" />
     <Project Path="src/Vice.Mux.Cli/Vice.Mux.Cli.csproj" />
     <Project Path="src/Vice.Net/Vice.Net.csproj" />

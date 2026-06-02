@@ -13,6 +13,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Vice/Vice.csproj" />
+    <ProjectReference Include="../Vice.Host/Vice.Host.csproj" />
     <ProjectReference Include="../Vice.Mux/Vice.Mux.csproj" />
     <ProjectReference Include="../Vice.Generators/Vice.Generators.csproj"
                       OutputItemType="Analyzer"

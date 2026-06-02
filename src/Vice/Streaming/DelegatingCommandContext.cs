@@ -5,7 +5,6 @@ using Vice.Execution;
 using Vice.Logging;
 using Vice.Options;
 using Vice.Parser;
-using Vice.Session;
 
 namespace Vice.Streaming;
 
