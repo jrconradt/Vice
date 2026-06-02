@@ -1,6 +1,4 @@
-using Vice.Execution;
-
-namespace Vice.Streaming;
+namespace Vice.Contracts;
 
 public interface IStreamingCommandContext<T> : ICommandContext
 {

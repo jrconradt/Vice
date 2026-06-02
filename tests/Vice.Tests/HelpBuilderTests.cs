@@ -107,4 +107,25 @@ public class HelpBuilderTests
         Assert.Contains("by {axis}", console.Output);
         Assert.Contains("[and by {axis}...]", console.Output);
     }
+
+    [Fact]
+    public async Task Help_FullLayoutMatchesGolden()
+    {
+        var (app, console) = Build();
+        app.Register(verb("alpha", "a"),
+                     "alpha description",
+                     (ctx, ct) => Task.FromResult(0));
+        app.Register(verb("beta") > noun("things") * target("path"),
+                     "beta description",
+                     (ctx, ct) => Task.FromResult(0));
+        app.Register(verb("gamma"),
+                     "gamma description",
+                     (ctx, ct) => Task.FromResult(0),
+                     showInHelp: false);
+
+        var exit = await app.RunAsync(new[] { "--help" });
+
+        Assert.Equal(0, exit);
+        GoldenFile.Verify("help_full.golden", console.Output);
+    }
 }

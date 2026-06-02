@@ -11,9 +11,13 @@
     <PackageReference Include="xunit.runner.visualstudio" />
     <PackageReference Include="coverlet.collector" />
     <PackageReference Include="JunitXml.TestLogger" />
+    <PackageReference Include="CsCheck" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\Vice\Vice.csproj" />
+    <ProjectReference Include="..\..\src\Vice.Host\Vice.Host.csproj" />
+    <ProjectReference Include="..\..\src\Vice.Jobs\Vice.Jobs.csproj" />
+    <ProjectReference Include="..\..\src\Vice.Foundation\Vice.Foundation.csproj" />
   </ItemGroup>
   <ItemGroup>
     <None Update="xunit.runner.json">

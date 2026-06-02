@@ -4,7 +4,7 @@ internal static class BashCompletionGenerator
 {
     public static string Generate(CompletionTrie trie)
     {
-        var funcName = "_" + SanitizeIdentifier(trie.AppName);
+        var funcName = CompletionEmit.FunctionName(trie.AppName);
         var appName = BashEscape(trie.AppName);
         var globalTokens = string.Join(' ', trie.GlobalOptions
             .SelectMany(o =>
@@ -12,7 +12,7 @@ internal static class BashCompletionGenerator
                 var list = new List<string> { "--" + o.Name };
                 foreach (var a in o.Aliases)
                 {
-                    list.Add(a.Length == 1 ? "-" + a : "--" + a);
+                    list.Add(CompletionEmit.AliasPrefix(a) + a);
                 }
 
                 return list;
@@ -21,15 +21,7 @@ internal static class BashCompletionGenerator
 
         var (walkedTransitions, walkedSuggestions) = CompletionWalker.Walk(trie.Root);
 
-        var transitionLines = new List<string>(walkedTransitions.Count);
-        foreach (var t in walkedTransitions)
-        {
-            var parent = BashEscape(t.ParentStateId);
-            var child = BashEscape(t.ChildStateId);
-            var pattern = string.Join("|", t.Tokens.Select(tok => $"\"{parent}:{BashEscape(tok)}\""));
-            var setSkip = t.TargetCount > 0 ? $" skip={t.TargetCount};" : "";
-            transitionLines.Add($"            {pattern}) state=\"{child}\";{setSkip} ;;");
-        }
+        var transitionLines = CompletionEmit.TransitionLines(walkedTransitions, BashEscape);
 
         var suggestionLines = new List<string>(walkedSuggestions.Count);
         foreach (var s in walkedSuggestions)
@@ -89,8 +81,7 @@ internal static class BashCompletionGenerator
     }
 
     private static string BashEscape(string s)
-        => string.Concat(s.Select(c => (c == '\\' || c == '"' || c == '$' || c == '`') ? $"\\{c}" : $"{c}"));
-
-    private static string SanitizeIdentifier(string name)
-        => string.Concat(name.Select(c => char.IsLetterOrDigit(c) || c == '_' ? c : '_'));
+        => string.Concat(s.Select(c => (c == '\\' || c == '"'
+                                        || c == '$'
+                                        || c == '`') ? $"\\{c}" : $"{c}"));
 }

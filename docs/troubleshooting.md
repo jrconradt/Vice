@@ -6,7 +6,7 @@ Research-source verbs route through `PoliteHandler`, which:
 
 - Forces a 1 s minimum gap between requests to the same hostname.
 - Retries on `429 Too Many Requests` and `503 Service Unavailable` up to 3 times.
-- Waits the upstream `Retry-After` if it's present, otherwise exponential backoff (2 s, 4 s, 8 s).
+- Waits the upstream `Retry-After` if it's present, otherwise a full-jitter backoff: a random delay in `[0, min(120, 2^(attempt+1)))` seconds, capped at 2 minutes.
 
 There is **no user-visible signal** when this throttle engages. A `search` or `archive` against a saturated source can appear to hang for tens of seconds while the handler waits between retries. Set `VICE_LOG_LEVEL=debug` to see the underlying timing; otherwise the only sign is a long pause before the response.
 
@@ -25,7 +25,7 @@ If a `build` call appears to hang, run `VICE_LOG_LEVEL=debug vice build <path>` 
 | Press | Effect |
 |---|---|
 | First Ctrl+C | Cancels the global `CancellationToken`. In-flight commands see cancellation and shut down gracefully. Vice prints `Shutting down — press Ctrl+C again to force exit.` to stderr. |
-| Second Ctrl+C | Default runtime behavior takes over and the process exits immediately (any unsaved job state is dropped; only the on-disk `jobs.json` survives). |
+| Second Ctrl+C | Default runtime behavior takes over and the process exits immediately; in-memory job state is dropped. |
 
 In session mode, an `OperationCanceledException` raised during a REPL command is caught and the REPL keeps running for the next prompt; the second Ctrl+C is the only way to force-quit.
 
@@ -35,15 +35,14 @@ In session mode, an `OperationCanceledException` raised during a REPL command is
 |---|---|---|
 | Triggered by | `vice` with no args | `vice <args>` |
 | Job runners | Active. Long-running operations (downloads, server-streaming gRPC calls) are submitted as background jobs and reported via `jobs`. | Not started. Operations run synchronously to completion. |
-| `jobs` / `pause` / `resume` / `cancel` / `history` / `clear` / `set` | Built-in, handled by the session loop. | Not available. |
+| `jobs` / `pause` / `resume` / `cancel` / `history` / `clear` | Built-in, handled by the session loop. | Not available. |
 | Daemon detach | If you exit the REPL while jobs are active, the process detaches and the jobs continue in a background daemon. Reconnect by running `vice` again. You can also start a daemon explicitly with `vice daemon` or `vice --daemon <command>` (useful under systemd/supervisord), and inspect a running daemon with `vice status`. | `vice daemon`, `vice --daemon`, and `vice status` all apply. |
-| Console state path | Per-kind XDG directories (see [env-and-config.md](env-and-config.md#state-directories-xdg-compliant)) | Same. |
 
 A side-effect to be aware of: a `download` issued from a one-shot invocation runs to completion in-line and blocks the caller; the same command in session mode returns immediately with `Queued download as job #N`.
 
 ## "Destination is outside the allowed roots"
 
-`download` and `archive` only write into the current working directory by default. To allow writes elsewhere, set `VICE_ALLOWED_ROOTS` to a `:`-separated list of allowed parent directories before invoking Vice. `unarchive` is independently restricted to the standard write roots — the user home directory, the XDG `data` / `cache` / `state` directories, the system temp directory, and the current working directory.
+`download` and `archive` only write into the current working directory by default. To allow writes elsewhere, set `VICE_ALLOWED_ROOTS` to a `:`-separated list of allowed parent directories before invoking Vice. `unarchive` is independently restricted to the standard write roots — the user home directory, the system temp directory, and the current working directory.
 
 ## "vice help <verb>" unknown
 
@@ -51,4 +50,4 @@ A side-effect to be aware of: a `download` issued from a one-shot invocation run
 
 ## Logging output is empty
 
-The default log level is `warn`. `Info` and `debug` lines are filtered out. To see the structured `(cached)` markers, "build queue starting" lines, or retry warnings, set `VICE_LOG_LEVEL=debug` (or `info` for less noise). Logs go to stderr, never stdout.
+The default log level is `warn`. `Info` and `debug` lines are filtered out. To see the structured "build queue starting" lines or retry warnings, set `VICE_LOG_LEVEL=debug` (or `info` for less noise). Logs go to stderr, never stdout.

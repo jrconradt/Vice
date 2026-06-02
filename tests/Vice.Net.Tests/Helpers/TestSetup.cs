@@ -1,5 +1,5 @@
 using System.Runtime.CompilerServices;
-using Vice.Network.gRPC;
+using Vice.Net.Requests.Grpc;
 
 namespace Vice.Net.Tests.Helpers;
 

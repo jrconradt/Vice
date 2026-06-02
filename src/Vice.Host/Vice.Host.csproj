@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>Vice</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsAotCompatible>true</IsAotCompatible>
+    <IsTrimmable>true</IsTrimmable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Vice/Vice.csproj" />
+    <ProjectReference Include="../Vice.Jobs/Vice.Jobs.csproj" />
+    <ProjectReference Include="../Vice.Foundation/Vice.Foundation.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Vice.Net" />
+    <InternalsVisibleTo Include="Vice.Files" />
+    <InternalsVisibleTo Include="Vice.Benchmarks" />
+    <InternalsVisibleTo Include="Vice.Tests" />
+    <InternalsVisibleTo Include="Vice.Net.Tests" />
+    <InternalsVisibleTo Include="Vice.Mux.Tests" />
+    <InternalsVisibleTo Include="Vice.Files.Tests" />
+    <InternalsVisibleTo Include="Vice.Build.Tests" />
+    <InternalsVisibleTo Include="Vice.Cli.Tests" />
+    <InternalsVisibleTo Include="Vice.Generators.Tests" />
+  </ItemGroup>
+</Project>

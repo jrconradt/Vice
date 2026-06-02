@@ -6,26 +6,19 @@ namespace Vice.Tests;
 public class InputHistoryTests
 {
     [Fact]
-    public async Task Append_Then_Load_Roundtrips()
+    public async Task Append_AccumulatesInOrder()
     {
-        using var tmp = new TempDir();
-        var path = Path.Combine(tmp.Path, "history");
+        var h = new InputHistory();
+        await h.AppendAsync("alpha", default);
+        await h.AppendAsync("beta", default);
 
-        var h1 = new InputHistory(path);
-        await h1.AppendAsync("alpha", default);
-        await h1.AppendAsync("beta", default);
-
-        var h2 = new InputHistory(path);
-        h2.Load();
-
-        Assert.Equal(new[] { "alpha", "beta" }, h2.GetHistory());
+        Assert.Equal(new[] { "alpha", "beta" }, h.GetHistory());
     }
 
     [Fact]
     public async Task Append_SkipsBlank()
     {
-        using var tmp = new TempDir();
-        var h = new InputHistory(Path.Combine(tmp.Path, "history"));
+        var h = new InputHistory();
         await h.AppendAsync("", default);
         await h.AppendAsync("   ", default);
         await h.AppendAsync("a", default);
@@ -36,8 +29,7 @@ public class InputHistoryTests
     [Fact]
     public async Task Append_SkipsConsecutiveDuplicates()
     {
-        using var tmp = new TempDir();
-        var h = new InputHistory(Path.Combine(tmp.Path, "history"));
+        var h = new InputHistory();
         await h.AppendAsync("a", default);
         await h.AppendAsync("a", default);
         await h.AppendAsync("b", default);
@@ -48,8 +40,7 @@ public class InputHistoryTests
     [Fact]
     public async Task GetHistory_Count_ReturnsTail()
     {
-        using var tmp = new TempDir();
-        var h = new InputHistory(Path.Combine(tmp.Path, "history"));
+        var h = new InputHistory();
         await h.AppendAsync("a", default);
         await h.AppendAsync("b", default);
         await h.AppendAsync("c", default);

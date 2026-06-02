@@ -1,17 +1,19 @@
 using System.Net.Sockets;
+using Vice.Logging;
 
 namespace Vice.Mux.Sinks;
 
-internal sealed class TcpSink : SinkBase
+internal sealed class TcpSink : StreamBackedSink
 {
     private readonly TcpClient _client;
 
-    public TcpSink(TcpClient client, string label) : base(client.GetStream(), label)
+    public TcpSink(TcpClient client, string label, IViceLogger logger)
+        : base(client.GetStream(), label, logger)
     {
         _client = client;
     }
 
-    protected override ValueTask DisposeCoreAsync()
+    protected override ValueTask DisposeUnderlyingAsync()
     {
         _client.Dispose();
         return ValueTask.CompletedTask;

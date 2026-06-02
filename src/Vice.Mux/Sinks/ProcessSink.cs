@@ -1,18 +1,19 @@
 using System.Diagnostics;
+using Vice.Logging;
 
 namespace Vice.Mux.Sinks;
 
-internal sealed class ProcessSink : SinkBase
+internal sealed class ProcessSink : StreamBackedSink
 {
     private readonly Process _process;
 
-    public ProcessSink(Process process, string label)
-        : base(process.StandardInput.BaseStream, label)
+    public ProcessSink(Process process, string label, IViceLogger logger)
+        : base(process.StandardInput.BaseStream, label, logger)
     {
         _process = process;
     }
 
-    protected override async ValueTask DisposeCoreAsync()
+    protected override async ValueTask DisposeUnderlyingAsync()
     {
         var gracefulExited = false;
         try
@@ -23,7 +24,7 @@ internal sealed class ProcessSink : SinkBase
         }
         catch (Exception ex) when (ex is OperationCanceledException or InvalidOperationException)
         {
-            System.Diagnostics.Debug.WriteLine(ex);
+            Vice.Quietly.Swallow(ex, Logger);
         }
 
         if (!gracefulExited)
@@ -34,7 +35,7 @@ internal sealed class ProcessSink : SinkBase
             }
             catch (Exception killEx) when (killEx is InvalidOperationException or NotSupportedException or System.ComponentModel.Win32Exception)
             {
-                System.Diagnostics.Debug.WriteLine(killEx);
+                Vice.Quietly.Swallow(killEx, Logger);
             }
 
             try
@@ -43,10 +44,38 @@ internal sealed class ProcessSink : SinkBase
             }
             catch (Exception waitEx) when (waitEx is TimeoutException or InvalidOperationException or OperationCanceledException)
             {
-                System.Diagnostics.Debug.WriteLine(waitEx);
+                Vice.Quietly.Swallow(waitEx, Logger);
             }
         }
 
+        ReportExit(gracefulExited);
         _process.Dispose();
+    }
+
+    private void ReportExit(bool gracefulExited)
+    {
+        if (!gracefulExited)
+        {
+            Logger.Log(ViceLogLevel.Warn,
+                       $"Sink '{Label}' downstream process did not exit within the grace period and was killed.");
+            return;
+        }
+
+        int exitCode;
+        try
+        {
+            exitCode = _process.ExitCode;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException)
+        {
+            Vice.Quietly.Swallow(ex, Logger);
+            return;
+        }
+
+        if (exitCode != 0)
+        {
+            Logger.Log(ViceLogLevel.Warn,
+                       $"Sink '{Label}' downstream process exited with code {exitCode}.");
+        }
     }
 }

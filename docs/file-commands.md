@@ -91,7 +91,9 @@ vice unarchive <archive>                       # extracts to a temp directory
 vice unarchive <archive> to dir <dest>         # extracts to <dest>
 ```
 
-The destination, if given, must lie inside one of the standard write roots: the user home directory, the XDG `data` / `cache` / `state` directories, the system temp directory, or the current working directory. Destinations outside every root are refused.
+The destination, if given, must lie inside one of the allowed write roots: the user home directory; the XDG base directories `XDG_DATA_HOME`, `XDG_CACHE_HOME`, and `XDG_STATE_HOME`; the system temp directory (`TMPDIR` and the platform temp path); the current working directory; and any paths listed in `VICE_ALLOWED_ROOTS` (colon-separated). Destinations outside every root are refused.
+
+Extraction into a caller-provided destination is additive and overwriting, not a clean replace. Each archive entry overwrites a matching file already in the destination, but files left from a prior extraction that are absent from the current archive are not pruned, so re-extracting a changed archive yields the union of old and new contents. A mid-extraction failure leaves the entries written so far in place; the destination is not rolled back. To get an exact mirror of the archive, extract into an empty or freshly created directory.
 
 ## search files / search folders
 

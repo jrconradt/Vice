@@ -132,4 +132,14 @@ public class ManPageTests
         Assert.Contains("by {axis}", c.Output);
         Assert.Contains("[and by {axis}...]", c.Output);
     }
+
+    [Fact]
+    public async Task FullManPageMatchesGolden()
+    {
+        var (app, console) = Build();
+        var exit = await app.RunAsync(new[] { "manpage" });
+
+        Assert.Equal(0, exit);
+        GoldenFile.Verify("manpage.golden", console.Output);
+    }
 }

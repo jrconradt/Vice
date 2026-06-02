@@ -70,15 +70,15 @@ public class DslTests
     [Fact]
     public void Conjunctive_IsRelational_ByDefault()
     {
-        Assert.Equal(ConjunctiveKind.Relational, Connectors.To().ConjunctiveKind);
-        Assert.Equal(ConjunctiveKind.Relational, Connectors.With().ConjunctiveKind);
+        Assert.Equal(ConjunctiveKind.Preposition, Connectors.To().ConjunctiveKind);
+        Assert.Equal(ConjunctiveKind.Preposition, Connectors.With().ConjunctiveKind);
     }
 
     [Fact]
     public void Conjunctive_Then_IsPiping()
     {
-        Assert.Equal(ConjunctiveKind.Piping, Connectors.Then().ConjunctiveKind);
-        Assert.Equal(ConjunctiveKind.Piping, Connectors.AndPipe().ConjunctiveKind);
+        Assert.Equal(ConjunctiveKind.StageSeparator, Connectors.Then().ConjunctiveKind);
+        Assert.Equal(ConjunctiveKind.StageSeparator, Connectors.AndPipe().ConjunctiveKind);
     }
 
     [Fact]

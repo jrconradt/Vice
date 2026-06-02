@@ -1,4 +1,4 @@
-using Vice.Commands;
+using Vice.Contracts;
 using Vice.Parser;
 
 namespace Vice.Execution;
@@ -17,7 +17,7 @@ internal static class PipelineSplitter
         foreach (var node in chain.Nodes)
         {
             if (node.Descriptor.Kind == ChainNodeKind.Conjunctive &&
-                node.Descriptor.ConjunctiveKind == ConjunctiveKind.Piping)
+                node.Descriptor.ConjunctiveKind == ConjunctiveKind.StageSeparator)
             {
                 var handler = GetHandler(registration, stageIndex);
                 stages.Add(CreateStage(currentOperator, currentOperatorWord, currentTargets, currentNodes, handler, registration, stageIndex));
@@ -25,7 +25,7 @@ internal static class PipelineSplitter
 
                 currentTargets = new Dictionary<string, string>();
                 currentNodes = new List<ResolvedCommand>();
-                currentOperator = ConjunctiveKind.Piping;
+                currentOperator = ConjunctiveKind.StageSeparator;
                 currentOperatorWord = node.Descriptor.Name;
             }
             else
@@ -50,7 +50,7 @@ internal static class PipelineSplitter
         foreach (var node in chain.Nodes)
         {
             if (node.Descriptor.Kind == ChainNodeKind.Conjunctive &&
-                node.Descriptor.ConjunctiveKind == ConjunctiveKind.Piping)
+                node.Descriptor.ConjunctiveKind == ConjunctiveKind.StageSeparator)
             {
                 return true;
             }
@@ -66,7 +66,7 @@ internal static class PipelineSplitter
         CommandRegistration registration,
         int stageIndex)
     {
-        if (registration.Mode == StageMode.Classic)
+        if (registration.Mode == StageMode.Buffered)
         {
             return new PipelineStage(op, operatorWord, targets, handler, nodes);
         }
@@ -84,21 +84,28 @@ internal static class PipelineSplitter
         IReadOnlyList<CommandRegistration> registrations)
     {
         var stages = new List<PipelineStage>(segments.Count);
+        int stageIndex = 0;
         foreach (var s in segments)
         {
             var reg = registrations[s.MatchedRegistrationIndex];
             var targets = s.Chain.AllTargetValues();
             var nodes = s.Chain.Nodes;
 
-            if (reg.Mode != StageMode.Classic)
+            if (reg.Mode != StageMode.Buffered)
             {
+                var mode = (stageIndex > 0 && reg.Launcher is { HasConsumer: true })
+                    ? StageMode.StreamConsumer
+                    : reg.Mode;
+
                 stages.Add(new PipelineStage(null, s.OperatorWord, targets,
-                    reg.Handler, reg.Mode, reg.StreamOptions, reg.Launcher, nodes));
+                    reg.Handler, mode, reg.StreamOptions, reg.Launcher, nodes));
             }
             else
             {
                 stages.Add(new PipelineStage(null, s.OperatorWord, targets, reg.Handler, nodes));
             }
+
+            stageIndex++;
         }
         return stages;
     }

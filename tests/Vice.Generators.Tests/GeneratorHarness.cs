@@ -24,6 +24,7 @@ internal static class GeneratorHarness
         }
         references.Add(MetadataReference.CreateFromFile(typeof(Vice.IViceApp).Assembly.Location));
         references.Add(MetadataReference.CreateFromFile(typeof(Vice.Composition.ViceHostAttribute).Assembly.Location));
+        references.Add(MetadataReference.CreateFromFile(typeof(Vice.ViceAppBuilder).Assembly.Location));
 
         var compilation = CSharpCompilation.Create(
             assemblyName: "TestAssembly",

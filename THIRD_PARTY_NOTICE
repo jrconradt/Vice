@@ -4,12 +4,87 @@ Copyright 2026 Infalligence Labs LLC
 This product includes software developed at Infalligence Labs LLC.
 
 This product includes software from the following third-party projects,
-each licensed under the Apache License, Version 2.0:
+redistributed in the shipped `vice` tool and `Vice` package. Each is listed
+with its license; the full text of each non-Apache-2.0 license appears at the
+end of this file.
 
-- Grpc.AspNetCore 2.71.0 (Copyright The gRPC Authors)
-- Grpc.AspNetCore.Server.Reflection 2.71.0 (Copyright The gRPC Authors)
-- Grpc.Net.Client 2.71.0 (Copyright The gRPC Authors)
-- Grpc.Reflection 2.71.0 (Copyright The gRPC Authors)
-- Grpc.Tools 2.71.0 (Copyright The gRPC Authors)
-- Google.Protobuf 3.34.0 (Copyright Google Inc.)
-- Microsoft.CodeAnalysis.CSharp 5.3.0 (Copyright Microsoft Corporation)
+Redistributed under the Apache License, Version 2.0:
+
+- Grpc.Net.Client 2.80.0 (Copyright 2019 The gRPC Authors)
+- Grpc.Reflection 2.80.0 (Copyright 2019 The gRPC Authors)
+- Grpc.Core.Api 2.80.0 (Copyright 2019 The gRPC Authors)
+- Grpc.Net.Common 2.80.0 (Copyright 2019 The gRPC Authors)
+
+Redistributed under the BSD 3-Clause License:
+
+- Google.Protobuf 3.35.0 (Copyright 2015, Google Inc.)
+
+Redistributed under the MIT License:
+
+- Microsoft.CodeAnalysis.CSharp 4.14.0 (Copyright Microsoft Corporation) — compiled into the bundled Vice.Generators analyzer DLL packed by the `Vice` package
+- Microsoft.Extensions.Logging.Abstractions 6.0.0 (Copyright Microsoft Corporation)
+
+Development and test-only dependencies (NOT redistributed in any shipped artifact):
+
+- Grpc.AspNetCore 2.80.0 (Apache-2.0, Copyright 2019 The gRPC Authors)
+- Grpc.AspNetCore.Server.Reflection 2.80.0 (Apache-2.0, Copyright 2019 The gRPC Authors)
+- Grpc.Tools 2.80.0 (Apache-2.0, Copyright 2019 The gRPC Authors)
+
+The full text of the Apache License, Version 2.0 is in the LICENSE file at the
+root of this repository.
+
+================================================================================
+BSD 3-Clause License (Google.Protobuf)
+================================================================================
+
+Copyright 2015, Google Inc. All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are
+met:
+
+    * Redistributions of source code must retain the above copyright
+notice, this list of conditions and the following disclaimer.
+    * Redistributions in binary form must reproduce the above
+copyright notice, this list of conditions and the following disclaimer
+in the documentation and/or other materials provided with the
+distribution.
+    * Neither the name of Google Inc. nor the names of its
+contributors may be used to endorse or promote products derived from
+this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+================================================================================
+MIT License (Microsoft.CodeAnalysis.CSharp, Microsoft.Extensions.Logging.Abstractions)
+================================================================================
+
+Copyright (c) Microsoft Corporation. All rights reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

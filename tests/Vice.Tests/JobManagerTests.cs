@@ -30,14 +30,12 @@ public class JobManagerTests
     }
 
     [Fact]
-    public async Task Submit_AssignsSequentialIds_AndPersists()
+    public async Task Submit_AssignsSequentialIds_AndCompletes()
     {
-        using var tmp = new TempDir();
-        var persistence = new JobPersistence(Path.Combine(tmp.Path, "jobs.json"));
         var completions = new System.Collections.Concurrent.ConcurrentBag<int>();
         var bothCompleted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var runner = new CountingRunner(JobKind.Download);
-        await using var mgr = new JobManager(new[] { (IJobRunner)runner }, persistence);
+        await using var mgr = new JobManager(new[] { (IJobRunner)runner });
 
         mgr.JobCompleted += s =>
         {
@@ -62,9 +60,7 @@ public class JobManagerTests
     [Fact]
     public async Task Submit_NoMatchingRunner_ThrowsArgumentException()
     {
-        using var tmp = new TempDir();
-        var persistence = new JobPersistence(Path.Combine(tmp.Path, "jobs.json"));
-        await using var mgr = new JobManager(Array.Empty<IJobRunner>(), persistence);
+        await using var mgr = new JobManager(Array.Empty<IJobRunner>());
 
         var ex = await Assert.ThrowsAsync<ArgumentException>(() =>
             mgr.SubmitAsync(JobDescriptor.ForDownload("src", "rid", "/dest", ".txt"), default));
@@ -75,10 +71,8 @@ public class JobManagerTests
     [Fact]
     public async Task Runner_RunsAndCompletes_FiresCompletedEvent()
     {
-        using var tmp = new TempDir();
-        var persistence = new JobPersistence(Path.Combine(tmp.Path, "jobs.json"));
         var runner = new CountingRunner(JobKind.Download);
-        await using var mgr = new JobManager(new[] { (IJobRunner)runner }, persistence);
+        await using var mgr = new JobManager(new[] { (IJobRunner)runner });
 
         var completed = new TaskCompletionSource<JobState>(TaskCreationOptions.RunContinuationsAsynchronously);
         mgr.JobCompleted += s => completed.TrySetResult(s);
@@ -93,8 +87,6 @@ public class JobManagerTests
     [Fact]
     public async Task Cancel_RunningJob_TransitionsToFailed_WithCancelledMessage()
     {
-        using var tmp = new TempDir();
-        var persistence = new JobPersistence(Path.Combine(tmp.Path, "jobs.json"));
         var runnerStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var runner = new CountingRunner(JobKind.Download,
             (job, prog, ct) =>
@@ -103,7 +95,7 @@ public class JobManagerTests
                 return Task.Delay(Timeout.Infinite, ct);
             });
 
-        await using var mgr = new JobManager(new[] { (IJobRunner)runner }, persistence);
+        await using var mgr = new JobManager(new[] { (IJobRunner)runner });
 
         var failedSignal = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
         mgr.JobFailed += (job, msg) => failedSignal.TrySetResult(msg);
@@ -119,9 +111,7 @@ public class JobManagerTests
     [Fact]
     public async Task GetJob_ReturnsNull_ForUnknownId()
     {
-        using var tmp = new TempDir();
-        var persistence = new JobPersistence(Path.Combine(tmp.Path, "jobs.json"));
-        await using var mgr = new JobManager(Array.Empty<IJobRunner>(), persistence);
+        await using var mgr = new JobManager(Array.Empty<IJobRunner>());
 
         Assert.Null(mgr.GetJob(999));
     }

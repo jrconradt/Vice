@@ -1,5 +1,6 @@
 using System.Threading.Tasks;
 using Vice;
+using Vice.Contracts;
 using Vice.Display;
 using Vice.Streaming;
 using Xunit;

@@ -25,27 +25,17 @@ public class PeerCredentialsTests
         Assert.Equal(-1, uid);
     }
 
-    [Fact]
+    [UnixOnlyFact]
     public void TryGetEuid_ReturnsNonNegativeValueOnUnix()
     {
-        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS() && !OperatingSystem.IsFreeBSD())
-        {
-            return;
-        }
-
         var ok = PeerCredentials.TryGetEuid(out var euid);
         Assert.True(ok);
         Assert.True(euid >= 0);
     }
 
-    [Fact]
+    [UnixOnlyFact]
     public void TryGetPeerUid_OnUnixDomainSocketPair_ReturnsCurrentEuid()
     {
-        if (!OperatingSystem.IsLinux())
-        {
-            return;
-        }
-
         using var listener = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
         var path = Path.Combine(Path.GetTempPath(), $"vice-peercred-{Guid.NewGuid():N}.sock");
         try

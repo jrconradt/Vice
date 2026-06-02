@@ -1,9 +1,9 @@
 using Vice.Composition;
 using Vice.Jobs;
 
-namespace Vice.Network.gRPC;
+namespace Vice.Net.Requests.Grpc;
 
-internal static class JobFactory
+public static class JobFactory
 {
     [ViceJobRunner]
     public static IJobRunner GrpcStream(GrpcConnectionManager grpc) => new GrpcStreamJobRunner(grpc);

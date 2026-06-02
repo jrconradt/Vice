@@ -1,21 +1,80 @@
 using System.Diagnostics;
-using Vice.Logging;
+using Vice.Contracts;
 using Vice.Display;
 using Vice.Display.Rendering;
-using Vice.Session;
+using Vice.Logging;
 using Vice.Streaming;
 
 namespace Vice.Execution;
 
 internal sealed class PipelineExecutor
 {
-    private readonly SessionContext? _session;
+    private readonly ISessionContext? _session;
     private readonly IViceLogger _logger;
 
-    public PipelineExecutor(SessionContext? session, IViceLogger logger)
+    public PipelineExecutor(ISessionContext? session, IViceLogger logger)
     {
         _session = session;
         _logger = logger ?? NullViceLogger.Instance;
+    }
+
+    private sealed record PipelineRunContext(
+        IReadOnlyDictionary<string, string?> GlobalOptions,
+        IConsoleWriter Console,
+        IStatusDisplay Status,
+        TerminalCapabilities Capabilities,
+        int TotalStages,
+        CancellationToken Ct);
+
+    private sealed class OutputAccumulator
+    {
+        private readonly List<string> _segments = new();
+        private string? _materialized;
+        private bool _hasValue;
+
+        public void Replace(string? output)
+        {
+            _segments.Clear();
+            if (output is null)
+            {
+                _materialized = null;
+                _hasValue = false;
+                return;
+            }
+
+            _segments.Add(output);
+            _materialized = output;
+            _hasValue = true;
+        }
+
+        public void Append(string? output)
+        {
+            if (output is null)
+            {
+                return;
+            }
+
+            _segments.Add(output);
+            _materialized = null;
+            _hasValue = true;
+        }
+
+        public string? Materialize()
+        {
+            if (!_hasValue)
+            {
+                return null;
+            }
+
+            if (_materialized is null)
+            {
+                _materialized = _segments.Count == 1
+                    ? _segments[0]
+                    : string.Concat(_segments);
+            }
+
+            return _materialized;
+        }
     }
 
     private static PipelineOperator ClassifyOperator(string? word) => word switch
@@ -33,7 +92,15 @@ internal sealed class PipelineExecutor
         TerminalCapabilities capabilities,
         CancellationToken ct)
     {
-        string? previousOutput = null;
+        var context = new PipelineRunContext(
+            globalOptions,
+            console,
+            status,
+            capabilities,
+            stages.Count,
+            ct);
+
+        var accumulated = new OutputAccumulator();
         int lastExitCode = 0;
 
         for (int i = 0; i < stages.Count; i++)
@@ -46,10 +113,13 @@ internal sealed class PipelineExecutor
                 case PipelineOperator.Or:
                     {
                         var (newExit, newOutput) = await ExecuteOr(
-                            stage, lastExitCode, previousOutput,
-                            globalOptions, console, status, capabilities, i + 1, stages.Count, ct);
+                            stage,
+                            lastExitCode,
+                            accumulated.Materialize(),
+                            i + 1,
+                            context);
                         lastExitCode = newExit;
-                        previousOutput = newOutput;
+                        accumulated.Replace(newOutput);
                         break;
                     }
                 case PipelineOperator.And:
@@ -59,11 +129,13 @@ internal sealed class PipelineExecutor
                             return lastExitCode;
                         }
 
-                        var (newExit, newOutput) = await ExecuteAnd(
-                            stage, previousOutput,
-                            globalOptions, console, status, capabilities, i + 1, stages.Count, ct);
-                        lastExitCode = newExit;
-                        previousOutput = newOutput;
+                        var result = await ExecuteStage(
+                            stage,
+                            accumulated.Materialize(),
+                            i + 1,
+                            context);
+                        lastExitCode = result.ExitCode;
+                        accumulated.Append(result.Output);
                         break;
                     }
                 default:
@@ -74,10 +146,12 @@ internal sealed class PipelineExecutor
                         }
 
                         var (newExit, newOutput, advance) = await ExecuteThenOrStreamingPair(
-                            stages, i, previousOutput,
-                            globalOptions, console, status, capabilities, ct);
+                            stages,
+                            i,
+                            accumulated.Materialize(),
+                            context);
                         lastExitCode = newExit;
-                        previousOutput = newOutput;
+                        accumulated.Replace(newOutput);
                         i += advance;
                         break;
                     }
@@ -88,62 +162,63 @@ internal sealed class PipelineExecutor
     }
 
     private async Task<(int ExitCode, string? Output, int Advance)> ExecuteThenOrStreamingPair(
-        List<PipelineStage> stages, int i, string? previousOutput,
-        IReadOnlyDictionary<string, string?> globalOptions,
-        IConsoleWriter console, IStatusDisplay status, TerminalCapabilities capabilities,
-        CancellationToken ct)
+        List<PipelineStage> stages,
+        int i,
+        string? previousOutput,
+        PipelineRunContext context)
     {
         var stage = stages[i];
         var consumerStage = (i + 1 < stages.Count) ? stages[i + 1] : null;
         if (CanStreamPair(stage, consumerStage))
         {
             var result = await ExecuteStreamingPair(
-                stage, consumerStage!, globalOptions, console, status, capabilities,
-                previousOutput, i + 1, stages.Count, ct);
+                stage,
+                consumerStage!,
+                previousOutput,
+                i + 1,
+                context);
             return (result.ExitCode, result.Output, 1);
         }
 
         var (newExit, newOutput) = await ExecuteThen(
-            stage, previousOutput,
-            globalOptions, console, status, capabilities, i + 1, stages.Count, ct);
+            stage,
+            previousOutput,
+            i + 1,
+            context);
         return (newExit, newOutput, 0);
     }
 
     private async Task<(int ExitCode, string? Output)> ExecuteOr(
-        PipelineStage stage, int lastExitCode, string? previousOutput,
-        IReadOnlyDictionary<string, string?> globalOptions,
-        IConsoleWriter console, IStatusDisplay status, TerminalCapabilities capabilities,
-        int stageNumber, int totalStages, CancellationToken ct)
+        PipelineStage stage,
+        int lastExitCode,
+        string? previousOutput,
+        int stageNumber,
+        PipelineRunContext context)
     {
         if (lastExitCode == 0)
         {
             return (lastExitCode, previousOutput);
         }
 
-        var result = await ExecuteStage(stage, globalOptions, console, status, capabilities,
-            previousOutput, stageNumber, totalStages, ct);
+        var result = await ExecuteStage(
+            stage,
+            previousOutput,
+            stageNumber,
+            context);
         return (result.ExitCode, result.Output);
     }
 
-    private async Task<(int ExitCode, string? Output)> ExecuteAnd(
-        PipelineStage stage, string? previousOutput,
-        IReadOnlyDictionary<string, string?> globalOptions,
-        IConsoleWriter console, IStatusDisplay status, TerminalCapabilities capabilities,
-        int stageNumber, int totalStages, CancellationToken ct)
-    {
-        var result = await ExecuteStage(stage, globalOptions, console, status, capabilities,
-            previousOutput, stageNumber, totalStages, ct);
-        return (result.ExitCode, (previousOutput ?? "") + result.Output);
-    }
-
     private async Task<(int ExitCode, string? Output)> ExecuteThen(
-        PipelineStage stage, string? previousOutput,
-        IReadOnlyDictionary<string, string?> globalOptions,
-        IConsoleWriter console, IStatusDisplay status, TerminalCapabilities capabilities,
-        int stageNumber, int totalStages, CancellationToken ct)
+        PipelineStage stage,
+        string? previousOutput,
+        int stageNumber,
+        PipelineRunContext context)
     {
-        var result = await ExecuteStage(stage, globalOptions, console, status, capabilities,
-            previousOutput, stageNumber, totalStages, ct);
+        var result = await ExecuteStage(
+            stage,
+            previousOutput,
+            stageNumber,
+            context);
         return (result.ExitCode, result.Output);
     }
 
@@ -190,15 +265,11 @@ internal sealed class PipelineExecutor
     }
 
     private async Task<PipelineResult> ExecuteStreamingPair(
-        PipelineStage producer, PipelineStage consumer,
-        IReadOnlyDictionary<string, string?> globalOptions,
-        IConsoleWriter console,
-        IStatusDisplay status,
-        TerminalCapabilities capabilities,
+        PipelineStage producer,
+        PipelineStage consumer,
         string? pipelineInput,
         int stageNumber,
-        int totalStages,
-        CancellationToken ct)
+        PipelineRunContext context)
     {
         var producerLauncher = producer.Launcher!;
         var consumerLauncher = consumer.Launcher!;
@@ -209,33 +280,68 @@ internal sealed class PipelineExecutor
         var (channel, disposable) = producerLauncher.CreateChannel(capacity);
         await using (disposable)
         {
-            var producerLabel = totalStages > 1 ? $"Stage {stageNumber}/{totalStages}" : "Producing";
-            await using var producerHandle = status.Start(producerLabel, console);
+            var producerLabel = context.TotalStages > 1 ? $"Stage {stageNumber}/{context.TotalStages}" : "Producing";
+            await using var producerHandle = context.Status.Start(producerLabel, context.Console);
             var producerCapturing = new CapturingConsoleWriter(producerHandle.Writer);
-            var producerRender = new RenderContext(producerCapturing, capabilities);
+            var producerRender = new RenderContext(producerCapturing, context.Capabilities);
             var producerStatus = new Progress<string>(l => producerHandle.UpdateLabel(l));
             var producerProgress = producerHandle.SupportsProgress
                 ? new Progress<double>(frac => producerHandle.UpdateProgress(frac))
                 : null;
-            var producerCtx = new CommandContext(producer.Targets, globalOptions, producerCapturing, pipelineInput, producerStatus, producerRender, producerProgress, _session, _logger, producer.ResolvedNodes) { CancellationToken = ct };
+            var producerCtx = new CommandContext(
+                producer.Targets,
+                context.GlobalOptions,
+                producerCapturing,
+                pipelineInput,
+                producerStatus,
+                producerRender,
+                producerProgress,
+                _session,
+                _logger,
+                producer.ResolvedNodes)
+            { CancellationToken = context.Ct };
 
-            var consumerLabel = totalStages > 1 ? $"Stage {stageNumber + 1}/{totalStages}" : "Consuming";
-            await using var consumerHandle = status.Start(consumerLabel, console);
+            var consumerLabel = context.TotalStages > 1 ? $"Stage {stageNumber + 1}/{context.TotalStages}" : "Consuming";
+            await using var consumerHandle = context.Status.Start(consumerLabel, context.Console);
             var consumerCapturing = new CapturingConsoleWriter(consumerHandle.Writer);
-            var consumerRender = new RenderContext(consumerCapturing, capabilities);
+            var consumerRender = new RenderContext(consumerCapturing, context.Capabilities);
             var consumerStatus = new Progress<string>(l => consumerHandle.UpdateLabel(l));
             var consumerProgress = consumerHandle.SupportsProgress
                 ? new Progress<double>(frac => consumerHandle.UpdateProgress(frac))
                 : null;
-            var consumerCtx = new CommandContext(consumer.Targets, globalOptions, consumerCapturing, null, consumerStatus, consumerRender, consumerProgress, _session, _logger, consumer.ResolvedNodes) { CancellationToken = ct };
+            var consumerCtx = new CommandContext(
+                consumer.Targets,
+                context.GlobalOptions,
+                consumerCapturing,
+                null,
+                consumerStatus,
+                consumerRender,
+                consumerProgress,
+                _session,
+                _logger,
+                consumer.ResolvedNodes)
+            { CancellationToken = context.Ct };
 
-            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            var producerTask = RunProducerAsync(producerLauncher, producerCtx, channel, linkedCts.Token);
-            var consumerTask = RunConsumerAsync(consumerLauncher, consumerCtx, channel, linkedCts);
+            var producerName = ResolveStageName(producer, producerLabel);
+            var consumerName = ResolveStageName(consumer, consumerLabel);
+
+            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(context.Ct);
+            var producerTask = RunProducerAsync(
+                producerLauncher,
+                producerCtx,
+                channel,
+                producerName,
+                linkedCts.Token);
+            var consumerTask = RunConsumerAsync(
+                consumerLauncher,
+                consumerCtx,
+                channel,
+                consumerName,
+                linkedCts);
 
             var (consumerExit, consumerEx) = await AwaitCollectingAsync(consumerTask).ConfigureAwait(false);
 
-            var unblockProducer = !linkedCts.IsCancellationRequested && !ct.IsCancellationRequested;
+            var unblockProducer = !linkedCts.IsCancellationRequested && !context.Ct.IsCancellationRequested;
             if (unblockProducer)
             {
                 try
@@ -244,7 +350,7 @@ internal sealed class PipelineExecutor
                 }
                 catch (ObjectDisposedException ode)
                 {
-                    System.Diagnostics.Debug.WriteLine(ode);
+                    Quietly.Swallow(ode, _logger);
                 }
             }
 
@@ -252,7 +358,7 @@ internal sealed class PipelineExecutor
 
             if (producerEx is OperationCanceledException
                 && unblockProducer
-                && !ct.IsCancellationRequested)
+                && !context.Ct.IsCancellationRequested)
             {
                 producerEx = null;
                 producerExit = consumerExit;
@@ -278,79 +384,89 @@ internal sealed class PipelineExecutor
         }
     }
 
-    private void ReportPairOutcome(
-        IStatusHandle producerHandle, IStatusHandle consumerHandle,
-        int producerExit, int consumerExit,
-        Exception? producerEx, Exception? consumerEx)
+    private enum HandleDisposition
     {
-        if (producerEx is not null && consumerEx is not null)
-        {
-            Vice.Log.Emit(ViceLogLevel.Warn, "secondary stage exception (consumer)", consumerEx);
-            producerHandle.Fail();
-            consumerHandle.Fail();
-            throw producerEx;
-        }
-        if (producerEx is not null)
-        {
-            producerHandle.Fail();
-            if (consumerExit == 0)
-            {
-                consumerHandle.Succeed();
-            }
-            else
-            {
-                consumerHandle.Fail();
-            }
+        Succeed,
+        Fail,
+    }
 
-            throw producerEx;
-        }
-        if (consumerEx is not null)
+    private static HandleDisposition DispositionFor(Exception? ex, int exit)
+    {
+        if (ex is not null)
         {
-            if (producerExit == 0)
-            {
-                producerHandle.Succeed();
-            }
-            else
-            {
-                producerHandle.Fail();
-            }
-
-            consumerHandle.Fail();
-            throw consumerEx;
+            return HandleDisposition.Fail;
         }
 
-        if (producerExit == 0)
+        if (exit == 0)
         {
-            producerHandle.Succeed();
+            return HandleDisposition.Succeed;
+        }
+
+        return HandleDisposition.Fail;
+    }
+
+    private static void Apply(IStatusHandle handle, HandleDisposition disposition)
+    {
+        if (disposition == HandleDisposition.Succeed)
+        {
+            handle.Succeed();
         }
         else
         {
-            producerHandle.Fail();
+            handle.Fail();
         }
+    }
 
-        if (consumerExit == 0)
+    private void ReportPairOutcome(
+        IStatusHandle producerHandle,
+        IStatusHandle consumerHandle,
+        int producerExit,
+        int consumerExit,
+        Exception? producerEx,
+        Exception? consumerEx)
+    {
+        var primary = StagePairReconciler.ResolvePrimary(producerEx, consumerEx, _logger);
+
+        var producerDisposition = producerEx is not null
+            ? HandleDisposition.Fail
+            : DispositionFor(null, producerExit);
+        var consumerDisposition = consumerEx is not null
+            ? HandleDisposition.Fail
+            : DispositionFor(null, consumerExit);
+
+        Apply(producerHandle, producerDisposition);
+        Apply(consumerHandle, consumerDisposition);
+
+        if (primary is not null)
         {
-            consumerHandle.Succeed();
-        }
-        else
-        {
-            consumerHandle.Fail();
+            throw primary;
         }
     }
 
     private static Task<int> RunProducerAsync(
-        IStreamingLauncher launcher, CommandContext ctx, object channel, CancellationToken ct)
+        IStreamingLauncher launcher,
+        CommandContext ctx,
+        object channel,
+        string stageName,
+        CancellationToken ct)
     {
         return Task.Run(async () =>
         {
             Exception? failure = null;
+            ctx.Logger.Log(new CommandStarted(stageName));
+            var sw = Stopwatch.StartNew();
             try
             {
-                return await launcher.InvokeProducerAsync(ctx, channel, ct).ConfigureAwait(false);
+                var exitCode = await launcher.InvokeProducerAsync(ctx, channel, ct).ConfigureAwait(false);
+                sw.Stop();
+                ctx.Logger.Log(new CommandCompleted(stageName, exitCode, sw.Elapsed));
+                return exitCode;
             }
             catch (Exception ex)
             {
+                sw.Stop();
                 failure = ex;
+                ctx.Logger.Log(new CommandFailed(stageName, ex, sw.Elapsed));
                 throw;
             }
             finally
@@ -368,23 +484,34 @@ internal sealed class PipelineExecutor
     }
 
     private static Task<int> RunConsumerAsync(
-        IStreamingLauncher launcher, CommandContext ctx, object channel, CancellationTokenSource linkedCts)
+        IStreamingLauncher launcher,
+        CommandContext ctx,
+        object channel,
+        string stageName,
+        CancellationTokenSource linkedCts)
     {
         return Task.Run(async () =>
         {
+            ctx.Logger.Log(new CommandStarted(stageName));
+            var sw = Stopwatch.StartNew();
             try
             {
-                return await launcher.InvokeConsumerAsync(ctx, channel, linkedCts.Token).ConfigureAwait(false);
+                var exitCode = await launcher.InvokeConsumerAsync(ctx, channel, linkedCts.Token).ConfigureAwait(false);
+                sw.Stop();
+                ctx.Logger.Log(new CommandCompleted(stageName, exitCode, sw.Elapsed));
+                return exitCode;
             }
-            catch
+            catch (Exception ex)
             {
+                sw.Stop();
+                ctx.Logger.Log(new CommandFailed(stageName, ex, sw.Elapsed));
                 try
                 {
                     linkedCts.Cancel();
                 }
                 catch (ObjectDisposedException ode)
                 {
-                    System.Diagnostics.Debug.WriteLine(ode);
+                    Quietly.Swallow(ode, ctx.Logger);
                 }
 
                 throw;
@@ -394,43 +521,46 @@ internal sealed class PipelineExecutor
 
     private async Task<PipelineResult> ExecuteStage(
         PipelineStage stage,
-        IReadOnlyDictionary<string, string?> globalOptions,
-        IConsoleWriter console,
-        IStatusDisplay status,
-        TerminalCapabilities capabilities,
         string? pipelineInput,
         int stageNumber,
-        int totalStages,
-        CancellationToken ct)
+        PipelineRunContext context)
     {
-        var label = totalStages > 1 ? $"Stage {stageNumber}/{totalStages}" : stage.OperatorWord ?? "Executing";
-        await using var handle = status.Start(label, console);
+        var label = context.TotalStages > 1 ? $"Stage {stageNumber}/{context.TotalStages}" : stage.OperatorWord ?? "Executing";
+        await using var handle = context.Status.Start(label, context.Console);
 
         var capturing = new CapturingConsoleWriter(handle.Writer);
-        var renderCtx = new RenderContext(capturing, capabilities);
+        var renderCtx = new RenderContext(capturing, context.Capabilities);
         var statusUpdater = new Progress<string>(l => handle.UpdateLabel(l));
         var progressReporter = handle.SupportsProgress
             ? new Progress<double>(frac => handle.UpdateProgress(frac))
             : null;
-        var ctx = new CommandContext(stage.Targets, globalOptions, capturing, pipelineInput, statusUpdater, renderCtx, progressReporter, _session, _logger, stage.ResolvedNodes) { CancellationToken = ct };
+        var ctx = new CommandContext(
+            stage.Targets,
+            context.GlobalOptions,
+            capturing,
+            pipelineInput,
+            statusUpdater,
+            renderCtx,
+            progressReporter,
+            _session,
+            _logger,
+            stage.ResolvedNodes)
+        { CancellationToken = context.Ct };
 
         var stageName = ResolveStageName(stage, label);
-        Vice.Log.Emit(new CommandStarted(stageName));
+        ctx.Logger.Log(new CommandStarted(stageName));
         var sw = Stopwatch.StartNew();
         int exitCode;
         try
         {
-            exitCode = await stage.Handler(ctx, ct);
+            exitCode = await stage.Handler(ctx, context.Ct);
             sw.Stop();
-            Vice.Log.Emit(new CommandCompleted(stageName, exitCode, sw.Elapsed));
+            ctx.Logger.Log(new CommandCompleted(stageName, exitCode, sw.Elapsed));
         }
         catch (Exception ex)
         {
             sw.Stop();
-            if (ex is not ViceError)
-            {
-                Vice.Log.Emit(new CommandFailed(stageName, ex, sw.Elapsed));
-            }
+            ctx.Logger.Log(new CommandFailed(stageName, ex, sw.Elapsed));
             handle.Fail();
             throw;
         }

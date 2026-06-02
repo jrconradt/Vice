@@ -4,7 +4,7 @@ internal static class ZshCompletionGenerator
 {
     public static string Generate(CompletionTrie trie)
     {
-        var funcName = "_" + SanitizeIdentifier(trie.AppName);
+        var funcName = CompletionEmit.FunctionName(trie.AppName);
 
         var globalsLines = new List<string>();
         foreach (var opt in trie.GlobalOptions)
@@ -13,22 +13,14 @@ internal static class ZshCompletionGenerator
             globalsLines.Add($"            '--{ZshEscape(opt.Name)}{valueSuffix}[{ZshEscape(opt.Description)}]'");
             foreach (var a in opt.Aliases)
             {
-                var prefix = a.Length == 1 ? "-" : "--";
+                var prefix = CompletionEmit.AliasPrefix(a);
                 globalsLines.Add($"            '{prefix}{ZshEscape(a)}{valueSuffix}[{ZshEscape(opt.Description)}]'");
             }
         }
 
         var (walkedTransitions, walkedSuggestions) = CompletionWalker.Walk(trie.Root);
 
-        var transitionLines = new List<string>(walkedTransitions.Count);
-        foreach (var t in walkedTransitions)
-        {
-            var parent = ZshEscape(t.ParentStateId);
-            var child = ZshEscape(t.ChildStateId);
-            var pattern = string.Join("|", t.Tokens.Select(tok => $"\"{parent}:{ZshEscape(tok)}\""));
-            var setSkip = t.TargetCount > 0 ? $" skip={t.TargetCount};" : "";
-            transitionLines.Add($"            {pattern}) state=\"{child}\";{setSkip} ;;");
-        }
+        var transitionLines = CompletionEmit.TransitionLines(walkedTransitions, ZshEscape);
 
         var suggestionLines = new List<string>();
         foreach (var s in walkedSuggestions)
@@ -109,7 +101,4 @@ internal static class ZshCompletionGenerator
 
     private static string ZshEscape(string s)
         => s.Replace("\\", "\\\\").Replace("'", "'\\''").Replace("[", "\\[").Replace("]", "\\]").Replace(":", "\\:");
-
-    private static string SanitizeIdentifier(string name)
-        => string.Concat(name.Select(c => char.IsLetterOrDigit(c) || c == '_' ? c : '_'));
 }

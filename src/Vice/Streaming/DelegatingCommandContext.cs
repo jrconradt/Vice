@@ -1,20 +1,30 @@
-using Vice.Execution;
-using Vice.Logging;
+using Vice.Contracts;
 using Vice.Display;
 using Vice.Display.Rendering;
+using Vice.Execution;
+using Vice.Logging;
 using Vice.Options;
 using Vice.Parser;
-using Vice.Session;
 
 namespace Vice.Streaming;
 
 internal abstract class DelegatingCommandContext : ICommandContext
 {
     protected readonly CommandContext Inner;
+    private readonly IConsoleWriter? _console;
 
-    protected DelegatingCommandContext(CommandContext inner) => Inner = inner;
+    protected DelegatingCommandContext(CommandContext inner)
+    {
+        Inner = inner;
+    }
 
-    public IConsoleWriter Console => Inner.Console;
+    protected DelegatingCommandContext(CommandContext inner, IConsoleWriter console)
+    {
+        Inner = inner;
+        _console = console;
+    }
+
+    public IConsoleWriter Console => _console ?? Inner.Console;
     public RenderContext Render => Inner.Render;
     public bool Verbose => Inner.Verbose;
     public bool Quiet => Inner.Quiet;
@@ -27,9 +37,10 @@ internal abstract class DelegatingCommandContext : ICommandContext
     public string? PipelineInput => Inner.PipelineInput;
     public IProgress<string>? StatusUpdater => Inner.StatusUpdater;
     public IProgress<double>? ProgressReporter => Inner.ProgressReporter;
-    public SessionContext? Session => Inner.Session;
+    public ISessionContext? Session => Inner.Session;
     public IViceLogger Logger => Inner.Logger;
     public CancellationToken CancellationToken => Inner.CancellationToken;
+    public string InvocationId => Inner.InvocationId;
 
     public IReadOnlyList<ResolvedCommand> ResolvedNodes => Inner.ResolvedNodes;
 

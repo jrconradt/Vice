@@ -17,6 +17,12 @@ public class FileAccessControlTests
 
         Assert.True(File.Exists(path));
         Assert.Equal("x", File.ReadAllText(path));
+
+        if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS()
+            || OperatingSystem.IsFreeBSD())
+        {
+            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(path));
+        }
     }
 
     [Fact]
@@ -30,6 +36,13 @@ public class FileAccessControlTests
         FileAccessControl.RestrictToCurrentUser(dir);
 
         Assert.True(Directory.Exists(dir));
+
+        if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS()
+            || OperatingSystem.IsFreeBSD())
+        {
+            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute,
+                         File.GetUnixFileMode(dir));
+        }
     }
 
     [Fact]
@@ -42,39 +55,37 @@ public class FileAccessControlTests
         Assert.Null(ex);
     }
 
-    [Fact]
+    [UnixOnlyFact]
     public void RestrictToCurrentUser_UnixGivesUserOnlyMode()
     {
-        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS() && !OperatingSystem.IsFreeBSD())
-        {
-            return;
-        }
-
         using var tmp = new TempDir();
         var path = Path.Combine(tmp.Path, "perm-check.txt");
         File.WriteAllText(path, "y");
 
         FileAccessControl.RestrictToCurrentUser(path);
 
-        var mode = File.GetUnixFileMode(path);
-        Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, mode);
+        if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS()
+            || OperatingSystem.IsFreeBSD())
+        {
+            var mode = File.GetUnixFileMode(path);
+            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, mode);
+        }
     }
 
-    [Fact]
+    [UnixOnlyFact]
     public void RestrictToCurrentUser_UnixGivesUserOnlyDirMode()
     {
-        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS() && !OperatingSystem.IsFreeBSD())
-        {
-            return;
-        }
-
         using var tmp = new TempDir();
         var dir = Path.Combine(tmp.Path, "perm-dir");
         Directory.CreateDirectory(dir);
 
         FileAccessControl.RestrictToCurrentUser(dir);
 
-        var mode = File.GetUnixFileMode(dir);
-        Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute, mode);
+        if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS()
+            || OperatingSystem.IsFreeBSD())
+        {
+            var mode = File.GetUnixFileMode(dir);
+            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute, mode);
+        }
     }
 }

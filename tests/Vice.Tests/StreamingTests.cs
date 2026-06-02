@@ -1,7 +1,8 @@
 using System.Threading.Tasks;
 using Vice;
-using Vice.Lexicon;
+using Vice.Contracts;
 using Vice.Display;
+using Vice.Lexicon;
 using Vice.Streaming;
 using Xunit;
 using static Vice.Dsl;
@@ -10,6 +11,96 @@ namespace Vice.Tests;
 
 public class StreamingTests
 {
+    [Fact]
+    public async Task StreamChannel_SynchronousHotLoop_StaysWithinAllocationBudget()
+    {
+        const int WARMUP_ITEMS = 4_096;
+        const int MEASURED_ITEMS = 262_144;
+        const long REGRESSION_BYTES_PER_ITEM = 64;
+
+        await DrainSynchronousAsync(WARMUP_ITEMS);
+
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        await DrainSynchronousAsync(MEASURED_ITEMS);
+        var after = GC.GetAllocatedBytesForCurrentThread();
+
+        var perItem = (after - before) / (double)MEASURED_ITEMS;
+        Assert.True(perItem <= REGRESSION_BYTES_PER_ITEM,
+            $"StreamChannel hot loop allocated {perItem:0.00} bytes/item (regression threshold {REGRESSION_BYTES_PER_ITEM}).");
+    }
+
+    [Fact]
+    public async Task StreamChannel_PrefilledBatchRead_StaysWithinAllocationBudget()
+    {
+        const int WARMUP_ITEMS = 4_096;
+        const int MEASURED_ITEMS = 131_072;
+        const int BATCH_SIZE = 64;
+        const long REGRESSION_BYTES_PER_ITEM = 256;
+
+        await DrainPrefilledBatchedAsync(WARMUP_ITEMS, BATCH_SIZE);
+
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        await DrainPrefilledBatchedAsync(MEASURED_ITEMS, BATCH_SIZE);
+        var after = GC.GetAllocatedBytesForCurrentThread();
+
+        var perItem = (after - before) / (double)MEASURED_ITEMS;
+        Assert.True(perItem <= REGRESSION_BYTES_PER_ITEM,
+            $"StreamChannel batch loop allocated {perItem:0.00} bytes/item (regression threshold {REGRESSION_BYTES_PER_ITEM}).");
+    }
+
+    private static async Task DrainSynchronousAsync(int items)
+    {
+        await using var channel = new StreamChannel<int>(capacity: 1024);
+
+        var consumed = 0;
+        for (var i = 0; i < items; i++)
+        {
+            while (!channel.TryYield(i))
+            {
+                while (channel.TryRead(out _))
+                {
+                    consumed++;
+                }
+            }
+        }
+
+        channel.Complete();
+        while (channel.TryRead(out _))
+        {
+            consumed++;
+        }
+
+        Assert.Equal(items, consumed);
+    }
+
+    private static async Task DrainPrefilledBatchedAsync(int items, int batchSize)
+    {
+        await using var channel = new StreamChannel<int>(capacity: items);
+
+        for (var i = 0; i < items; i++)
+        {
+            Assert.True(channel.TryYield(i));
+        }
+
+        channel.Complete();
+
+        var consumed = 0;
+        await foreach (var batch in channel.ReadBatchesAsync(batchSize))
+        {
+            consumed += batch.Count;
+        }
+
+        Assert.Equal(items, consumed);
+    }
+
     [Fact]
     public async Task RegisterStreamingPipeline_ProducerToConsumer_RoundTrip()
     {

@@ -1,4 +1,5 @@
 using Vice.Commands;
+using Vice.Contracts;
 using Vice.Help;
 using Vice.Options;
 
@@ -15,7 +16,9 @@ internal static class ManPageGenerator
         IReadOnlyList<GlobalOption> orderedGlobalOptions,
         DateTime? generatedOn = null)
     {
-        var date = (generatedOn ?? DateTime.UtcNow).ToString("MMMM yyyy", System.Globalization.CultureInfo.InvariantCulture);
+        var date = generatedOn is { } stamp
+            ? stamp.ToString("MMMM yyyy", System.Globalization.CultureInfo.InvariantCulture)
+            : string.Empty;
         var upperName = appName.ToUpperInvariant();
 
         var lines = new List<string>

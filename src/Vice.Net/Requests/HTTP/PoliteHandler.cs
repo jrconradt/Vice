@@ -4,7 +4,7 @@ using System.Net;
 using Vice.Concurrency;
 using Vice.Logging;
 
-namespace Vice.Net.Commands.Documents;
+namespace Vice.Net.Http;
 
 internal sealed class PoliteHandler : DelegatingHandler
 {
@@ -12,6 +12,8 @@ internal sealed class PoliteHandler : DelegatingHandler
     private static readonly TimeSpan IdleTtl = TimeSpan.FromMinutes(30);
     private static readonly TimeSpan EvictionScanInterval = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan DisposeWaitTimeout = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan MaxRetryAfter = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan MaxBackoff = TimeSpan.FromMinutes(2);
 
     private readonly TimeSpan _minInterval;
     private readonly int _maxRetries;
@@ -148,25 +150,35 @@ internal sealed class PoliteHandler : DelegatingHandler
         base.Dispose(disposing);
     }
 
-    protected override Task<HttpResponseMessage> SendAsync(
+    protected override async Task<HttpResponseMessage> SendAsync(
         HttpRequestMessage request, CancellationToken ct)
     {
         var host = request.RequestUri?.Host ?? string.Empty;
-        var gate = _hostGates.GetOrAdd(host,
-            _ => new Lazy<HostGate>(() => new HostGate(), LazyThreadSafetyMode.ExecutionAndPublication)).Value;
-        Interlocked.Exchange(ref gate.LastUsedTicks, DateTime.UtcNow.Ticks);
-
-        return gate.Queue.EnqueueAsync(async token =>
+        while (true)
         {
+            var gate = _hostGates.GetOrAdd(host,
+                _ => new Lazy<HostGate>(() => new HostGate(), LazyThreadSafetyMode.ExecutionAndPublication)).Value;
+            Interlocked.Exchange(ref gate.LastUsedTicks, DateTime.UtcNow.Ticks);
+
             try
             {
-                return await SendWithThrottleAndRetryAsync(gate, request, token).ConfigureAwait(false);
+                return await gate.Queue.EnqueueAsync(async token =>
+                {
+                    try
+                    {
+                        return await SendWithThrottleAndRetryAsync(gate, request, token).ConfigureAwait(false);
+                    }
+                    finally
+                    {
+                        Interlocked.Exchange(ref gate.LastRequestTicks, Stopwatch.GetTimestamp());
+                    }
+                }, ct).ConfigureAwait(false);
             }
-            finally
+            catch (ObjectDisposedException)
             {
-                Interlocked.Exchange(ref gate.LastRequestTicks, Stopwatch.GetTimestamp());
+                ct.ThrowIfCancellationRequested();
             }
-        }, ct);
+        }
     }
 
     private async Task<HttpResponseMessage> SendWithThrottleAndRetryAsync(
@@ -190,13 +202,40 @@ internal sealed class PoliteHandler : DelegatingHandler
             contentType = request.Content.Headers.ContentType?.ToString();
         }
 
+        var retryEligible = IsRetryEligible(request);
+
         for (var attempt = 0; ; attempt++)
         {
             var toSend = attempt == 0 ? request : CloneRequest(request, bodyBytes, contentType);
             HttpResponseMessage response;
             try
             {
-                response = await base.SendAsync(toSend, ct).ConfigureAwait(false);
+                try
+                {
+                    response = await base.SendAsync(toSend, ct).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (IsTransientException(ex, ct))
+                {
+                    if (!retryEligible)
+                    {
+                        _logger.Log(ViceLogLevel.Warn,
+                            $"polite: {request.RequestUri?.Host} request failed transiently ({ex.GetType().Name}); not auto-retrying non-idempotent {request.Method} without an idempotency key.");
+                        throw;
+                    }
+
+                    if (attempt >= _maxRetries)
+                    {
+                        _logger.Log(ViceLogLevel.Warn,
+                            $"polite: {request.RequestUri?.Host} request failed transiently ({ex.GetType().Name}); giving up after {attempt + 1} attempts.");
+                        throw;
+                    }
+
+                    var transientBackoff = ComputeBackoff(null, attempt);
+                    _logger.Log(ViceLogLevel.Info,
+                        $"polite: {request.RequestUri?.Host} request failed transiently ({ex.GetType().Name}); backing off {transientBackoff.TotalSeconds:0.0}s then retrying (attempt {attempt + 1}/{_maxRetries}).");
+                    await Task.Delay(transientBackoff, ct).ConfigureAwait(false);
+                    continue;
+                }
             }
             finally
             {
@@ -206,9 +245,15 @@ internal sealed class PoliteHandler : DelegatingHandler
                 }
             }
 
-            if (response.StatusCode is not (HttpStatusCode.TooManyRequests
-                or HttpStatusCode.ServiceUnavailable))
+            if (!IsRetryableStatus(response.StatusCode))
             {
+                return response;
+            }
+
+            if (!retryEligible)
+            {
+                _logger.Log(ViceLogLevel.Warn,
+                    $"polite: {request.RequestUri?.Host} returned {(int)response.StatusCode} {response.StatusCode}; not auto-retrying non-idempotent {request.Method} without an idempotency key.");
                 return response;
             }
 
@@ -219,8 +264,7 @@ internal sealed class PoliteHandler : DelegatingHandler
                 return response;
             }
 
-            var retryAfter = response.Headers.RetryAfter?.Delta
-                ?? TimeSpan.FromSeconds(Math.Pow(2, attempt + 1));
+            var retryAfter = ComputeBackoff(response.Headers.RetryAfter?.Delta, attempt);
             _logger.Log(ViceLogLevel.Info,
                 $"polite: {request.RequestUri?.Host} returned {(int)response.StatusCode}; backing off {retryAfter.TotalSeconds:0.0}s then retrying (attempt {attempt + 1}/{_maxRetries}).");
             response.Dispose();
@@ -229,13 +273,67 @@ internal sealed class PoliteHandler : DelegatingHandler
         }
     }
 
-    private static readonly HashSet<string> SensitiveHeaderNames = new(StringComparer.OrdinalIgnoreCase)
+    private static bool IsRetryableStatus(HttpStatusCode statusCode)
+    {
+        return statusCode is HttpStatusCode.TooManyRequests
+            or HttpStatusCode.InternalServerError
+            or HttpStatusCode.BadGateway
+            or HttpStatusCode.ServiceUnavailable
+            or HttpStatusCode.GatewayTimeout;
+    }
+
+    private static bool IsTransientException(Exception ex, CancellationToken ct)
+    {
+        if (ct.IsCancellationRequested)
+        {
+            return false;
+        }
+
+        return ex is HttpRequestException
+            or IOException
+            or TaskCanceledException
+            or TimeoutException;
+    }
+
+    private static readonly HashSet<HttpMethod> IdempotentMethods = new()
+    {
+        HttpMethod.Get,
+        HttpMethod.Head,
+        HttpMethod.Put,
+        HttpMethod.Delete,
+        HttpMethod.Options,
+        HttpMethod.Trace,
+    };
+
+    private static bool IsRetryEligible(HttpRequestMessage request)
+    {
+        if (IdempotentMethods.Contains(request.Method))
+        {
+            return true;
+        }
+
+        return request.Headers.Contains("Idempotency-Key");
+    }
+
+    private static TimeSpan ComputeBackoff(TimeSpan? retryAfter, int attempt)
+    {
+        if (retryAfter is TimeSpan delta)
+        {
+            return delta < MaxRetryAfter ? delta : MaxRetryAfter;
+        }
+
+        var capSeconds = Math.Min(MaxBackoff.TotalSeconds, Math.Pow(2, attempt + 1));
+        var jittered = Random.Shared.NextDouble() * capSeconds;
+        return TimeSpan.FromSeconds(jittered);
+    }
+
+    private static readonly HashSet<string> SensitiveHeaders = new(StringComparer.OrdinalIgnoreCase)
     {
         "Authorization",
         "Proxy-Authorization",
         "Cookie",
-        "X-Auth-Token",
         "X-Api-Key",
+        "X-Auth-Token",
     };
 
     private static HttpRequestMessage CloneRequest(HttpRequestMessage original, byte[]? bodyBytes, string? contentType)
@@ -246,7 +344,7 @@ internal sealed class PoliteHandler : DelegatingHandler
         };
         foreach (var (key, values) in original.Headers)
         {
-            if (SensitiveHeaderNames.Contains(key))
+            if (SensitiveHeaders.Contains(key))
             {
                 continue;
             }

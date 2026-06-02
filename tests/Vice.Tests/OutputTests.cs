@@ -73,11 +73,27 @@ public class OutputTests
     [Fact]
     public void NullConsoleWriter_Discards()
     {
-        var n = NullConsoleWriter.Instance;
-        n.Write("anything");
-        n.WriteLine("anything");
-        n.WriteLine();
-        n.WriteError("anything");
+        var captured = new StringWriter();
+        var capturedError = new StringWriter();
+        var originalOut = Console.Out;
+        var originalError = Console.Error;
+        Console.SetOut(captured);
+        Console.SetError(capturedError);
+        try
+        {
+            var n = NullConsoleWriter.Instance;
+            n.Write("anything");
+            n.WriteLine("anything");
+            n.WriteLine();
+            n.WriteError("anything");
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+            Console.SetError(originalError);
+        }
 
+        Assert.Equal("", captured.ToString());
+        Assert.Equal("", capturedError.ToString());
     }
 }

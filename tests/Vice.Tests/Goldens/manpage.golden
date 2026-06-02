@@ -1,0 +1,124 @@
+.TH VICE 1 "" "vice 9.9.9" "User Commands"
+.SH NAME
+vice \- test app
+.SH SYNOPSIS
+.B vice
+[\fIOPTIONS\fR] \fICOMMAND\fR [\fIARGS\fR]
+.SH DESCRIPTION
+test app
+Run \fBvice help\fR for the in-tool command summary, or \fBvice help \fI<command>\fR for per-command help.
+.SH COMMANDS
+.TP
+.B exit|quit
+Exit the session
+.TP
+.B jobs
+List background jobs
+.TP
+.B pause {id}
+Pause a background job
+.TP
+.B resume {id}
+Resume a paused job
+.TP
+.B cancel {id}
+Cancel a background job
+.TP
+.B history
+Show command history
+.TP
+.B clear
+Clear the screen
+.TP
+.B alpha
+alpha description
+.TP
+.B beta things {path}
+beta description
+.SH GLOBAL OPTIONS
+.TP
+.BR \-\-chunk\-size " " \fIVALUE\fR
+Byte\-stream chunk size in bytes
+.TP
+.BR \-\-color " " \fIVALUE\fR
+Force or suppress color output (auto|always|never)
+.TP
+.BR \-\-depth " " \fIVALUE\fR
+Maximum recursion depth
+.TP
+.B \-\-dry\-run
+Show what would happen without making changes
+.TP
+.BR \-\-encoding " " \fIVALUE\fR
+Text encoding (utf8|ascii)
+.TP
+.BR \-\-format " " \fIVALUE\fR
+Output or content format (text|hex|json|...)
+.TP
+.B \-\-help
+Show help
+.TP
+.BR \-\-limit " " \fIVALUE\fR
+Maximum results to return
+.TP
+.BR \-\-locale " " \fIVALUE\fR
+BCP\-47 locale tag for output formatting (e.g. en\-US, de\-DE)
+.TP
+.BR \-\-metadata " " \fIVALUE\fR
+Per\-call metadata as JSON
+.TP
+.B \-\-no\-color
+Disable ANSI color output
+.TP
+.B \-\-no\-pager
+Disable PAGER wrapping for long output
+.TP
+.B \-\-no\-status
+Disable status spinner
+.TP
+.B \-\-non\-interactive
+Refuse to prompt; fail fast on missing input
+.TP
+.BR \-\-offset " " \fIVALUE\fR
+Skip this many results
+.TP
+.BR \-\-page " " \fIVALUE\fR
+1\-based page number (alternative to offset)
+.TP
+.B \-\-quiet
+Suppress non\-error output
+.TP
+.BR \-\-timeout " " \fIVALUE\fR
+Maximum I/O wait time in milliseconds
+.TP
+.B \-\-verbose
+Verbose output
+.TP
+.B \-\-version
+Show version
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+Generic runtime error.
+.TP
+.B 2
+Usage error (unknown command, bad argument).
+.TP
+.B 130
+Interrupted by SIGINT (Ctrl+C).
+.SH ENVIRONMENT
+.TP
+.B VICE_LOG_LEVEL
+Logger threshold (trace|debug|info|warn|error).
+.TP
+.B NO_COLOR, FORCE_COLOR, CLICOLOR_FORCE
+Standard color-control env vars.
+.TP
+.B XDG_CONFIG_HOME, XDG_DATA_HOME, XDG_CACHE_HOME, XDG_STATE_HOME
+Standard XDG directories. Each can be overridden per-app via VICE_CONFIG_HOME et al.
+.SH SEE ALSO
+.BR vice (1)
+

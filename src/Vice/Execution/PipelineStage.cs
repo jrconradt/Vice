@@ -1,3 +1,4 @@
+using Vice.Contracts;
 using Vice.Parser;
 using Vice.Streaming;
 
@@ -28,7 +29,7 @@ internal sealed class PipelineStage
         Targets = targets;
         ResolvedNodes = resolvedNodes ?? Array.Empty<ResolvedCommand>();
         Handler = handler;
-        Mode = StageMode.Classic;
+        Mode = StageMode.Buffered;
     }
 
     public PipelineStage(

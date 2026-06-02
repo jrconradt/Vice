@@ -1,7 +1,8 @@
 using Vice.Commands;
 using Vice.Completions;
-using Vice.Nodes;
+using Vice.Contracts;
 using Vice.Display;
+using Vice.Nodes;
 using Vice.Options;
 using Xunit;
 using static Vice.Dsl;
@@ -174,6 +175,28 @@ public class CompletionsTests
 
         Assert.Equal(2, exit);
         Assert.Contains("Unsupported shell", console.Error);
+    }
+
+    [Fact]
+    public async Task Bash_FullScriptMatchesGolden()
+    {
+        var (app, console) = Build();
+
+        var exit = await app.RunAsync(new[] { "completions", "bash" });
+
+        Assert.Equal(0, exit);
+        GoldenFile.Verify("completions_bash.golden", console.Output);
+    }
+
+    [Fact]
+    public async Task Zsh_FullScriptMatchesGolden()
+    {
+        var (app, console) = Build();
+
+        var exit = await app.RunAsync(new[] { "completions", "zsh" });
+
+        Assert.Equal(0, exit);
+        GoldenFile.Verify("completions_zsh.golden", console.Output);
     }
 
     private static CompletionTrie BuildTrie(params ChainNode[] chains)

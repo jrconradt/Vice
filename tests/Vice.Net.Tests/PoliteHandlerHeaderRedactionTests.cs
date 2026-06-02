@@ -1,6 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
-using Vice.Net.Commands.Documents;
+using Vice.Net.Http;
 using Xunit;
 
 namespace Vice.Net.Tests;

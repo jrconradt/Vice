@@ -1,8 +1,11 @@
 using System.Net;
-using Vice.Network.gRPC;
+using Vice.Net.Requests.Grpc;
 using Xunit;
 
 namespace Vice.Net.Tests;
+
+[CollectionDefinition("SafeOutboundPolicy", DisableParallelization = true)]
+public sealed class SafeOutboundPolicyCollection { }
 
 [Collection("SafeOutboundPolicy")]
 public class SafeOutboundCheckEndpointTests : IDisposable

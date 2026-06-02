@@ -1,3 +1,3 @@
-namespace Vice.Network.gRPC;
+namespace Vice.Net.Requests.Grpc;
 
-internal record ConnectionInfo(string Endpoint, DateTime ConnectedAt, int CallCount);
+public record ConnectionInfo(string Endpoint, DateTime ConnectedAt, int CallCount);

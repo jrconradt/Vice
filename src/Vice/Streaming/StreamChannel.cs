@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
+using Vice.Contracts;
 
 namespace Vice.Streaming;
 
@@ -82,19 +83,23 @@ internal sealed class StreamChannel<T> : IStreamContext<T>, IStreamInput<T>, IAs
                     {
                         if (useTimeout)
                         {
-                            timeoutCts!.CancelAfter(timeout);
+                            if (batch.Count == 0)
+                            {
+                                timeoutCts!.CancelAfter(timeout);
+                            }
+
                             try
                             {
-                                batch.Add(await reader.ReadAsync(timeoutCts.Token).ConfigureAwait(false));
-                                timeoutCts.CancelAfter(Timeout.InfiniteTimeSpan);
+                                batch.Add(await reader.ReadAsync(timeoutCts!.Token).ConfigureAwait(false));
                             }
                             catch (OperationCanceledException) when (!ct.IsCancellationRequested)
                             {
-                                if (timeoutCts.IsCancellationRequested)
+                                if (timeoutCts!.IsCancellationRequested)
                                 {
                                     timeoutCts.Dispose();
                                     timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
                                 }
+
                                 break;
                             }
                         }

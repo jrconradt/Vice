@@ -3,7 +3,7 @@
 ## Install
 
 ```bash
-dotnet tool install --global Vice.Net
+dotnet tool install --global Vice.Cli
 ```
 
 The installed command is `vice`. Requires .NET 10 on the host.
@@ -21,7 +21,7 @@ Type `help` for the command list, `exit` (or `quit`, or Ctrl+D) to leave. From t
 
 ```
 vice> version
-vice v1.0.0
+vice v0.1.0
 vice> list commands
 ```
 

@@ -12,11 +12,7 @@ internal sealed class HttpTestServer : IAsyncDisposable
 
     public HttpTestServer(Func<HttpListenerContext, Task> handler)
     {
-        var port = FreePort();
-        BaseUrl = $"http://127.0.0.1:{port}/";
-        _listener = new HttpListener();
-        _listener.Prefixes.Add(BaseUrl);
-        _listener.Start();
+        (_listener, BaseUrl) = BindListener();
 
         _acceptLoop = Task.Run(async () =>
         {
@@ -56,13 +52,35 @@ internal sealed class HttpTestServer : IAsyncDisposable
         });
     }
 
-    private static int FreePort()
+    private static (HttpListener Listener, string BaseUrl) BindListener()
     {
-        var l = new TcpListener(IPAddress.Loopback, 0);
-        l.Start();
-        var port = ((IPEndPoint)l.LocalEndpoint).Port;
-        l.Stop();
-        return port;
+        const int MAX_ATTEMPTS = 32;
+        for (var attempt = 0; attempt < MAX_ATTEMPTS; attempt++)
+        {
+            var probe = new TcpListener(IPAddress.Loopback, 0);
+            probe.Start();
+            var port = ((IPEndPoint)probe.LocalEndpoint).Port;
+            var baseUrl = $"http://127.0.0.1:{port}/";
+            var listener = new HttpListener();
+            listener.Prefixes.Add(baseUrl);
+            try
+            {
+                probe.Stop();
+                listener.Start();
+                return (listener, baseUrl);
+            }
+            catch (HttpListenerException)
+            {
+                ((IDisposable)listener).Dispose();
+            }
+            finally
+            {
+                probe.Stop();
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"could not bind an HttpListener to a free loopback port after {MAX_ATTEMPTS} attempts.");
     }
 
     public async ValueTask DisposeAsync()

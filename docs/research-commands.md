@@ -1,8 +1,8 @@
 # Research commands
 
-Four verbs over a registry of five sources (arXiv, Project Gutenberg, PubMed, UniProt, AlphaFold). All four take a `source` target identifying which backend to use. See [sources.md](sources.md) for per-source query syntax, aliases, and supported formats.
+Four verbs over a registry of five sources (arXiv, Project Gutenberg, PubMed, UniProt, AlphaFold). All four take a `source` target identifying which backend to use.
 
-The default per-call timeout is 30 s. Results are cached on disk; see [env-and-config.md](env-and-config.md) for cache location and [--no-cache](#global-options) to bypass.
+The default per-call timeout is 30 s.
 
 ## search / find
 
@@ -90,4 +90,19 @@ Requires the source to support both `search` and `download`. AlphaFold therefore
 | `--page <n>` | (none) | search, archive | Convenience for `--offset (n-1)*limit`. Ignored if `--offset` is also set. |
 | `--format <fmt>` | source-specific | fetch, download, archive | Per-source format override (e.g. `epub` for Gutenberg, `cif` for AlphaFold). |
 | `--timeout <ms>` | 30000 | all | Per-call timeout. |
-| `--no-cache` | off | all | Bypass the on-disk research cache for this call. |
+
+## Data licensing and attribution
+
+Content retrieved by `fetch`, `download`, and `archive` is owned by the upstream source, not by Vice. Apache-2.0 covers the Vice tool only; it grants you no rights over downloaded data. Each source sets its own terms, and reuse or redistribution carries obligations that travel with the bytes you write to disk.
+
+| Source | Terms | Your obligation on reuse / redistribution |
+|---|---|---|
+| arXiv | Per-submission license, set by each paper's author (arXiv non-exclusive, CC-BY, CC-BY-SA, CC-BY-NC, CC0, or "arXiv perpetual" with no redistribution right). | Check the license recorded on each paper's abstract page. Many submissions are **not** freely redistributable; do not assume you may republish a downloaded PDF. |
+| Project Gutenberg | Ebook texts are public domain in the United States. The name "Project Gutenberg" is a registered trademark. | The text is free to reuse in the US; verify your own jurisdiction. If you redistribute with the Project Gutenberg name or header attached, you accept the trademark terms in the Project Gutenberg License — strip the trademark and header to redistribute without those conditions. |
+| PubMed | NLM/NCBI terms. Records and abstracts are generally usable, but some abstracts carry the publisher's copyright. | Follow the NLM data usage policy. Do not assume an abstract is public domain; attribution to NLM and the originating publisher is expected. |
+| UniProt | CC-BY 4.0. | Attribution required. Credit UniProt and link the license (https://creativecommons.org/licenses/by/4.0/) wherever you redistribute or build on the data. |
+| AlphaFold | CC-BY 4.0 (DeepMind / EMBL-EBI). | Attribution required. Credit AlphaFold DB and link the CC-BY 4.0 license wherever you redistribute or build on the structures. |
+
+License URLs: arXiv https://arxiv.org/help/license, Project Gutenberg https://www.gutenberg.org/policy/license.html, PubMed/NLM https://www.nlm.nih.gov/web_policies.html, UniProt https://www.uniprot.org/help/license, AlphaFold https://alphafold.ebi.ac.uk/faq.
+
+These obligations are yours to discharge; Vice does not clear rights on your behalf and does not strip or rewrite upstream license metadata in the files it saves.

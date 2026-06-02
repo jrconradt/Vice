@@ -1,0 +1,14 @@
+[Unit]
+Description=Vice background daemon (IPC control channel and job manager)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=@VICE_BIN@ --daemon
+Restart=on-failure
+RestartSec=2
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target

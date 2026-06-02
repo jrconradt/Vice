@@ -48,15 +48,29 @@ public class HttpStreamHelperTests
         using var dest = new MemoryStream();
 
         var reports = new List<DownloadProgress>();
-        var progress = new Progress<DownloadProgress>(p => { lock (reports) { reports.Add(p); } });
+        var terminalReported = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var progress = new Progress<DownloadProgress>(p =>
+        {
+            lock (reports)
+            {
+                reports.Add(p);
+            }
+
+            if (p.BytesDownloaded == payload.Length)
+            {
+                terminalReported.TrySetResult();
+            }
+        });
 
         await HttpStreamHelper.DownloadToStreamAsync(http, server.BaseUrl + "x", dest,
             progress, CancellationToken.None);
 
         Assert.Equal(payload.Length, dest.Length);
-        await Task.Delay(60);
-        Assert.NotEmpty(reports);
 
+        var completed = await Task.WhenAny(terminalReported.Task, Task.Delay(TimeSpan.FromSeconds(5)));
+        Assert.Same(terminalReported.Task, completed);
+
+        Assert.NotEmpty(reports);
         Assert.Contains(reports, p => p.BytesDownloaded == payload.Length);
     }
 

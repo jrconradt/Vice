@@ -1,6 +1,4 @@
-using Vice.Execution;
-
-namespace Vice.Streaming;
+namespace Vice.Contracts;
 
 internal interface IStreamingLauncher
 {

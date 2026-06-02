@@ -11,6 +11,7 @@
     <PackageReference Include="xunit.runner.visualstudio" />
     <PackageReference Include="coverlet.collector" />
     <PackageReference Include="JunitXml.TestLogger" />
+    <PackageReference Include="CsCheck" />
     <PackageReference Include="Grpc.AspNetCore" />
     <PackageReference Include="Grpc.AspNetCore.Server.Reflection" />
     <PackageReference Include="Microsoft.AspNetCore.TestHost" />

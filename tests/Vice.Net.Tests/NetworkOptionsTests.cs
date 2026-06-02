@@ -1,6 +1,8 @@
 using System.Text;
+using Vice.Contracts;
 using Vice.Display;
 using Vice.Execution;
+using Vice.Logging;
 using Vice.Net.Commands.Network;
 using Xunit;
 
@@ -56,15 +58,15 @@ public class NetworkOptionsTests
     public void GetTimeout_throws_on_negative_or_zero()
     {
         var ctx = CtxWith(("timeout", "0"));
-        Assert.Throws<ArgumentException>(() => NetworkOptions.GetTimeout(ctx, 5000));
+        Assert.Throws<BadArgument>(() => NetworkOptions.GetTimeout(ctx, 5000));
     }
 
     [Theory]
-    [InlineData(null, NetworkOutputFormat.Text)]
-    [InlineData("text", NetworkOutputFormat.Text)]
-    [InlineData("HEX", NetworkOutputFormat.Hex)]
-    [InlineData("json", NetworkOutputFormat.Json)]
-    public void GetFormat_accepts_known(string? raw, NetworkOutputFormat expected)
+    [InlineData(null, OutputFormatKind.Text)]
+    [InlineData("text", OutputFormatKind.Text)]
+    [InlineData("HEX", OutputFormatKind.Hex)]
+    [InlineData("json", OutputFormatKind.Json)]
+    public void GetFormat_accepts_known(string? raw, OutputFormatKind expected)
     {
         var ctx = raw is null ? CtxWith() : CtxWith(("format", raw));
         Assert.Equal(expected, NetworkOptions.GetFormat(ctx));

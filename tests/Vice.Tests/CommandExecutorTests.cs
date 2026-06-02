@@ -3,6 +3,7 @@ using Vice;
 using Vice.Commands;
 using Vice.Display;
 using Vice.Display.Rendering;
+using Vice.Logging;
 using Vice.Session;
 using Xunit;
 using static Vice.Dsl;
@@ -17,7 +18,7 @@ public class CommandExecutorTests
         console = new RecordingConsole();
         return new CommandExecutor(
             registry, TestOptions.All, console,
-            NullStatusDisplay.Instance, TerminalCapabilities.None, session: null);
+            NullStatusDisplay.Instance, TerminalCapabilities.None, NullOutputSink.Instance, session: null);
     }
 
     [Fact]

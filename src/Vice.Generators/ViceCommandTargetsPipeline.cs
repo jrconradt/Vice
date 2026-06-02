@@ -13,7 +13,6 @@ namespace Vice.Generators;
 public sealed partial class ViceCompositionGenerator
 {
     const string COMMAND_ATTR = "Vice.Composition.ViceCommandAttribute";
-    const string TARGET_DEF_FQ = "Vice.TargetDef";
 
     static readonly DiagnosticDescriptor TargetsInferenceFailed = new(
         "VICE010", "Cannot infer targets from chain expression",
@@ -23,6 +22,11 @@ public sealed partial class ViceCompositionGenerator
     static readonly DiagnosticDescriptor TargetsMultipleRegistrationsDiffer = new(
         "VICE011", "Multiple registrations for [ViceCommand] disagree on targets",
         "[ViceCommand] handler '{0}' is registered with multiple chain expressions that resolve to different target sets ({1} vs {2}). Add explicit targets on the attribute to disambiguate.",
+        "Vice.Composition", DiagnosticSeverity.Error, isEnabledByDefault: true);
+
+    static readonly DiagnosticDescriptor CommandTypeMissingHandle = new(
+        "VICE012", "[ViceCommand] class does not implement IViceCommand",
+        "[ViceCommand] class '{0}' does not implement global::Vice.Composition.IViceCommand and does not declare 'Task<int> Handle(CommandContext, CancellationToken)'. Implement IViceCommand (or declare the Handle method) so the generated partial can satisfy the interface.",
         "Vice.Composition", DiagnosticSeverity.Error, isEnabledByDefault: true);
 
     void InitializeTargetsPipeline(IncrementalGeneratorInitializationContext context)
@@ -341,8 +345,9 @@ public sealed partial class ViceCompositionGenerator
             : owner.ContainingNamespace.ToDisplayString();
         var visibility = method.DeclaredAccessibility == Accessibility.Public ? "public" : "internal";
 
-        var sourceText = BuildFreeFunctionTargets(ns, visibility, owner, method, resolved);
-        var hint = SanitizeHint($"{owner.ToDisplayString()}.{method.Name}_Targets.g.cs");
+        var disambiguator = MethodSignatureDisambiguator(method);
+        var sourceText = BuildFreeFunctionTargets(ns, visibility, owner, method, resolved, disambiguator);
+        var hint = SanitizeHint($"{owner.ToDisplayString()}.{method.Name}_{disambiguator}_Targets.g.cs");
         spc.AddSource(hint, SourceText.From(sourceText, Encoding.UTF8));
     }
 
@@ -374,9 +379,46 @@ public sealed partial class ViceCompositionGenerator
             : type.ContainingNamespace.ToDisplayString();
         var visibility = type.DeclaredAccessibility == Accessibility.Public ? "public" : "internal";
 
-        var sourceText = BuildPartialClassTargets(ns, visibility, type, resolved);
+        var satisfiesCommand = ImplementsIViceCommand(type) || DeclaresHandle(type);
+        if (!satisfiesCommand)
+        {
+            spc.ReportDiagnostic(Diagnostic.Create(CommandTypeMissingHandle,
+                                                   type.Locations.FirstOrDefault() ?? Location.None,
+                                                   displayName));
+        }
+
+        var sourceText = BuildPartialClassTargets(ns, visibility, type, resolved, satisfiesCommand);
         var hint = SanitizeHint($"{type.ToDisplayString()}_Targets.g.cs");
         spc.AddSource(hint, SourceText.From(sourceText, Encoding.UTF8));
+    }
+
+    static bool DeclaresHandle(INamedTypeSymbol type)
+    {
+        foreach (var member in type.GetMembers("Handle"))
+        {
+            if (member is not IMethodSymbol method)
+            {
+                continue;
+            }
+
+            if (method.ReturnType.ToDisplayString() != "System.Threading.Tasks.Task<int>")
+            {
+                continue;
+            }
+
+            if (method.Parameters.Length != 2)
+            {
+                continue;
+            }
+
+            if (method.Parameters[0].Type.ToDisplayString() == "Vice.Contracts.CommandContext"
+                && method.Parameters[1].Type.ToDisplayString() == "System.Threading.CancellationToken")
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     static IReadOnlyList<string>? ReadExplicitTargets(AttributeData? attr)
@@ -409,58 +451,144 @@ public sealed partial class ViceCompositionGenerator
         return list;
     }
 
-    static string BuildFreeFunctionTargets(string? ns, string visibility, INamedTypeSymbol owner, IMethodSymbol method, IReadOnlyList<string> names)
+    static string BuildTargetPropertyLines(IReadOnlyList<string> names, string ownerDisplay)
     {
-        var className = method.Name + "_Targets";
-        var namespaceBlock = ns is not null ? $"namespace {ns};\n\n" : "";
         var propLines = new List<string>();
+        var usedPropNames = new HashSet<string>(StringComparer.Ordinal);
         foreach (var name in names)
         {
-            var propName = ToPascal(name);
-            var escaped = EscapeStringLiteral(name);
+            var propName = UniquePropertyName(ToPascal(name), usedPropNames);
+            var keyLiteral = SymbolDisplay.FormatLiteral(name, true);
+            var messageLiteral = SymbolDisplay.FormatLiteral($"Target '{name}' not bound for {ownerDisplay}.", true);
             propLines.Add(
-                $"        public string {propName} => _ctx[\"{escaped}\"] ?? throw new global::System.InvalidOperationException(\"Target '{escaped}' not bound for {EscapeStringLiteral(method.Name)}.\");\n");
+                $"        public string {propName} => _ctx[{keyLiteral}] ?? throw new global::System.InvalidOperationException({messageLiteral});\n");
         }
+
+        return string.Concat(propLines);
+    }
+
+    static string UniquePropertyName(string candidate, HashSet<string> used)
+    {
+        if (used.Add(candidate))
+        {
+            return candidate;
+        }
+
+        var suffix = 2;
+        var next = $"{candidate}_{suffix}";
+        while (!used.Add(next))
+        {
+            suffix++;
+            next = $"{candidate}_{suffix}";
+        }
+
+        return next;
+    }
+
+    static string BuildFreeFunctionTargets(string? ns, string visibility, INamedTypeSymbol owner, IMethodSymbol method, IReadOnlyList<string> names, string disambiguator)
+    {
+        var className = $"{method.Name}_{disambiguator}_Targets";
+        var namespaceBlock = ns is not null ? $"namespace {ns};\n\n" : "";
+        var propBody = BuildTargetPropertyLines(names, method.Name);
 
         return
             $"#nullable enable\n\n" +
             $"{namespaceBlock}" +
             $"{visibility} static class {className}\n{{\n" +
-            $"    public static TargetSet Of(global::Vice.Execution.CommandContext ctx) => new(ctx);\n\n" +
+            $"    public static TargetSet Of(global::Vice.Contracts.CommandContext ctx) => new(ctx);\n\n" +
             $"    public readonly struct TargetSet\n    {{\n" +
-            $"        private readonly global::Vice.Execution.CommandContext _ctx;\n" +
-            $"        public TargetSet(global::Vice.Execution.CommandContext ctx) {{ _ctx = ctx; }}\n" +
-            $"{string.Concat(propLines)}" +
+            $"        private readonly global::Vice.Contracts.CommandContext _ctx;\n" +
+            $"        public TargetSet(global::Vice.Contracts.CommandContext ctx) {{ _ctx = ctx; }}\n" +
+            $"{propBody}" +
             $"    }}\n" +
             $"}}\n";
     }
 
-    static string BuildPartialClassTargets(string? ns, string visibility, INamedTypeSymbol type, IReadOnlyList<string> names)
+    static string BuildPartialClassTargets(string? ns, string visibility, INamedTypeSymbol type, IReadOnlyList<string> names, bool emitInterface)
     {
         var namespaceBlock = ns is not null ? $"namespace {ns};\n\n" : "";
-        var propLines = new List<string>();
-        foreach (var name in names)
+        var propBody = BuildTargetPropertyLines(names, type.Name);
+
+        var enclosing = new Stack<INamedTypeSymbol>();
+        for (var ct = type.ContainingType; ct is not null; ct = ct.ContainingType)
         {
-            var propName = ToPascal(name);
-            var escaped = EscapeStringLiteral(name);
-            propLines.Add(
-                $"        public string {propName} => _ctx[\"{escaped}\"] ?? throw new global::System.InvalidOperationException(\"Target '{escaped}' not bound for {EscapeStringLiteral(type.Name)}.\");\n");
+            enclosing.Push(ct);
         }
+
+        var openWrappers = "";
+        var closeWrappers = "";
+        var indent = "";
+        while (enclosing.Count > 0)
+        {
+            var wrapper = enclosing.Pop();
+            openWrappers += $"{indent}partial {TypeKindKeyword(wrapper)} {wrapper.Name}{TypeParameterList(wrapper)}\n{indent}{{\n";
+            closeWrappers = $"{indent}}}\n" + closeWrappers;
+            indent += "    ";
+        }
+
+        var typeParams = TypeParameterList(type);
+        var baseList = emitInterface ? " : global::Vice.Composition.IViceCommand" : "";
+
+        var classBlock =
+            $"{indent}{visibility} partial class {type.Name}{typeParams}{baseList}\n{indent}{{\n" +
+            $"{indent}    public TargetSet Targets(global::Vice.Contracts.CommandContext ctx) => new(ctx);\n\n" +
+            $"{indent}    public readonly struct TargetSet\n{indent}    {{\n" +
+            $"{indent}        private readonly global::Vice.Contracts.CommandContext _ctx;\n" +
+            $"{indent}        public TargetSet(global::Vice.Contracts.CommandContext ctx) {{ _ctx = ctx; }}\n" +
+            $"{propBody}" +
+            $"{indent}    }}\n{indent}}}\n";
 
         return
             $"#nullable enable\n" +
             $"using global::Vice.Execution;\n\n" +
             $"{namespaceBlock}" +
-            $"{visibility} partial class {type.Name} : global::Vice.Composition.IViceCommand\n{{\n" +
-            $"    public TargetSet Targets(global::Vice.Execution.CommandContext ctx) => new(ctx);\n\n" +
-            $"    public readonly struct TargetSet\n    {{\n" +
-            $"        private readonly global::Vice.Execution.CommandContext _ctx;\n" +
-            $"        public TargetSet(global::Vice.Execution.CommandContext ctx) {{ _ctx = ctx; }}\n" +
-            $"{string.Concat(propLines)}" +
-            $"    }}\n}}\n";
+            $"{openWrappers}" +
+            $"{classBlock}" +
+            $"{closeWrappers}";
     }
 
-    static string EscapeStringLiteral(string s) => s.Replace("\\", "\\\\").Replace("\"", "\\\"");
+    static string TypeKindKeyword(INamedTypeSymbol type)
+    {
+        if (type.IsRecord)
+        {
+            return type.TypeKind == TypeKind.Struct ? "record struct" : "record";
+        }
+
+        return type.TypeKind switch
+        {
+            TypeKind.Struct => "struct",
+            TypeKind.Interface => "interface",
+            _ => "class"
+        };
+    }
+
+    static string TypeParameterList(INamedTypeSymbol type)
+    {
+        if (type.TypeParameters.Length == 0)
+        {
+            return "";
+        }
+
+        return $"<{string.Join(", ", type.TypeParameters.Select(p => p.Name))}>";
+    }
+
+    static string MethodSignatureDisambiguator(IMethodSymbol method)
+    {
+        var parameterSignature = string.Join(",", method.Parameters.Select(p => p.Type.ToDisplayString()));
+        var signature = $"{method.ContainingType.ToDisplayString()}.{method.Name}({parameterSignature})";
+        unchecked
+        {
+            const uint offset = 2166136261;
+            const uint prime = 16777619;
+            var hash = offset;
+            foreach (var c in signature)
+            {
+                hash = (hash ^ c) * prime;
+            }
+
+            return $"{hash:x8}";
+        }
+    }
 
     static string SanitizeHint(string s)
     {
@@ -479,7 +607,7 @@ public sealed partial class ViceCompositionGenerator
         var upper = true;
         foreach (var c in raw)
         {
-            if (c == '-' || c == '_' || c == '.' || c == ' ')
+            if (!char.IsLetterOrDigit(c))
             {
                 upper = true;
                 continue;
@@ -496,7 +624,17 @@ public sealed partial class ViceCompositionGenerator
             }
         }
 
-        return chars.Count == 0 ? "_" : new string(chars.ToArray());
+        if (chars.Count == 0)
+        {
+            return "_";
+        }
+
+        if (char.IsDigit(chars[0]))
+        {
+            chars.Insert(0, '_');
+        }
+
+        return new string(chars.ToArray());
     }
 
     sealed class RegistrationCandidate
@@ -547,12 +685,14 @@ public sealed partial class ViceCompositionGenerator
 
 internal static class ChainTargetScanner
 {
+    const int NodeBudget = 4096;
+
     public static IReadOnlyList<string>? ScanTargets(ExpressionSyntax chain, SemanticModel model, out string? failureDetail)
     {
         var names = new List<string>();
         failureDetail = null;
         var fail = new FailureSink();
-        var ok = ScanRecursive(chain, model, names, fail);
+        var ok = ScanWorkList(chain, model, names, fail);
         if (!ok)
         {
             failureDetail = fail.Detail;
@@ -565,91 +705,112 @@ internal static class ChainTargetScanner
     sealed class FailureSink
     {
         public string? Detail;
-        public void Set(string s) { if (Detail is null) Detail = s; }
+        public void Set(string s)
+        {
+            if (Detail is null)
+            {
+                Detail = s;
+            }
+        }
     }
 
-    static bool ScanRecursive(ExpressionSyntax expr, SemanticModel model, List<string> names, FailureSink fail)
+    static bool ScanWorkList(ExpressionSyntax root, SemanticModel model, List<string> names, FailureSink fail)
     {
-        switch (expr)
+        var work = new Stack<ExpressionSyntax>();
+        work.Push(root);
+        var visited = 0;
+        while (work.Count > 0)
         {
-            case ParenthesizedExpressionSyntax paren:
-                return ScanRecursive(paren.Expression, model, names, fail);
-            case BinaryExpressionSyntax bin:
-                return ScanRecursive(bin.Left, model, names, fail) && ScanRecursive(bin.Right, model, names, fail);
-            case InvocationExpressionSyntax inv:
-                foreach (var arg in inv.ArgumentList.Arguments)
-                {
-                    if (!ScanRecursive(arg.Expression, model, names, fail))
-                    {
-                        return false;
-                    }
-                }
+            if (visited >= NodeBudget)
+            {
+                fail.Set($"chain expression exceeded node budget of {NodeBudget} — simplify the chain or provide explicit targets");
+                return false;
+            }
 
-                return true;
-            case MemberAccessExpressionSyntax ma:
-                {
-                    var symbol = model.GetSymbolInfo(ma).Symbol;
-                    if (symbol is IFieldSymbol fs && IsTargetDefField(fs))
+            visited++;
+            var expr = work.Pop();
+            switch (expr)
+            {
+                case ParenthesizedExpressionSyntax paren:
+                    work.Push(paren.Expression);
+                    break;
+                case BinaryExpressionSyntax bin:
+                    work.Push(bin.Right);
+                    work.Push(bin.Left);
+                    break;
+                case InvocationExpressionSyntax inv:
                     {
-                        var n = ExtractTargetName(fs);
-                        if (n is null)
+                        var invArgs = inv.ArgumentList.Arguments;
+                        for (var i = invArgs.Count - 1; i >= 0; i--)
                         {
-                            fail.Set($"could not extract name literal for field '{fs.ToDisplayString()}' (initializer={(fs.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax() as VariableDeclaratorSyntax)?.Initializer?.Value?.GetType().Name ?? "null"})");
+                            work.Push(invArgs[i].Expression);
+                        }
+
+                        break;
+                    }
+                case MemberAccessExpressionSyntax ma:
+                    {
+                        var symbol = model.GetSymbolInfo(ma).Symbol;
+                        if (symbol is IFieldSymbol fs && IsTargetDefField(fs))
+                        {
+                            var n = ExtractTargetName(fs);
+                            if (n is null)
+                            {
+                                fail.Set($"could not extract name literal for field '{fs.ToDisplayString()}' (initializer={(fs.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax() as VariableDeclaratorSyntax)?.Initializer?.Value?.GetType().Name ?? "null"})");
+                                return false;
+                            }
+
+                            names.Add(n);
+                        }
+
+                        break;
+                    }
+                case IdentifierNameSyntax id:
+                    {
+                        var symbol = model.GetSymbolInfo(id).Symbol;
+                        if (symbol is IFieldSymbol fs && IsTargetDefField(fs))
+                        {
+                            var n = ExtractTargetName(fs);
+                            if (n is null)
+                            {
+                                fail.Set($"could not extract name literal for field '{fs.ToDisplayString()}'");
+                                return false;
+                            }
+
+                            names.Add(n);
+                            break;
+                        }
+
+                        if (symbol is ILocalSymbol)
+                        {
+                            fail.Set($"chain references local '{id.Identifier.ValueText}' — generator cannot resolve through locals");
                             return false;
                         }
 
-                        names.Add(n);
-                        return true;
-                    }
-
-                    return true;
-                }
-            case IdentifierNameSyntax id:
-                {
-                    var symbol = model.GetSymbolInfo(id).Symbol;
-                    if (symbol is IFieldSymbol fs && IsTargetDefField(fs))
-                    {
-                        var n = ExtractTargetName(fs);
-                        if (n is null)
+                        if (symbol is IParameterSymbol)
                         {
-                            fail.Set($"could not extract name literal for field '{fs.ToDisplayString()}'");
+                            fail.Set($"chain references parameter '{id.Identifier.ValueText}' — generator cannot resolve through parameters");
                             return false;
                         }
 
-                        names.Add(n);
-                        return true;
+                        break;
                     }
-
-                    if (symbol is ILocalSymbol)
+                case LiteralExpressionSyntax:
+                    break;
+                default:
                     {
-                        fail.Set($"chain references local '{id.Identifier.ValueText}' — generator cannot resolve through locals");
-                        return false;
-                    }
-
-                    if (symbol is IParameterSymbol)
-                    {
-                        fail.Set($"chain references parameter '{id.Identifier.ValueText}' — generator cannot resolve through parameters");
-                        return false;
-                    }
-
-                    return true;
-                }
-            case LiteralExpressionSyntax:
-                return true;
-            default:
-                foreach (var child in expr.ChildNodes())
-                {
-                    if (child is ExpressionSyntax cExpr)
-                    {
-                        if (!ScanRecursive(cExpr, model, names, fail))
+                        var childExprs = expr.ChildNodes().OfType<ExpressionSyntax>().ToList();
+                        for (var i = childExprs.Count - 1; i >= 0; i--)
                         {
-                            return false;
+                            work.Push(childExprs[i]);
                         }
-                    }
-                }
 
-                return true;
+                        break;
+                    }
+            }
         }
+
+        return true;
     }
 
     static bool IsTargetDefField(IFieldSymbol f)
@@ -664,7 +825,8 @@ internal static class ChainTargetScanner
                 continue;
             }
 
-            if (attr.ConstructorArguments.Length > 0 && attr.ConstructorArguments[0].Value is string s && !string.IsNullOrEmpty(s))
+            if (attr.ConstructorArguments.Length > 0 && attr.ConstructorArguments[0].Value is string s
+                && !string.IsNullOrEmpty(s))
             {
                 return s;
             }

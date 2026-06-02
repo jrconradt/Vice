@@ -1,3 +1,4 @@
+using Vice.Logging;
 using Vice.Mux.Sinks;
 using Xunit;
 
@@ -11,7 +12,7 @@ public class SinkFactoryTests
         var path = Path.Combine(Path.GetTempPath(), $"vice-mux-{Guid.NewGuid():N}.bin");
         try
         {
-            await using (var sink = SinkFactory.Open($"file:{path}"))
+            await using (var sink = SinkFactory.Open($"file:{path}", NullViceLogger.Instance))
             {
                 await sink.WriteAsync(new byte[] { 1, 2, 3, 4 }, default);
                 await sink.FlushAsync(default);
@@ -19,7 +20,9 @@ public class SinkFactoryTests
             var read = await File.ReadAllBytesAsync(path);
             Assert.Equal(new byte[] { 1, 2, 3, 4 }, read);
         }
-        finally { if (File.Exists(path))
+        finally
+        {
+            if (File.Exists(path))
             {
                 File.Delete(path);
             }
@@ -33,7 +36,7 @@ public class SinkFactoryTests
         try
         {
             await File.WriteAllBytesAsync(path, new byte[] { 0xFF });
-            await using (var sink = SinkFactory.Open($"append:{path}"))
+            await using (var sink = SinkFactory.Open($"append:{path}", NullViceLogger.Instance))
             {
                 await sink.WriteAsync(new byte[] { 1, 2 }, default);
             }
@@ -41,7 +44,9 @@ public class SinkFactoryTests
             var read = await File.ReadAllBytesAsync(path);
             Assert.Equal(new byte[] { 0xFF, 1, 2 }, read);
         }
-        finally { if (File.Exists(path))
+        finally
+        {
+            if (File.Exists(path))
             {
                 File.Delete(path);
             }
@@ -51,7 +56,7 @@ public class SinkFactoryTests
     [Fact]
     public async Task NullSink_AcceptsWritesSilently()
     {
-        await using var sink = SinkFactory.Open("null:");
+        await using var sink = SinkFactory.Open("null:", NullViceLogger.Instance);
         await sink.WriteAsync(new byte[1024], default);
         await sink.FlushAsync(default);
         Assert.Equal("null:", sink.Label);
@@ -60,6 +65,6 @@ public class SinkFactoryTests
     [Fact]
     public void UnknownScheme_Throws()
     {
-        Assert.Throws<ArgumentException>(() => SinkFactory.Open("zzz:nope"));
+        Assert.Throws<ArgumentException>(() => SinkFactory.Open("zzz:nope", NullViceLogger.Instance));
     }
 }

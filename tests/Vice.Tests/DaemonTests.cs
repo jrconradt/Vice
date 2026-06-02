@@ -1,8 +1,9 @@
 using System.Threading;
 using System.Threading.Tasks;
 using Vice;
-using Vice.Ipc;
+using Vice.Contracts;
 using Vice.Display;
+using Vice.Ipc;
 using Vice.Session;
 using Xunit;
 using static Vice.Dsl;
@@ -14,9 +15,8 @@ public class DaemonTests
     [Fact]
     public async Task RunDaemonAsync_ServesCommandRoundTrip_OverPipe()
     {
-        using var tmp = new TempDir();
         var pipeName = "vice-test-daemon-" + Guid.NewGuid().ToString("N");
-        var state = new SessionState(tmp.Path, pipeName);
+        var state = new SessionState("vice-test", pipeName);
 
         var app = new ViceApp("vice", "1.0.0", description: null,
             console: new RecordingConsole(), status: NullStatusDisplay.Instance);
@@ -46,9 +46,8 @@ public class DaemonTests
     [Fact]
     public async Task RunDaemonAsync_HandlesJobStatusRequest()
     {
-        using var tmp = new TempDir();
         var pipeName = "vice-test-daemon-" + Guid.NewGuid().ToString("N");
-        var state = new SessionState(tmp.Path, pipeName);
+        var state = new SessionState("vice-test", pipeName);
 
         var app = new ViceApp("vice", "1.0.0", description: null,
             console: new RecordingConsole(), status: NullStatusDisplay.Instance);
@@ -70,9 +69,8 @@ public class DaemonTests
     [Fact]
     public async Task RunDaemonAsync_StartsPipeServer_AndShutsDownOnCancellation()
     {
-        using var tmp = new TempDir();
         var pipeName = "vice-test-daemon-" + Guid.NewGuid().ToString("N");
-        var state = new SessionState(tmp.Path, pipeName);
+        var state = new SessionState("vice-test", pipeName);
 
         var app = new ViceApp("vice", "1.0.0", description: null,
             console: new RecordingConsole(), status: NullStatusDisplay.Instance);

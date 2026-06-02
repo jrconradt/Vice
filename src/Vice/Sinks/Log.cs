@@ -16,7 +16,9 @@ public static class Log
         => Volatile.Read(ref _sink).IsEnabled(level);
 
     public static void Emit(ViceError error)
-        => Volatile.Read(ref _sink).Log(error);
+    {
+        Volatile.Read(ref _sink).Log(error);
+    }
 
     public static void Emit(
         ViceLogLevel level,
@@ -25,5 +27,22 @@ public static class Log
         [CallerMemberName] string? caller = null,
         [CallerFilePath] string? file = null,
         [CallerLineNumber] int line = 0)
-        => Volatile.Read(ref _sink).Log(level, message, exception, caller, file, line);
+    {
+        Volatile.Read(ref _sink).Log(level, message, exception, caller, file, line);
+    }
+
+    public static void Emit(
+        ViceLogLevel level,
+        [InterpolatedStringHandlerArgument("level")] ref LogInterpolatedStringHandler message,
+        [CallerMemberName] string? caller = null,
+        [CallerFilePath] string? file = null,
+        [CallerLineNumber] int line = 0)
+    {
+        if (!message.IsEnabled)
+        {
+            return;
+        }
+
+        Volatile.Read(ref _sink).Log(level, message.ToStringAndClear(), null, caller, file, line);
+    }
 }

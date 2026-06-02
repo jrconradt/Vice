@@ -2,8 +2,10 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Vice;
-using Vice.Ipc;
+using Vice.Contracts;
 using Vice.Display;
+using Vice.Ipc;
+using Vice.Logging;
 using Vice.Session;
 using Xunit;
 
@@ -16,9 +18,8 @@ public class SadPath_DaemonAndIpcTests
     [Fact]
     public async Task Daemon_UnknownCommand_ReturnsCapturedError_NonZeroExit()
     {
-        using var tmp = new TempDir();
         var pipeName = UniquePipe();
-        var state = new SessionState(tmp.Path, pipeName);
+        var state = new SessionState("vice-test", pipeName);
 
         var app = new ViceApp("vice", "1.0.0", description: null,
             console: new RecordingConsole(), status: NullStatusDisplay.Instance);
@@ -49,7 +50,7 @@ public class SadPath_DaemonAndIpcTests
             return msg is CommandMessage cmd
                 ? new CommandResponse { ExitCode = 0, Output = cmd.CommandLine }
                 : null;
-        });
+        }, NullViceLogger.Instance);
         using var cts = new CancellationTokenSource();
         await server.StartAsync(cts.Token);
 
@@ -86,7 +87,7 @@ public class SadPath_DaemonAndIpcTests
                 ExitCode = 0,
                 Output = bigPayload
             });
-        });
+        }, NullViceLogger.Instance);
         using var cts = new CancellationTokenSource();
         await server.StartAsync(cts.Token);
 

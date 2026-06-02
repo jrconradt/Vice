@@ -1,7 +1,10 @@
+using System.Text;
+using System.Text.Json;
 using System.Threading.Tasks;
 using Vice;
-using Vice.Execution;
+using Vice.Contracts;
 using Vice.Display;
+using Vice.Execution;
 using Xunit;
 using static Vice.Dsl;
 
@@ -68,5 +71,18 @@ public class OutputFormatTests
         await app.RunAsync(new[] { "--format", "JSON", "probe" });
         Assert.Equal(OutputFormatKind.Json, format[0]);
         Assert.True(wantsJson[0]);
+    }
+
+    [Fact]
+    public void JsonPayload_SerializedShape_MatchesGolden()
+    {
+        var data = Encoding.UTF8.GetBytes("Hello, Vice!\n");
+        var payload = new OutputFormatJsonPayload(Bytes: data.Length,
+                                                  Text: Encoding.UTF8.GetString(data),
+                                                  Base64: Convert.ToBase64String(data));
+
+        var json = JsonSerializer.Serialize(payload, OutputFormatterJsonContext.Default.OutputFormatJsonPayload);
+
+        GoldenFile.Verify("output_format_json_payload.golden", json);
     }
 }

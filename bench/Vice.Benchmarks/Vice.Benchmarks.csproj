@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>Vice.Benchmarks</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="BenchmarkDotNet" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Vice/Vice.csproj" />
+    <ProjectReference Include="../../src/Vice.Host/Vice.Host.csproj" />
+    <ProjectReference Include="../../src/Vice.Foundation/Vice.Foundation.csproj" />
+    <ProjectReference Include="../../src/Vice.Mux/Vice.Mux.csproj" />
+  </ItemGroup>
+</Project>

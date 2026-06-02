@@ -143,7 +143,7 @@ public class CommandResolverNewKindsTests
     public void Partials_disabled_by_default_falls_back_to_exact_or_synonym()
     {
         var chain = verb("download");
-        var result = CommandResolver.Resolve(["down"], Reg(chain), null, null, PartialsEnabled: false);
+        var result = CommandResolver.Resolve(["down"], Reg(chain), null, null, partialsEnabled: false);
         Assert.False(result.Success);
     }
 
@@ -151,14 +151,14 @@ public class CommandResolverNewKindsTests
     public void Partials_enabled_unique_prefix_matches()
     {
         var chain = verb("download");
-        var result = CommandResolver.Resolve(["down"], Reg(chain), null, null, PartialsEnabled: true);
+        var result = CommandResolver.Resolve(["down"], Reg(chain), null, null, partialsEnabled: true);
         Assert.True(result.Success);
     }
 
     [Fact]
     public void Partials_enabled_ambiguous_prefix_reports_candidates()
     {
-        var result = CommandResolver.Resolve(["s"], Reg(verb("search"), verb("set")), null, null, PartialsEnabled: true);
+        var result = CommandResolver.Resolve(["s"], Reg(verb("search"), verb("set")), null, null, partialsEnabled: true);
         Assert.False(result.Success);
         Assert.NotNull(result.BestMatch);
         var candidates = result.BestMatch!.AmbiguousCandidates;
@@ -170,7 +170,7 @@ public class CommandResolverNewKindsTests
     [Fact]
     public void Partials_enabled_exact_match_takes_precedence_over_prefix()
     {
-        var result = CommandResolver.Resolve(["set"], Reg(verb("set"), verb("setup")), null, null, PartialsEnabled: true);
+        var result = CommandResolver.Resolve(["set"], Reg(verb("set"), verb("setup")), null, null, partialsEnabled: true);
         Assert.True(result.Success);
         Assert.Equal("set", result.Chain!.Nodes[0].MatchedName);
     }
@@ -179,7 +179,7 @@ public class CommandResolverNewKindsTests
     public void Partials_only_applies_at_head()
     {
         var chain = verb("foo") > verb("bar");
-        var result = CommandResolver.Resolve(["f", "b"], Reg(chain), null, null, PartialsEnabled: true);
+        var result = CommandResolver.Resolve(["f", "b"], Reg(chain), null, null, partialsEnabled: true);
         Assert.False(result.Success);
     }
 
@@ -224,8 +224,8 @@ public class CommandResolverNewKindsTests
             ["read", "a.txt", "write", "to", "file", "b.txt"],
             Reg(read, write),
             null, null,
-            PartialsEnabled: true,
-            ImplicitPipelinesEnabled: false);
+            partialsEnabled: true,
+            implicitPipelinesEnabled: false);
         Assert.False(result.Success);
     }
 }

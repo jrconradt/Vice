@@ -1,5 +1,3 @@
-using Vice.Composition;
-
 namespace Vice.Options;
 
 [ViceOption]

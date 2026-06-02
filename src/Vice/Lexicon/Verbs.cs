@@ -36,10 +36,7 @@ public static class Verbs
     public static ChainNode History() => verb("history");
     public static ChainNode Clear() => verb("clear");
     public static ChainNode Set() => verb("set");
-    public static ChainNode Cache() => verb("cache");
     public static ChainNode Inspect() => verb("inspect");
-    public static ChainNode Split() => verb("split");
     public static ChainNode Route() => verb("route");
     public static ChainNode Tee() => verb("tee");
-    public static ChainNode Strategies() => verb("strategies");
 }
