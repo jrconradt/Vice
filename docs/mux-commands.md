@@ -1,14 +1,16 @@
 # vice-mux commands
 
-`vice-mux` is the companion tool for inspecting, routing, and tee-ing byte streams on a Vice pipeline. It reads stdin and writes to stdout and to one or more **sinks** (files, TCP endpoints, child processes, named pipes). It is a separate tool from `vice`, with its own package and command name.
+`vice-mux` is the companion tool for inspecting, routing, and tee-ing byte streams on a Vice pipeline. It reads stdin and writes to stdout and to one or more **sinks** (files, TCP endpoints, child processes, named pipes). It is a separate tool from `vice`, with its own project and command name.
 
 ## Install
 
+From a checkout of this repo, run `./scripts/install-local.sh`, which packs and installs both `vice` and `vice-mux` as global tools:
+
 ```bash
-dotnet tool install --global Vice.Mux.Cli
+./scripts/install-local.sh
 ```
 
-The installed command is `vice-mux`. Requires .NET 10 on the host. To install from a local checkout instead of nuget.org, run `./scripts/install-local.sh`, which packs and installs both `vice` and `vice-mux`.
+The installed command is `vice-mux`. Requires the .NET 10 SDK on the host.
 
 Run `vice-mux` with no arguments to open the REPL, or pass a verb to run one command and exit:
 

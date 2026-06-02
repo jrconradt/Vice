@@ -1,3 +1,4 @@
+using Vice.Display.Rendering;
 using Vice.Logging;
 using Vice.Net.Requests.Grpc;
 using Xunit;
@@ -7,6 +8,28 @@ namespace Vice.Net.Tests;
 public class GrpcConnectionManagerTests
 {
     private const string Endpoint = "127.0.0.1:50111";
+
+    private sealed class RecordingWriter : IConsoleWriter
+    {
+        public string Errors { get; private set; } = "";
+
+        public void Write(string text)
+        {
+        }
+
+        public void WriteLine(string text)
+        {
+        }
+
+        public void WriteLine()
+        {
+        }
+
+        public void WriteError(string text)
+        {
+            Errors += $"{text}\n";
+        }
+    }
 
     [Fact]
     public async Task Connect_twice_for_one_endpoint_returns_same_channel_instance()
@@ -76,5 +99,41 @@ public class GrpcConnectionManagerTests
         Assert.Contains("shutting down", ex.Message);
 
         await conn.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Connect_default_to_non_443_port_does_not_warn_about_cleartext()
+    {
+        await using var conn = new GrpcConnectionManager(NullViceLogger.Instance);
+        var writer = new RecordingWriter();
+
+        conn.Connect("127.0.0.1:8080", plaintext: false, writer);
+
+        Assert.Equal("", writer.Errors);
+    }
+
+    [Fact]
+    public async Task Connect_with_plaintext_warns_that_traffic_is_unencrypted()
+    {
+        await using var conn = new GrpcConnectionManager(NullViceLogger.Instance);
+        var writer = new RecordingWriter();
+
+        conn.Connect("127.0.0.1:8080", plaintext: true, writer);
+
+        Assert.Contains("plaintext transport", writer.Errors);
+        Assert.Contains("unencrypted", writer.Errors);
+    }
+
+    [Fact]
+    public async Task Connect_with_plaintext_warns_exactly_once_per_endpoint()
+    {
+        await using var conn = new GrpcConnectionManager(NullViceLogger.Instance);
+        var writer = new RecordingWriter();
+
+        conn.Connect("127.0.0.1:8080", plaintext: true, writer);
+        conn.Connect("127.0.0.1:8080", plaintext: true, writer);
+
+        var occurrences = writer.Errors.Split("plaintext transport").Length - 1;
+        Assert.Equal(1, occurrences);
     }
 }

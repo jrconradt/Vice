@@ -1,8 +1,8 @@
 # Architecture and internal layering
 
 This document records the intended layering of the Vice assemblies and the
-internal subsystem layers inside the core `Vice` assembly. It exists so that
-feature work does not deepen coupling to incidental core subsystems, and so the
+internal subsystem folders inside each runtime assembly. It exists so that
+feature work does not deepen coupling to incidental subsystems, and so the
 extraction boundaries that already hold (and the ones that intentionally do not)
 are explicit.
 
@@ -11,23 +11,40 @@ are explicit.
 The project graph is acyclic. Features depend only on shared lower assemblies;
 no shared assembly depends on a feature.
 
+Three leaves carry no inbound `Vice.*` dependency: `Vice.Foundation` (BCL-only
+shared primitives), `Vice.Parser` (BCL-only lexer + resolver), and
+`Vice.Generators` (the Roslyn source generator, consumed as an analyzer and
+producing no runtime assembly reference). `Vice.Jobs` sits just above
+`Vice.Foundation`. The framework root `Vice` references `Vice.Foundation`,
+`Vice.Jobs`, and `Vice.Parser`. `Vice.Host` adds the session REPL on top of
+`Vice` and `Vice.Jobs`. Feature libraries (`Vice.Net`, `Vice.Files`,
+`Vice.Build`, `Vice.Mux`) build on `Vice` and `Vice.Foundation` — `Vice.Net`
+also reaches `Vice.Jobs` for background work. The two entry-point CLIs compose
+the libraries they need.
+
+Each project and the `ProjectReference` edges it declares (the `Vice.Generators`
+analyzer reference is noted separately below, not as a runtime edge):
+
 ```
-Vice.Parser        (BCL-only leaf: lexer + resolver, no inbound Vice dependency)
-   ^
-   |
-Vice               (core host runtime; references Vice.Parser)
-   ^         ^        ^        ^
-   |         |        |        |
-Vice.Net  Vice.Files Vice.Build Vice.Mux   (feature modules; each references Vice only)
-   ^                                ^
-   |                                |
-Vice.Cli                        Vice.Mux.Cli   (entry-point CLIs; compose features)
+Vice.Foundation  -> (none; BCL-only leaf)
+Vice.Parser      -> (none; BCL-only leaf)
+Vice.Generators  -> (none; analyzer leaf)
+Vice.Jobs        -> Vice.Foundation
+Vice             -> Vice.Foundation, Vice.Jobs, Vice.Parser
+Vice.Host        -> Vice, Vice.Jobs, Vice.Foundation
+Vice.Net         -> Vice, Vice.Jobs, Vice.Foundation
+Vice.Files       -> Vice, Vice.Foundation
+Vice.Build       -> Vice, Vice.Foundation
+Vice.Mux         -> Vice, Vice.Foundation
+Vice.Cli         -> Vice, Vice.Host, Vice.Net, Vice.Files, Vice.Build, Vice.Mux
+Vice.Mux.Cli     -> Vice, Vice.Host, Vice.Mux
 ```
 
-`Vice.Generators` is a Roslyn source generator consumed as an analyzer by `Vice`
-and the CLIs; it produces no runtime assembly reference.
+`Vice.Generators` is a Roslyn source generator consumed as an analyzer reference
+by `Vice`, `Vice.Build`, `Vice.Cli`, and `Vice.Mux.Cli`; it produces no runtime
+assembly reference.
 
-## Vice.Parser is a standalone package
+## Vice.Parser is a standalone leaf
 
 `Vice.Parser` is the command-line lexer and resolver: tokenization
 (`Lexer` / `Token`), global-option extraction (`GlobalOptionExtractor`),
@@ -36,10 +53,10 @@ outcome (`ParseResult` / `MatchDiagnostic`), and the host-facing descriptor
 surface (`IChainDescriptor` / `ITargetDescriptor`).
 
 It depends only on the .NET base class library — no type in `Vice.Parser`
-references any other `Vice.*` namespace — so it ships as its own package. The
-`Vice` host references it, so framework consumers receive it transitively, while
-a tool that needs only lexing and resolution can reference `Vice.Parser` alone
-and pull in nothing else. `Vice.Parser.Tests` exercises it directly.
+references any other `Vice.*` namespace. The `Vice` framework references it
+directly, so framework consumers receive it transitively, while a tool that
+needs only lexing and resolution can reference `Vice.Parser` alone and pull in
+nothing else. `Vice.Parser.Tests` exercises it directly.
 
 ## Vice.Generators analyzer-diagnostic suppressions
 
@@ -60,25 +77,25 @@ If `Vice.Generators` is ever packaged for external consumption, restore the
 `AnalyzerReleases` ledger files and drop `RS2000;RS2001;RS2002;RS2008` from
 `NoWarn` so the release-tracking analyzers run again.
 
-## Core internal layers
+## Internal layers across the runtime assemblies
 
-Inside the `Vice` assembly the folders form layers. Lower layers know nothing of
-higher layers; a higher layer may use any lower layer. Listed lowest first.
+The runtime functionality is split across four assemblies — `Vice.Foundation`,
+`Vice.Jobs`, `Vice`, and `Vice.Host` — each carrying its own folders. Lower
+assemblies know nothing of higher ones; within an assembly, a higher folder may
+use any lower folder. Listed lowest first.
 
-| Layer | Folders | Role |
+| Assembly | Folders | Role |
 | --- | --- | --- |
-| Foundation | `Concurrency`, `Display`, `Nodes`, `Composition`, `Persistence` | Primitives: wait-free helpers, terminal rendering, DSL node tree, expression composition, path-gating and atomic-file write primitives (`SafeWriteRoots`, `AtomicFile`, `FileAccessControl`) consumed by feature modules. |
-| Parsing surface | `Lexicon`, `Options`, `Core` | Connector vocabulary, typed option registries, the public `Dsl` / `TargetDef` builder surface — all thin layers over `Vice.Parser`. |
-| Logging and configuration | `Logging`, `Configuration`, `Sinks` | Structured logging, configuration, log sinks. |
-| Execution | `Commands`, `Execution`, `Help`, `Completions`, `Manpages` | Command registry, pipeline execution, help rendering, shell-completion and man-page generation. |
-| Runtime services | `Ipc`, `Jobs`, `Session`, `Streaming`, `Plugins` | Pipe-server IPC, job/daemon management, the session REPL, typed streaming, external-plugin dispatch. |
-| Host | `ViceApp`, `ViceAppBuilder`, `Signals` | Wires the layers into a runnable application. |
+| `Vice.Foundation` | `Concurrency`, `Execution`, `Logging`, `Persistence`, `Sinks` | BCL-only primitives: wait-free helpers, low-level execution scaffolding, structured logging and log sinks, and path-gating + atomic-file write primitives (`SafeWriteRoots`, `AtomicFile`, `FileAccessControl`) consumed by every assembly above. |
+| `Vice.Jobs` | `Jobs` | The background-job model — job state, scheduling, and lifecycle. References `Vice.Foundation` only. |
+| `Vice` | `Lexicon`, `Options`, `Core`, `Nodes`, `Composition`, `Display`, `Commands`, `Execution`, `Streaming`, `Help`, `Completions`, `Manpages`, `Contracts`, `Sinks` | The framework. The parsing surface (`Lexicon`, `Options`, `Core`'s `Dsl` / `TargetDef`) over `Vice.Parser`; the DSL node tree and expression composition (`Nodes`, `Composition`); terminal rendering (`Display`); the command registry and pipeline execution (`Commands`, `Execution`, `Streaming`); and help, shell-completion, and man-page generation (`Help`, `Completions`, `Manpages`). |
+| `Vice.Host` | `Core`, `Ipc`, `Plugins`, `Session`, `ViceApp` / `ViceAppBuilder` | Daemon liveness and message handling (`Core`), pipe-server IPC, external-plugin dispatch, the session REPL, and the `ViceApp` / `ViceAppBuilder` surface that wires everything into a runnable interactive application. |
 
-## Subsystems that intentionally stay in core
+## Subsystems that intentionally stay in `Vice`
 
-`Completions` and `Manpages` are self-contained in purpose but
-are not extractable to their own assemblies without introducing a project cycle.
-They stay in `Vice`; the layering table above is the contract that keeps their
+`Completions` and `Manpages` are self-contained in purpose but are not
+extractable to their own assemblies without introducing a project cycle. They
+stay in `Vice`; the layering table above is the contract that keeps their
 coupling from spreading.
 
 - `Completions` consumes `Commands`, `Nodes`, and `Options`, and is itself
@@ -94,8 +111,9 @@ the type graph still spans.
 
 ## Rule for new feature work
 
-A new feature module references `Vice` and nothing below it directly; it reaches
-parsing or execution only through the public surface those layers
-expose. When a feature needs a capability that today lives deep in core, surface
-it on the owning layer rather than reaching across layers — that keeps the
-acyclic assembly graph and the internal layering both intact.
+A feature module (`Vice.Net`, `Vice.Files`, `Vice.Build`, `Vice.Mux`) references
+`Vice` and `Vice.Foundation`, reaching parsing or execution only through the
+public surface those layers expose; it does not reach into `Vice.Host`. When a
+feature needs a capability that today lives deep in a lower assembly, surface it
+on the owning layer rather than reaching across layers — that keeps the acyclic
+assembly graph and the internal layering both intact.

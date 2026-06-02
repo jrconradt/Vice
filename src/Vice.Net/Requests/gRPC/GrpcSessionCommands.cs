@@ -18,14 +18,8 @@ public static class GrpcSessionCommands
             {
                 var endpoint = ctx["endpoint"] ?? throw new InvalidOperationException("Target 'endpoint' not bound.");
                 var plaintext = ctx.GetGlobalOption("plaintext") is not null;
-                var insecure = ctx.GetGlobalOption("insecure") is not null;
 
-                if (insecure)
-                {
-                    GrpcConnectionManager.WarnInsecure(ctx.Session?.Logger, endpoint);
-                }
-
-                connections.Connect(endpoint, plaintext, insecure);
+                connections.Connect(endpoint, plaintext, ctx.Console);
                 ctx.Console.WriteLine($"Connected to {endpoint}.");
                 return 0;
             });

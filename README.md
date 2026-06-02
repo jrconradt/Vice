@@ -17,7 +17,7 @@ Vice is two things:
 - **`vice` — a CLI tool** for network probes, scientific-literature search, filesystem work, and `dotnet` build orchestration. Commands use the natural-language grammar and pipe into each other.
 - **Vice — the framework** underneath it. Define your own commands as a composable grammar, and inherit the parser, the pipelines, the REPL, jobs, history, plugins, and configuration without implementing them.
 
-Apache-2.0 · targets .NET 10 · current release `0.1.0` (see [CHANGELOG.md](CHANGELOG.md)).
+Apache-2.0 · targets .NET 10.
 
 ---
 
@@ -30,7 +30,7 @@ To try the `vice` tool, build and install it from this repo:
 vice                          # opens the interactive REPL
 ```
 
-The published-tool install path and a full walkthrough live in **[docs/getting-started.md](docs/getting-started.md)**.
+A full walkthrough lives in **[docs/getting-started.md](docs/getting-started.md)**.
 
 Run a single command and exit:
 
@@ -96,7 +96,7 @@ vice read ./large.bin.gz then stream to count
 
 ## The `vice-mux` companion tool
 
-`vice-mux` is a separate stream-plumbing tool for inspecting, routing, and tee-ing byte streams — installed on its own (`dotnet tool install --global Vice.Mux.Cli`) and invoked as `vice-mux`. It reads stdin and fans bytes out to files, TCP endpoints, child processes, or named pipes; `route` forwards the stream to the destinations whose condition matches the upstream exit code. ([docs/mux-commands.md](docs/mux-commands.md))
+`vice-mux` is a separate stream-plumbing tool for inspecting, routing, and tee-ing byte streams — installed locally alongside `vice` via `./scripts/install-local.sh` and invoked as `vice-mux`. It reads stdin and fans bytes out to files, TCP endpoints, child processes, or named pipes; `route` forwards the stream to the destinations whose condition matches the upstream exit code. ([docs/mux-commands.md](docs/mux-commands.md))
 
 ```bash
 cat ./events.ndjson | vice-mux tee to file:./copy.ndjson,tcp:collector:9000 > ./out.ndjson
@@ -107,10 +107,10 @@ some-stage | vice-mux route on 0 to file:./ok.log on 1,2 to exec:notify on '*' t
 
 ## Build your own CLI on Vice
 
-Add the framework package:
+Reference the framework directly from a checkout of this repo — add a `ProjectReference` to `src/Vice/Vice.csproj`:
 
-```bash
-dotnet add package Vice
+```xml
+<ProjectReference Include="path/to/vice/src/Vice/Vice.csproj" />
 ```
 
 Define a group of commands. Each command is a grammar (verb, optional nouns, bound targets) plus a handler. Register them by hand when wiring a single app:
@@ -180,13 +180,18 @@ The framework API is summarized in [src/Vice/README.md](src/Vice/README.md); the
 
 | Path | What it is |
 |---|---|
-| `src/Vice.Parser` | The command-line lexer and resolver. NuGet package `Vice.Parser` — BCL-only, no dependency on the rest of the framework; `Vice` references it transitively. |
-| `src/Vice` | The framework. NuGet package `Vice` — the command DSL, streaming channels, REPL, jobs, plugins, configuration; references `Vice.Parser` for lexing and resolution. |
-| `src/Vice.Generators` | Roslyn source generators that wire `[ViceCommandPack]` classes into the host at compile time. |
-| `src/Vice.Net` | Network command library (TCP, UDP, gRPC) for the `vice` tool, built on the framework. A library, not a tool — `IsPackable=false`. |
-| `src/Vice.Cli` | The `vice` reference CLI tool. NuGet package `Vice.Cli`, `ToolCommandName` `vice` — `dotnet tool install --global Vice.Cli`. |
+| `src/Vice.Foundation` | BCL-only primitives shared across the tree — concurrency helpers, terminal rendering, the DSL node tree, expression composition, and path-gated atomic file writes. A leaf with no inbound `Vice.*` dependency. |
+| `src/Vice.Parser` | The command-line lexer and resolver. BCL-only, no dependency on the rest of the framework; `Vice` references it. |
+| `src/Vice.Generators` | Roslyn source generators that wire `[ViceCommandPack]` classes into the host at compile time. Consumed in-tree as an analyzer, never shipped — `IsPackable=false`. |
+| `src/Vice.Jobs` | The background-job model — job state, scheduling, and lifecycle. References `Vice.Foundation` only. |
+| `src/Vice` | The framework. The command DSL, streaming channels, configuration, plugins; references `Vice.Foundation`, `Vice.Jobs`, and `Vice.Parser`. |
+| `src/Vice.Host` | The session REPL host that wires the framework into a runnable interactive application. References `Vice`, `Vice.Jobs`, and `Vice.Foundation`. |
+| `src/Vice.Net` | Network command library (TCP, UDP, gRPC) for the `vice` tool. A library, not a tool — `IsPackable=false`. |
+| `src/Vice.Files` | Filesystem command library — read, write, stream, archive, and search. A library, not a tool. |
+| `src/Vice.Build` | The `dotnet`-wrapper build command library. A library, not a tool. |
 | `src/Vice.Mux` | The mux library for inspecting, routing, and tee-ing Vice pipeline streams. A library, not a tool. |
-| `src/Vice.Mux.Cli` | The `vice-mux` companion CLI tool. NuGet package `Vice.Mux.Cli`, `ToolCommandName` `vice-mux` — `dotnet tool install --global Vice.Mux.Cli` ([docs/mux-commands.md](docs/mux-commands.md)). |
+| `src/Vice.Cli` | The `vice` reference CLI tool, `ToolCommandName` `vice`. Composes the framework, host, and feature libraries. Install from a local checkout with `./scripts/install-local.sh`. |
+| `src/Vice.Mux.Cli` | The `vice-mux` companion CLI tool, `ToolCommandName` `vice-mux`. Install from a local checkout with `./scripts/install-local.sh` ([docs/mux-commands.md](docs/mux-commands.md)). |
 | `docs/` | User and configuration guides. |
 | `scripts/` | Build, test, and local-install helpers ([scripts/README.md](scripts/README.md)). |
 | `tests/` | Unit tests for the framework, generators, parser, network layer, and mux tool. |
@@ -221,7 +226,6 @@ Vice is usable without color, motion, or Unicode, and conveys every outcome text
 - [Build commands](docs/build-commands.md) — `dotnet` wrappers and build deduplication
 - [vice-mux commands](docs/mux-commands.md) — the companion stream inspect/route/tee tool, its exit-code conditions and sinks
 - [Environment and configuration](docs/env-and-config.md) — env vars, plugins, services, exit codes
-- [Releasing](docs/releasing.md) — versioning policy, tagging, publishing, rollback
 - [Licensing](docs/licensing.md) — Apache-2.0 coverage, SPDX provenance, third-party notices
 - [Troubleshooting](docs/troubleshooting.md)
 
@@ -241,27 +245,6 @@ Requires the .NET 10 SDK.
 `scripts/bench.sh` runs every benchmark by default and writes BenchmarkDotNet JSON, Markdown, and log artifacts under `BenchmarkDotNet.Artifacts/` in the repository root (override the location with `VICE_BENCH_ARTIFACTS`). Pass BenchmarkDotNet arguments through, e.g. `./scripts/bench.sh --filter '*RouteStrategy*'`.
 
 To compare throughput run-over-run automatically, pass `--gate`: the harness diffs each benchmark's mean against the committed `bench/Vice.Benchmarks/baseline.json` and exits non-zero when any benchmark slows past the tolerance (`VICE_BENCH_TOLERANCE`, default `0.10` for 10%); a missing baseline is seeded from the current run. Pass `--update-baseline` to rewrite the baseline from the current run when an intended change shifts the numbers.
-
----
-
-## Releasing
-
-Four projects are packable: the two tool projects — `Vice.Cli` (the `vice` tool) and `Vice.Mux.Cli` (the `vice-mux` tool) — and the two framework libraries `Vice` and `Vice.Parser`; `Vice.Net` and the other libraries are not. The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); the shipped version is `<Version>` in `Directory.Build.props`, and each release is an annotated git tag `v<version>`.
-
-To cut a release: bump `<Version>`, update [CHANGELOG.md](CHANGELOG.md), tag the commit (`git tag -a v<version> -m "v<version>"`), then pack and publish:
-
-```bash
-scripts/release.sh --verify-tag                       # pack all four packages into artifacts/release/<version>/
-NUGET_API_KEY=<key> scripts/release.sh --verify-tag --push   # publish to $VICE_NUGET_FEED (default nuget.org)
-```
-
-Roll a tool back to a prior published version (every prior version stays on the feed):
-
-```bash
-scripts/rollback.sh <previous-version> all            # dotnet tool update --version <previous-version>
-```
-
-The full process — versioning policy, tagging, publishing, and rollback — is documented in **[docs/releasing.md](docs/releasing.md)**. To try the tools locally without publishing, run `./scripts/install-local.sh`.
 
 ---
 

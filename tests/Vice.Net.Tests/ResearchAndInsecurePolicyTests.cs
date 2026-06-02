@@ -1,8 +1,4 @@
-using System.Net.Security;
-using System.Security.Cryptography;
-using System.Security.Cryptography.X509Certificates;
 using Vice.Logging;
-using Vice.Net.Requests.Grpc;
 using Vice.Net.Research;
 using Xunit;
 
@@ -90,55 +86,4 @@ public sealed class ResearchAndInsecurePolicyTests
         }
     }
 
-    [Fact]
-    public void Insecure_callback_without_pin_accepts_any_certificate()
-    {
-        var original = Environment.GetEnvironmentVariable(GrpcConnectionManager.PinnedCertEnvVar);
-        try
-        {
-            Environment.SetEnvironmentVariable(GrpcConnectionManager.PinnedCertEnvVar, null);
-
-            var callback = GrpcConnectionManager.BuildInsecureValidationCallback(NullViceLogger.Instance);
-            using var cert = SelfSigned("CN=any");
-
-            Assert.True(callback(this, cert, null, SslPolicyErrors.RemoteCertificateChainErrors));
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable(GrpcConnectionManager.PinnedCertEnvVar, original);
-        }
-    }
-
-    [Fact]
-    public void Insecure_callback_with_pin_accepts_only_matching_certificate()
-    {
-        var original = Environment.GetEnvironmentVariable(GrpcConnectionManager.PinnedCertEnvVar);
-        try
-        {
-            using var expected = SelfSigned("CN=expected");
-            using var attacker = SelfSigned("CN=attacker");
-
-            var pin = Convert.ToHexString(SHA256.HashData(expected.GetRawCertData()));
-            Environment.SetEnvironmentVariable(GrpcConnectionManager.PinnedCertEnvVar, pin);
-
-            var callback = GrpcConnectionManager.BuildInsecureValidationCallback(NullViceLogger.Instance);
-
-            Assert.True(callback(this, expected, null, SslPolicyErrors.RemoteCertificateChainErrors));
-            Assert.False(callback(this, attacker, null, SslPolicyErrors.RemoteCertificateChainErrors));
-            Assert.False(callback(this, null, null, SslPolicyErrors.RemoteCertificateNotAvailable));
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable(GrpcConnectionManager.PinnedCertEnvVar, original);
-        }
-    }
-
-    private static X509Certificate2 SelfSigned(string subject)
-    {
-        using var rsa = RSA.Create(2048);
-        var request = new CertificateRequest(subject, rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
-        return request.CreateSelfSigned(
-            DateTimeOffset.UtcNow.AddMinutes(-5),
-            DateTimeOffset.UtcNow.AddMinutes(5));
-    }
 }

@@ -179,33 +179,8 @@ public static class GrpcReflectionCommands
         CommandContext ctx,
         string endpoint)
     {
-        var insecure = ctx.GetGlobalOption("insecure") is not null;
         var plaintext = ctx.GetGlobalOption("plaintext") is not null;
-        if (insecure)
-        {
-            GrpcConnectionManager.WarnInsecure(ctx.Session?.Logger, endpoint);
-        }
-
-        if (plaintext)
-        {
-            WarnPlaintext(ctx, endpoint);
-        }
-
-        return connections.Connect(endpoint, plaintext, insecure);
-    }
-
-    private static void WarnPlaintext(CommandContext ctx, string endpoint)
-    {
-        ctx.Logger.Log(
-            ViceLogLevel.Warn,
-            $"plaintext gRPC transport for {endpoint} via --plaintext flag; request bodies and metadata (auth tokens) are sent unencrypted");
-        if (ctx.Quiet)
-        {
-            return;
-        }
-
-        ctx.Console.WriteError(
-            $"vice: WARNING: plaintext transport for endpoint {endpoint}; request bodies and metadata (auth tokens) are sent unencrypted");
+        return connections.Connect(endpoint, plaintext, ctx.Console);
     }
 
     private static int GetTimeout(CommandContext ctx)

@@ -1,6 +1,4 @@
 using System.Collections.Concurrent;
-using System.Security.Cryptography;
-using System.Security.Cryptography.X509Certificates;
 using Grpc.Net.Client;
 using Vice.Display.Rendering;
 using Vice.Logging;
@@ -9,11 +7,8 @@ namespace Vice.Net.Requests.Grpc;
 
 public sealed class GrpcConnectionManager : IAsyncDisposable
 {
-    public const string PinnedCertEnvVar = "VICE_GRPC_PINNED_CERT_SHA256";
-
     private const int MAX_GRPC_MESSAGE_BYTES = 32 * 1024 * 1024;
     private const int MAX_CONNECTIONS = 256;
-    private const int TLS_DEFAULT_PORT = 443;
     private static readonly TimeSpan DefaultShutdownTimeout = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan IdleTtl = TimeSpan.FromMinutes(10);
     private static readonly TimeSpan EvictionScanInterval = TimeSpan.FromSeconds(60);
@@ -98,50 +93,17 @@ public sealed class GrpcConnectionManager : IAsyncDisposable
         }
     }
 
-    public static void WarnInsecure(IViceLogger? logger, string endpoint, IConsoleWriter? writer = null)
+    private static void WarnPlaintext(IViceLogger logger, string endpoint, IConsoleWriter? writer)
     {
-        var pinned = ParsePin(Environment.GetEnvironmentVariable(PinnedCertEnvVar)).Pin is not null;
-        var headline = pinned
-            ? $"TLS chain validation bypassed for {endpoint} via --insecure; certificate pinned to {PinnedCertEnvVar}"
-            : $"TLS certificate validation disabled for {endpoint} via --insecure flag";
+        logger.Log(
+            ViceLogLevel.Warn,
+            $"plaintext gRPC transport for {endpoint} via --plaintext flag; request bodies and metadata (auth tokens) are sent unencrypted");
 
-        (logger ?? NullViceLogger.Instance).Log(ViceLogLevel.Warn, headline);
-
-        var lines = BuildInsecureBanner(endpoint, pinned);
-        var sink = writer ?? Vice.Display.NullConsoleWriter.Instance;
-        foreach (var line in lines)
-        {
-            sink.WriteError(line);
-        }
+        (writer ?? Vice.Display.NullConsoleWriter.Instance).WriteError(
+            $"vice: WARNING: plaintext transport for endpoint {endpoint}; request bodies and metadata (auth tokens) are sent unencrypted");
     }
 
-    private static string[] BuildInsecureBanner(string endpoint, bool pinned)
-    {
-        if (pinned)
-        {
-            return new[]
-            {
-                "vice: ============================================================",
-                $"vice: WARNING: TLS chain validation is BYPASSED for {endpoint}",
-                $"vice: --insecure is accepting only the certificate pinned via {PinnedCertEnvVar}.",
-                "vice: A pin narrows exposure, but the normal CA trust chain is NOT enforced.",
-                "vice: ============================================================",
-            };
-        }
-
-        return new[]
-        {
-            "vice: ============================================================",
-            $"vice: WARNING: TLS certificate validation is DISABLED for {endpoint}",
-            "vice: --insecure accepts ANY certificate, including attacker-substituted ones.",
-            "vice: All credentials and request payloads sent to this endpoint can be",
-            "vice: intercepted and read by an active network (MITM) attacker.",
-            $"vice: Set {PinnedCertEnvVar}=<sha256 hex> to pin one expected certificate instead.",
-            "vice: ============================================================",
-        };
-    }
-
-    public GrpcChannel Connect(string endpoint, bool plaintext = false, bool insecure = false)
+    public GrpcChannel Connect(string endpoint, bool plaintext = false, IConsoleWriter? writer = null)
     {
         if (Volatile.Read(ref _shuttingDown) != 0)
         {
@@ -152,15 +114,14 @@ public sealed class GrpcConnectionManager : IAsyncDisposable
         var lazy = _connections.GetOrAdd(
             endpoint,
             ep => new Lazy<ConnectionEntry>(
-                () => CreateEntry(ep, plaintext, insecure),
+                () => CreateEntry(ep, plaintext, writer),
                 LazyThreadSafetyMode.ExecutionAndPublication));
 
         var entry = lazy.Value;
-        if (entry.Plaintext != plaintext
-            || entry.Insecure != insecure)
+        if (entry.Plaintext != plaintext)
         {
             throw new InvalidOperationException(
-                $"Cached connection to {endpoint} was established with plaintext={entry.Plaintext}, insecure={entry.Insecure}; refusing to reuse it for a request with plaintext={plaintext}, insecure={insecure}.");
+                $"Cached connection to {endpoint} was established with plaintext={entry.Plaintext}; refusing to reuse it for a request with plaintext={plaintext}.");
         }
 
         Interlocked.Exchange(ref entry.LastUsedTicks, DateTime.UtcNow.Ticks);
@@ -427,9 +388,14 @@ public sealed class GrpcConnectionManager : IAsyncDisposable
         }
     }
 
-    private ConnectionEntry CreateEntry(string endpoint, bool plaintext, bool insecure)
+    private ConnectionEntry CreateEntry(string endpoint, bool plaintext, IConsoleWriter? writer)
     {
-        var (channel, handler) = CreateChannel(endpoint, plaintext, insecure, _logger);
+        if (plaintext)
+        {
+            WarnPlaintext(_logger, endpoint, writer);
+        }
+
+        var (channel, handler) = CreateChannel(endpoint, plaintext);
         return new ConnectionEntry
         {
             Channel = channel,
@@ -437,13 +403,12 @@ public sealed class GrpcConnectionManager : IAsyncDisposable
             Endpoint = endpoint,
             ConnectedAt = DateTime.UtcNow,
             CallCount = 0,
-            Plaintext = plaintext,
-            Insecure = insecure
+            Plaintext = plaintext
         };
     }
 
     private static (GrpcChannel channel, IDisposable? handler) CreateChannel(
-        string endpoint, bool plaintext, bool insecure, IViceLogger logger)
+        string endpoint, bool plaintext)
     {
         var options = new GrpcChannelOptions
         {
@@ -461,96 +426,9 @@ public sealed class GrpcConnectionManager : IAsyncDisposable
             EnableMultipleHttp2Connections = true,
         };
 
-        if (insecure)
-        {
-            handler.SslOptions = new System.Net.Security.SslClientAuthenticationOptions
-            {
-                RemoteCertificateValidationCallback = BuildInsecureValidationCallback(logger),
-            };
-        }
-
         options.HttpHandler = handler;
-        var useTls = !plaintext
-                     && EndpointPort(endpoint) == TLS_DEFAULT_PORT;
-        var scheme = useTls ? "https" : "http";
+        var scheme = plaintext ? "http" : "https";
         return (GrpcChannel.ForAddress($"{scheme}://{endpoint}", options), handler);
-    }
-
-    private static int EndpointPort(string endpoint)
-    {
-        var lastColon = endpoint.LastIndexOf(':');
-        if (lastColon < 0
-            || lastColon == endpoint.Length - 1
-            || endpoint.IndexOf(']') > lastColon)
-        {
-            return -1;
-        }
-
-        var portText = endpoint[(lastColon + 1)..];
-        if (int.TryParse(portText, out var port))
-        {
-            return port;
-        }
-
-        return -1;
-    }
-
-    internal static System.Net.Security.RemoteCertificateValidationCallback BuildInsecureValidationCallback(IViceLogger logger)
-    {
-        var configured = Environment.GetEnvironmentVariable(PinnedCertEnvVar);
-        var parse = ParsePin(configured);
-        if (parse.Malformed)
-        {
-            var message =
-                $"{PinnedCertEnvVar} is set but is not a valid SHA-256 certificate pin (expected 64 hex characters, separators ':' and ' ' allowed). Refusing to connect rather than silently accepting any certificate. Fix the pin value or unset {PinnedCertEnvVar}.";
-            logger.Log(ViceLogLevel.Error, message);
-            throw new InvalidOperationException(message);
-        }
-
-        if (parse.Pin is null)
-        {
-            return (_, _, _, _) => true;
-        }
-
-        var pin = parse.Pin;
-        return (_, certificate, _, _) => CertificateMatchesPin(certificate, pin);
-    }
-
-    private static bool CertificateMatchesPin(X509Certificate? certificate, byte[] pin)
-    {
-        if (certificate is null)
-        {
-            return false;
-        }
-
-        var raw = certificate.GetRawCertData();
-        var actual = SHA256.HashData(raw);
-        return CryptographicOperations.FixedTimeEquals(actual, pin);
-    }
-
-    private readonly record struct PinParse(byte[]? Pin, bool Malformed);
-
-    private static PinParse ParsePin(string? configured)
-    {
-        if (string.IsNullOrWhiteSpace(configured))
-        {
-            return new PinParse(null, false);
-        }
-
-        var normalized = configured.Trim().Replace(":", string.Empty).Replace(" ", string.Empty);
-        if (normalized.Length != 64)
-        {
-            return new PinParse(null, true);
-        }
-
-        try
-        {
-            return new PinParse(Convert.FromHexString(normalized), false);
-        }
-        catch (FormatException)
-        {
-            return new PinParse(null, true);
-        }
     }
 
     public sealed class ConnectionLease : IDisposable
@@ -587,7 +465,6 @@ public sealed class GrpcConnectionManager : IAsyncDisposable
         public int CallCount;
         public long LastUsedTicks;
         public required bool Plaintext { get; init; }
-        public required bool Insecure { get; init; }
         public IDisposable? Handler { get; init; }
         public ConcurrentDictionary<Guid, byte> ActiveLeases { get; } = new();
     }

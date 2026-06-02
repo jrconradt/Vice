@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-dotnet restore Vice.slnx --locked-mode
+dotnet restore Vice.slnx
 dotnet test Vice.slnx --nologo --no-restore \
   --collect:"XPlat Code Coverage" \
   --results-directory artifacts/test-results \

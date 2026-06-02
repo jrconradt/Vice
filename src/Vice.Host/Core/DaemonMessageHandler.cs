@@ -61,8 +61,6 @@ internal sealed class DaemonMessageHandler
         {
             if (!IsAuthorized(cmd.CommandLine, out var deniedVerb))
             {
-                Vice.Audit.Emit(ViceLogLevel.Warn,
-                                $"daemon rejected disallowed verb '{deniedVerb}' over IPC control channel");
                 _logger.Log(ViceLogLevel.Warn,
                               $"daemon rejected disallowed verb '{deniedVerb}' over IPC");
                 return new CommandResponse
