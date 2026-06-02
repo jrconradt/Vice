@@ -56,34 +56,19 @@ public sealed class GrpcConnectionManager : IAsyncDisposable
                         continue;
                     }
 
-                    if (!kvp.Value.Value.ActiveLeases.IsEmpty)
-                    {
-                        continue;
-                    }
-
-                    var lastUsedTicks = Interlocked.Read(ref kvp.Value.Value.LastUsedTicks);
-                    if (lastUsedTicks > cutoffTicks)
-                    {
-                        continue;
-                    }
-
                     if (Volatile.Read(ref _shuttingDown) != 0)
                     {
                         break;
                     }
 
-                    if (!_connections.TryRemove(kvp))
+                    var entry = kvp.Value.Value;
+                    if (RetireIfIdle(entry, cutoffTicks) is null)
                     {
                         continue;
                     }
 
-                    if (!kvp.Value.Value.ActiveLeases.IsEmpty)
-                    {
-                        _connections.TryAdd(kvp.Key, kvp.Value);
-                        continue;
-                    }
-
-                    DrainAndDispose(kvp.Key, kvp.Value.Value, "idle eviction");
+                    _connections.TryRemove(kvp);
+                    DrainAndDispose(kvp.Key, entry, "idle eviction");
                 }
             }
         }
@@ -111,22 +96,30 @@ public sealed class GrpcConnectionManager : IAsyncDisposable
                 $"GrpcConnectionManager is shutting down; cannot connect to {endpoint}.");
         }
 
-        var lazy = _connections.GetOrAdd(
-            endpoint,
-            ep => new Lazy<ConnectionEntry>(
-                () => CreateEntry(ep, plaintext, writer),
-                LazyThreadSafetyMode.ExecutionAndPublication));
-
-        var entry = lazy.Value;
-        if (entry.Plaintext != plaintext)
+        while (true)
         {
-            throw new InvalidOperationException(
-                $"Cached connection to {endpoint} was established with plaintext={entry.Plaintext}; refusing to reuse it for a request with plaintext={plaintext}.");
-        }
+            var lazy = _connections.GetOrAdd(
+                endpoint,
+                ep => new Lazy<ConnectionEntry>(
+                    () => CreateEntry(ep, plaintext, writer),
+                    LazyThreadSafetyMode.ExecutionAndPublication));
 
-        Interlocked.Exchange(ref entry.LastUsedTicks, DateTime.UtcNow.Ticks);
-        EnforceMaxConnections(endpoint);
-        return entry.Channel;
+            var entry = lazy.Value;
+            if (entry.TryUpdate(Touch) is null)
+            {
+                _connections.TryRemove(new KeyValuePair<string, Lazy<ConnectionEntry>>(endpoint, lazy));
+                continue;
+            }
+
+            if (entry.Plaintext != plaintext)
+            {
+                throw new InvalidOperationException(
+                    $"Cached connection to {endpoint} was established with plaintext={entry.Plaintext}; refusing to reuse it for a request with plaintext={plaintext}.");
+            }
+
+            EnforceMaxConnections(endpoint);
+            return entry.Channel;
+        }
     }
 
     private void EnforceMaxConnections(string keepEndpoint)
@@ -138,17 +131,20 @@ public sealed class GrpcConnectionManager : IAsyncDisposable
             var found = false;
             foreach (var kvp in _connections)
             {
-                if (kvp.Key == keepEndpoint
-                    || !kvp.Value.IsValueCreated
-                    || !kvp.Value.Value.ActiveLeases.IsEmpty)
+                if (kvp.Key == keepEndpoint || !kvp.Value.IsValueCreated)
                 {
                     continue;
                 }
 
-                var ticks = Interlocked.Read(ref kvp.Value.Value.LastUsedTicks);
-                if (ticks < lruTicks)
+                var state = kvp.Value.Value.Read();
+                if (state.Retired || state.LeaseCount > 0)
                 {
-                    lruTicks = ticks;
+                    continue;
+                }
+
+                if (state.LastUsedTicks < lruTicks)
+                {
+                    lruTicks = state.LastUsedTicks;
                     lru = kvp;
                     found = true;
                 }
@@ -159,18 +155,14 @@ public sealed class GrpcConnectionManager : IAsyncDisposable
                 break;
             }
 
-            if (!_connections.TryRemove(lru))
+            var entry = lru.Value.Value;
+            if (RetireIfIdle(entry, long.MaxValue) is null)
             {
                 continue;
             }
 
-            if (!lru.Value.Value.ActiveLeases.IsEmpty)
-            {
-                _connections.TryAdd(lru.Key, lru.Value);
-                break;
-            }
-
-            DrainAndDispose(lru.Key, lru.Value.Value, "LRU eviction");
+            _connections.TryRemove(lru);
+            DrainAndDispose(lru.Key, entry, "LRU eviction");
         }
     }
 
@@ -235,8 +227,11 @@ public sealed class GrpcConnectionManager : IAsyncDisposable
         }
 
         var entry = lazy.Value;
-        Interlocked.Exchange(ref entry.LastUsedTicks, DateTime.UtcNow.Ticks);
-        Interlocked.Increment(ref entry.CallCount);
+        if (entry.TryUpdate(RecordCall) is null)
+        {
+            throw new InvalidOperationException($"Not connected to {endpoint}");
+        }
+
         return entry.Channel;
     }
 
@@ -248,9 +243,12 @@ public sealed class GrpcConnectionManager : IAsyncDisposable
         }
 
         var entry = lazy.Value;
-        Interlocked.Exchange(ref entry.LastUsedTicks, DateTime.UtcNow.Ticks);
-        Interlocked.Increment(ref entry.CallCount);
-        return new ConnectionLease(entry);
+        if (entry.TryUpdate(AcquireLease) is null)
+        {
+            throw new InvalidOperationException($"Not connected to {endpoint}");
+        }
+
+        return new ConnectionLease(this, entry);
     }
 
     public bool Disconnect(string endpoint)
@@ -260,18 +258,23 @@ public sealed class GrpcConnectionManager : IAsyncDisposable
             return false;
         }
 
-        if (lazy.IsValueCreated)
+        if (!lazy.IsValueCreated)
         {
-            try
-            {
-                lazy.Value.Channel.Dispose();
-                lazy.Value.Handler?.Dispose();
-            }
-            catch (Exception ex)
-            {
-                _logger.Log(ViceLogLevel.Warn, $"gRPC channel dispose for {endpoint} failed", ex);
-            }
+            return true;
         }
+
+        var entry = lazy.Value;
+        var retired = entry.TryUpdate(Retire);
+        if (retired is null)
+        {
+            return true;
+        }
+
+        if (retired.LeaseCount == 0)
+        {
+            DrainAndDispose(endpoint, entry, "disconnect");
+        }
+
         return true;
     }
 
@@ -279,8 +282,9 @@ public sealed class GrpcConnectionManager : IAsyncDisposable
     {
         return _connections.Values
             .Where(l => l.IsValueCreated)
-            .Select(l => l.Value)
-            .Select(e => new ConnectionInfo(e.Endpoint, e.ConnectedAt, Volatile.Read(ref e.CallCount)))
+            .Select(l => (Entry: l.Value, State: l.Value.Read()))
+            .Where(p => !p.State.Retired)
+            .Select(p => new ConnectionInfo(p.Entry.Endpoint, p.Entry.ConnectedAt, p.State.CallCount))
             .ToList()
             .AsReadOnly();
     }
@@ -293,10 +297,19 @@ public sealed class GrpcConnectionManager : IAsyncDisposable
         var entries = new List<ConnectionEntry>(endpoints.Length);
         foreach (var endpoint in endpoints)
         {
-            if (_connections.TryRemove(endpoint, out var lazy) && lazy.IsValueCreated)
+            if (!_connections.TryRemove(endpoint, out var lazy) || !lazy.IsValueCreated)
             {
-                entries.Add(lazy.Value);
+                continue;
             }
+
+            var entry = lazy.Value;
+            var retired = entry.TryUpdate(Retire);
+            if (retired is null || retired.LeaseCount > 0)
+            {
+                continue;
+            }
+
+            entries.Add(entry);
         }
 
         var tasks = entries.Select(async entry =>
@@ -388,6 +401,53 @@ public sealed class GrpcConnectionManager : IAsyncDisposable
         }
     }
 
+    private void Release(ConnectionEntry entry)
+    {
+        var released = entry.Update(s => s with
+        {
+            LeaseCount = s.LeaseCount - 1,
+            LastUsedTicks = DateTime.UtcNow.Ticks
+        });
+
+        if (released.Retired && released.LeaseCount == 0)
+        {
+            DrainAndDispose(entry.Endpoint, entry, "deferred disposal after lease release");
+        }
+    }
+
+    private static LifecycleState? Touch(LifecycleState state)
+        => state.Retired ? null : state with { LastUsedTicks = DateTime.UtcNow.Ticks };
+
+    private static LifecycleState? RecordCall(LifecycleState state)
+        => state.Retired
+            ? null
+            : state with { CallCount = state.CallCount + 1, LastUsedTicks = DateTime.UtcNow.Ticks };
+
+    private static LifecycleState? AcquireLease(LifecycleState state)
+        => state.Retired
+            ? null
+            : state with
+            {
+                LeaseCount = state.LeaseCount + 1,
+                CallCount = state.CallCount + 1,
+                LastUsedTicks = DateTime.UtcNow.Ticks
+            };
+
+    private static LifecycleState? Retire(LifecycleState state)
+        => state.Retired ? null : state with { Retired = true };
+
+    private static LifecycleState? RetireIfIdle(ConnectionEntry entry, long cutoffTicks)
+        => entry.TryUpdate(state =>
+        {
+            if (state.Retired || state.LeaseCount > 0
+                || state.LastUsedTicks > cutoffTicks)
+            {
+                return null;
+            }
+
+            return state with { Retired = true };
+        });
+
     private ConnectionEntry CreateEntry(string endpoint, bool plaintext, IConsoleWriter? writer)
     {
         if (plaintext)
@@ -402,7 +462,6 @@ public sealed class GrpcConnectionManager : IAsyncDisposable
             Handler = handler,
             Endpoint = endpoint,
             ConnectedAt = DateTime.UtcNow,
-            CallCount = 0,
             Plaintext = plaintext
         };
     }
@@ -433,39 +492,79 @@ public sealed class GrpcConnectionManager : IAsyncDisposable
 
     public sealed class ConnectionLease : IDisposable
     {
+        private readonly GrpcConnectionManager _manager;
         private readonly ConnectionEntry _entry;
-        private readonly Guid _id;
+        private int _disposed;
 
-        internal ConnectionLease(ConnectionEntry entry)
+        internal ConnectionLease(GrpcConnectionManager manager, ConnectionEntry entry)
         {
+            _manager = manager;
             _entry = entry;
-            _id = Guid.NewGuid();
-            _entry.ActiveLeases[_id] = 0;
         }
 
         public GrpcChannel Channel => _entry.Channel;
 
         public void Renew()
         {
-            Interlocked.Exchange(ref _entry.LastUsedTicks, DateTime.UtcNow.Ticks);
+            _entry.TryUpdate(Touch);
         }
 
         public void Dispose()
         {
-            Interlocked.Exchange(ref _entry.LastUsedTicks, DateTime.UtcNow.Ticks);
-            _entry.ActiveLeases.TryRemove(_id, out _);
+            if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            {
+                return;
+            }
+
+            _manager.Release(_entry);
         }
     }
 
     internal sealed class ConnectionEntry
     {
+        private LifecycleState _state = new(0, 0, DateTime.UtcNow.Ticks, false);
+
         public required GrpcChannel Channel { get; init; }
         public required string Endpoint { get; init; }
         public required DateTime ConnectedAt { get; init; }
-        public int CallCount;
-        public long LastUsedTicks;
         public required bool Plaintext { get; init; }
         public IDisposable? Handler { get; init; }
-        public ConcurrentDictionary<Guid, byte> ActiveLeases { get; } = new();
+
+        public LifecycleState Read() => Volatile.Read(ref _state);
+
+        public LifecycleState? TryUpdate(Func<LifecycleState, LifecycleState?> mutator)
+        {
+            LifecycleState current, next;
+            do
+            {
+                current = Volatile.Read(ref _state);
+                var result = mutator(current);
+                if (result is null)
+                {
+                    return null;
+                }
+
+                next = result;
+            }
+            while (!ReferenceEquals(Interlocked.CompareExchange(ref _state, next, current), current));
+            return next;
+        }
+
+        public LifecycleState Update(Func<LifecycleState, LifecycleState> mutator)
+        {
+            LifecycleState current, next;
+            do
+            {
+                current = Volatile.Read(ref _state);
+                next = mutator(current);
+            }
+            while (!ReferenceEquals(Interlocked.CompareExchange(ref _state, next, current), current));
+            return next;
+        }
     }
+
+    internal sealed record LifecycleState(int LeaseCount,
+                                          int CallCount,
+                                          long LastUsedTicks,
+                                          bool Retired);
 }
