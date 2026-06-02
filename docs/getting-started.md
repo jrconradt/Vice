@@ -2,11 +2,14 @@
 
 ## Install
 
+From a checkout of this repo, pack and install the tools locally:
+
 ```bash
-dotnet tool install --global Vice.Cli
+./scripts/install-local.sh
 ```
 
-The installed command is `vice`. Requires .NET 10 on the host.
+This installs both `vice` and `vice-mux` as global tools. The installed command
+is `vice`. Requires the .NET 10 SDK on the host.
 
 ## Verify
 

@@ -75,7 +75,6 @@ internal static class PluginDispatcher
         {
             var rejectionMessage = $"plugin rejected as untrusted: candidate='{candidate}' reason={rejection}";
             logger.Log(ViceLogLevel.Warn, rejectionMessage);
-            Vice.Audit.Emit(ViceLogLevel.Warn, rejectionMessage);
             return false;
         }
 
@@ -119,7 +118,6 @@ internal static class PluginDispatcher
         {
             var rejectionMessage = $"plugin rejected as untrusted: candidate='{candidate}' reason={rejection}";
             logger.Log(ViceLogLevel.Warn, rejectionMessage);
-            Vice.Audit.Emit(ViceLogLevel.Warn, rejectionMessage);
             return false;
         }
 
@@ -374,7 +372,6 @@ internal static class PluginDispatcher
     {
         var executionMessage = $"plugin execution: path='{pluginPath}' argc={args.Length}";
         logger.Log(ViceLogLevel.Info, executionMessage);
-        Vice.Audit.Emit(ViceLogLevel.Info, executionMessage);
         var psi = new ProcessStartInfo
         {
             FileName = pluginPath,
