@@ -65,10 +65,10 @@ scripts/test.sh
 rm -rf "$OUT_DIR"
 mkdir -p "$OUT_DIR"
 
-dotnet pack src/Vice.Parser/Vice.Parser.csproj -c Release -o "$OUT_DIR" --nologo -p:RestoreLockedMode=true
-dotnet pack src/Vice/Vice.csproj -c Release -o "$OUT_DIR" --nologo -p:RestoreLockedMode=true
-dotnet pack src/Vice.Cli/Vice.Cli.csproj -c Release -o "$OUT_DIR" --nologo -p:RestoreLockedMode=true
-dotnet pack src/Vice.Mux.Cli/Vice.Mux.Cli.csproj -c Release -o "$OUT_DIR" --nologo -p:RestoreLockedMode=true
+dotnet pack src/Vice.Parser/Vice.Parser.csproj -c Release -o "$OUT_DIR" --nologo
+dotnet pack src/Vice/Vice.csproj -c Release -o "$OUT_DIR" --nologo
+dotnet pack src/Vice.Cli/Vice.Cli.csproj -c Release -o "$OUT_DIR" --nologo
+dotnet pack src/Vice.Mux.Cli/Vice.Mux.Cli.csproj -c Release -o "$OUT_DIR" --nologo
 
 echo "Packed version $VERSION:"
 ls -1 "$OUT_DIR"

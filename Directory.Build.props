@@ -5,7 +5,6 @@
     <NuGetAudit>true</NuGetAudit>
     <NuGetAuditMode>all</NuGetAuditMode>
     <NuGetAuditLevel>low</NuGetAuditLevel>
-    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <EnableNETAnalyzers>true</EnableNETAnalyzers>
     <Version>0.1.0</Version>
     <Authors>Infalligence Labs LLC</Authors>
