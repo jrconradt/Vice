@@ -17,6 +17,7 @@ internal sealed class DaemonMessageHandler
     private readonly JobManager _jobManager;
     private readonly SessionContext _sessionCtx;
     private readonly IConsoleWriter _nullWriter;
+    private readonly IViceLogger _logger;
     private readonly IReadOnlySet<string>? _verbAllowlist;
     private readonly DateTime _startedUtc;
     private Func<DaemonLiveness>? _livenessProbe;
@@ -44,6 +45,7 @@ internal sealed class DaemonMessageHandler
         _jobManager = jobManager;
         _sessionCtx = sessionCtx;
         _nullWriter = nullWriter;
+        _logger = app.Logger;
         _verbAllowlist = verbAllowlist;
         _startedUtc = DateTime.UtcNow;
     }
@@ -61,7 +63,7 @@ internal sealed class DaemonMessageHandler
             {
                 Vice.Audit.Emit(ViceLogLevel.Warn,
                                 $"daemon rejected disallowed verb '{deniedVerb}' over IPC control channel");
-                Vice.Log.Emit(ViceLogLevel.Warn,
+                _logger.Log(ViceLogLevel.Warn,
                               $"daemon rejected disallowed verb '{deniedVerb}' over IPC");
                 return new CommandResponse
                 {
@@ -181,7 +183,7 @@ internal sealed class DaemonMessageHandler
         return verbs;
     }
 
-    private static CommandResponse BoundResponse(int exitCode, string output, string? error)
+    private CommandResponse BoundResponse(int exitCode, string output, string? error)
     {
         var candidate = new CommandResponse
         {
@@ -196,7 +198,7 @@ internal sealed class DaemonMessageHandler
         }
 
         var byteCount = System.Text.Encoding.UTF8.GetByteCount(output);
-        Vice.Log.Emit(ViceLogLevel.Warn,
+        _logger.Log(ViceLogLevel.Warn,
                       $"daemon command output of {byteCount} bytes exceeds the {PipeProtocol.MAX_MESSAGE_BYTES}-byte IPC frame limit; returning a recoverable error instead of the full payload");
 
         return new CommandResponse

@@ -1,5 +1,6 @@
 using System.Threading.Tasks;
 using Vice.Commands;
+using Vice.Logging;
 using Vice.Plugins;
 using Xunit;
 using static Vice.Dsl;
@@ -39,7 +40,8 @@ public class PluginDispatcherRestrictedTests
             ("VICE_PLUGIN_DIR", null),
             ("XDG_DATA_HOME", fakeXdg.Path));
 
-        var found = PluginDispatcher.TryFind("vice", new[] { "foo" }, Registry(), out _, out _);
+        var found = PluginDispatcher.TryFind("vice", new[] { "foo" }, Registry(), NullViceLogger.Instance,
+out _, out _);
 
         Assert.False(found);
     }
@@ -59,8 +61,8 @@ public class PluginDispatcherRestrictedTests
             ("VICE_PLUGIN_DIR", dir.Path),
             ("XDG_DATA_HOME", null));
 
-        var found = PluginDispatcher.TryFind("vice", new[] { "foo" }, Registry(),
-            out var resolved, out var pluginArgs);
+        var found = PluginDispatcher.TryFind("vice", new[] { "foo" }, Registry(), NullViceLogger.Instance,
+out var resolved, out var pluginArgs);
 
         Assert.True(found);
         Assert.Equal(pluginPath, resolved);
@@ -84,8 +86,8 @@ public class PluginDispatcherRestrictedTests
             ("VICE_PLUGIN_DIR", null),
             ("XDG_DATA_HOME", xdg.Path));
 
-        var found = PluginDispatcher.TryFind("vice", new[] { "foo" }, Registry(),
-            out var resolved, out _);
+        var found = PluginDispatcher.TryFind("vice", new[] { "foo" }, Registry(), NullViceLogger.Instance,
+out var resolved, out _);
 
         Assert.True(found);
         Assert.Equal(pluginPath, resolved);
@@ -108,7 +110,8 @@ public class PluginDispatcherRestrictedTests
             ("VICE_PLUGIN_DIR", dir.Path),
             ("XDG_DATA_HOME", null));
 
-        var found = PluginDispatcher.TryFind("vice", new[] { "foo" }, Registry(), out _, out _);
+        var found = PluginDispatcher.TryFind("vice", new[] { "foo" }, Registry(), NullViceLogger.Instance,
+out _, out _);
 
         Assert.False(found);
     }
@@ -129,7 +132,8 @@ public class PluginDispatcherRestrictedTests
             ("VICE_PLUGIN_DIR", dir.Path),
             ("XDG_DATA_HOME", null));
 
-        var found = PluginDispatcher.TryFind("vice", new[] { "foo" }, Registry(), out _, out _);
+        var found = PluginDispatcher.TryFind("vice", new[] { "foo" }, Registry(), NullViceLogger.Instance,
+out _, out _);
 
         Assert.False(found);
     }
@@ -153,7 +157,8 @@ public class PluginDispatcherRestrictedTests
             ("VICE_PLUGIN_DIR", pluginsDir.Path),
             ("XDG_DATA_HOME", null));
 
-        var found = PluginDispatcher.TryFind("vice", new[] { "foo" }, Registry(), out _, out _);
+        var found = PluginDispatcher.TryFind("vice", new[] { "foo" }, Registry(), NullViceLogger.Instance,
+out _, out _);
 
         Assert.False(found);
     }

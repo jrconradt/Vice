@@ -11,6 +11,7 @@ internal sealed class JobManager : IJobManager
     public const int RETRY_BASE_BACKOFF_MS = 500;
 
     private readonly IReadOnlyList<IJobRunner> _runners;
+    private readonly IViceLogger _logger;
     private readonly TimeSpan _shutdownTimeout;
 
     private readonly ConcurrentDictionary<int, JobStateHolder> _jobs = new();
@@ -45,7 +46,7 @@ internal sealed class JobManager : IJobManager
         CancellationToken shutdownLinkedToken,
         TimeSpan shutdownTimeout)
     {
-        _ = logger;
+        _logger = logger ?? NullViceLogger.Instance;
         _runners = runners ?? throw new ArgumentNullException(nameof(runners));
         if (maxConcurrency <= 0)
         {
@@ -59,7 +60,8 @@ internal sealed class JobManager : IJobManager
             maxConcurrency,
             ExecuteJobAsync,
             _shutdownCts.Token,
-            _shutdownTimeout);
+            _shutdownTimeout,
+            _logger);
     }
 
     public JobManager(IReadOnlyList<IJobRunner> runners, int maxConcurrency = 3)
@@ -127,7 +129,7 @@ internal sealed class JobManager : IJobManager
         }
         catch (TimeoutException)
         {
-            Vice.Log.Emit(ViceLogLevel.Warn,
+            _logger.Log(ViceLogLevel.Warn,
                 $"job {jobId} pause drain timed out after {_shutdownTimeout}; transitioning to Failed");
             var transitioned = TryTransitionToFailed(holder, "pause drain timed out");
             _activeTasks.TryRemove(jobId, out _);
@@ -140,7 +142,7 @@ internal sealed class JobManager : IJobManager
         }
         catch (Exception ex)
         {
-            Vice.Log.Emit(ViceLogLevel.Debug, $"job {jobId} pause drain observed exception", ex);
+            _logger.Log(ViceLogLevel.Debug, $"job {jobId} pause drain observed exception", ex);
         }
     }
 
@@ -155,7 +157,7 @@ internal sealed class JobManager : IJobManager
         _activeTasks.TryGetValue(jobId, out var prior);
         if (prior is not null && !prior.IsCompleted)
         {
-            Vice.Log.Emit(ViceLogLevel.Warn,
+            _logger.Log(ViceLogLevel.Warn,
                 $"job {jobId} resume requested while prior task still in flight; ignoring.");
             return;
         }
@@ -247,17 +249,17 @@ internal sealed class JobManager : IJobManager
                 await t.WaitAsync(_shutdownTimeout).ConfigureAwait(false);
                 if (t.IsFaulted)
                 {
-                    Vice.Log.Emit(ViceLogLevel.Warn, $"job {id} faulted during shutdown drain", t.Exception);
+                    _logger.Log(ViceLogLevel.Warn, $"job {id} faulted during shutdown drain", t.Exception);
                 }
             }
             catch (TimeoutException)
             {
-                Vice.Log.Emit(ViceLogLevel.Warn,
+                _logger.Log(ViceLogLevel.Warn,
                     $"job {id} did not finish within shutdown timeout {_shutdownTimeout}.");
             }
             catch (Exception ex)
             {
-                Vice.Log.Emit(ViceLogLevel.Warn, $"job {id} drain observed exception", ex);
+                _logger.Log(ViceLogLevel.Warn, $"job {id} drain observed exception", ex);
             }
         }
 
@@ -320,7 +322,7 @@ internal sealed class JobManager : IJobManager
         }
     }
 
-    private static void SweepAbandonedPartial(JobState job)
+    private void SweepAbandonedPartial(JobState job)
     {
         if (job.Kind != JobKind.Download
             || string.IsNullOrEmpty(job.DestinationPath))
@@ -338,7 +340,7 @@ internal sealed class JobManager : IJobManager
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            Vice.Log.Emit(ViceLogLevel.Debug, $"abandoned partial cleanup failed: '{partial}'", ex);
+            _logger.Log(ViceLogLevel.Debug, $"abandoned partial cleanup failed: '{partial}'", ex);
         }
     }
 
@@ -440,7 +442,7 @@ internal sealed class JobManager : IJobManager
         var currentSnap = holder.Read();
         if (currentSnap.Status == JobStatus.Paused)
         {
-            Vice.Log.Emit(ViceLogLevel.Debug, $"job {jobId} paused (runner drained)");
+            _logger.Log(ViceLogLevel.Debug, $"job {jobId} paused (runner drained)");
             return Task.CompletedTask;
         }
 
@@ -451,7 +453,7 @@ internal sealed class JobManager : IJobManager
             TryTransitionToFailed(holder, reason);
         }
 
-        Vice.Log.Emit(ViceLogLevel.Info, $"job {jobId} cancelled");
+        _logger.Log(ViceLogLevel.Info, $"job {jobId} cancelled");
         if (!alreadyFailed)
         {
             FailJob(holder, reason);
@@ -473,7 +475,7 @@ internal sealed class JobManager : IJobManager
                 ErrorMessage = ex.Message,
             }).Attempt;
 
-            Vice.Log.Emit(ViceLogLevel.Warn,
+            _logger.Log(ViceLogLevel.Warn,
                           $"job {jobId} transient failure (attempt {attempt}/{MAX_JOB_ATTEMPTS}); scheduling retry: {ex.Message}");
             return true;
         }
@@ -487,7 +489,7 @@ internal sealed class JobManager : IJobManager
             }
             : s with { ErrorMessage = ex.Message });
 
-        Vice.Log.Emit(ViceLogLevel.Warn, $"job {jobId} failed: {ex.Message}", ex);
+        _logger.Log(ViceLogLevel.Warn, $"job {jobId} failed: {ex.Message}", ex);
         FailJob(holder, ex.Message);
         return false;
     }
@@ -535,13 +537,13 @@ internal sealed class JobManager : IJobManager
         return false;
     }
 
-    private static void EmitCompletedTelemetry(JobState job)
-        => Vice.Log.Emit(ViceLogLevel.Info,
-                         $"job terminal id={job.Id} kind={job.Kind} status=Completed source={job.Source}");
+    private void EmitCompletedTelemetry(JobState job)
+        => _logger.Log(ViceLogLevel.Info,
+                       $"job terminal id={job.Id} kind={job.Kind} status=Completed source={job.Source}");
 
-    private static void EmitFailedTelemetry(JobState job, string reason)
-        => Vice.Log.Emit(ViceLogLevel.Warn,
-                         $"job terminal id={job.Id} kind={job.Kind} status=Failed source={job.Source} error={reason}");
+    private void EmitFailedTelemetry(JobState job, string reason)
+        => _logger.Log(ViceLogLevel.Warn,
+                       $"job terminal id={job.Id} kind={job.Kind} status=Failed source={job.Source} error={reason}");
 
     private void FailJob(JobStateHolder holder, string reason)
     {
@@ -565,7 +567,7 @@ internal sealed class JobManager : IJobManager
             }
             : null);
 
-    private static void SafeCancel(CancellationTokenSource? cts)
+    private void SafeCancel(CancellationTokenSource? cts)
     {
         try
         {
@@ -573,11 +575,11 @@ internal sealed class JobManager : IJobManager
         }
         catch (ObjectDisposedException ode)
         {
-            Quietly.Swallow(ode);
+            Quietly.Swallow(ode, _logger);
         }
     }
 
-    private static void SafeDispose(CancellationTokenSource? cts)
+    private void SafeDispose(CancellationTokenSource? cts)
     {
         try
         {
@@ -585,7 +587,7 @@ internal sealed class JobManager : IJobManager
         }
         catch (ObjectDisposedException ode)
         {
-            Quietly.Swallow(ode);
+            Quietly.Swallow(ode, _logger);
         }
     }
 

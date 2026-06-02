@@ -7,8 +7,8 @@ internal sealed class ProcessSink : StreamBackedSink
 {
     private readonly Process _process;
 
-    public ProcessSink(Process process, string label)
-        : base(process.StandardInput.BaseStream, label)
+    public ProcessSink(Process process, string label, IViceLogger logger)
+        : base(process.StandardInput.BaseStream, label, logger)
     {
         _process = process;
     }
@@ -24,7 +24,7 @@ internal sealed class ProcessSink : StreamBackedSink
         }
         catch (Exception ex) when (ex is OperationCanceledException or InvalidOperationException)
         {
-            Vice.Quietly.Swallow(ex);
+            Vice.Quietly.Swallow(ex, Logger);
         }
 
         if (!gracefulExited)
@@ -35,7 +35,7 @@ internal sealed class ProcessSink : StreamBackedSink
             }
             catch (Exception killEx) when (killEx is InvalidOperationException or NotSupportedException or System.ComponentModel.Win32Exception)
             {
-                Vice.Quietly.Swallow(killEx);
+                Vice.Quietly.Swallow(killEx, Logger);
             }
 
             try
@@ -44,7 +44,7 @@ internal sealed class ProcessSink : StreamBackedSink
             }
             catch (Exception waitEx) when (waitEx is TimeoutException or InvalidOperationException or OperationCanceledException)
             {
-                Vice.Quietly.Swallow(waitEx);
+                Vice.Quietly.Swallow(waitEx, Logger);
             }
         }
 
@@ -56,8 +56,8 @@ internal sealed class ProcessSink : StreamBackedSink
     {
         if (!gracefulExited)
         {
-            Log.Emit(ViceLogLevel.Warn,
-                     $"Sink '{Label}' downstream process did not exit within the grace period and was killed.");
+            Logger.Log(ViceLogLevel.Warn,
+                       $"Sink '{Label}' downstream process did not exit within the grace period and was killed.");
             return;
         }
 
@@ -68,14 +68,14 @@ internal sealed class ProcessSink : StreamBackedSink
         }
         catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException)
         {
-            Vice.Quietly.Swallow(ex);
+            Vice.Quietly.Swallow(ex, Logger);
             return;
         }
 
         if (exitCode != 0)
         {
-            Log.Emit(ViceLogLevel.Warn,
-                     $"Sink '{Label}' downstream process exited with code {exitCode}.");
+            Logger.Log(ViceLogLevel.Warn,
+                       $"Sink '{Label}' downstream process exited with code {exitCode}.");
         }
     }
 }

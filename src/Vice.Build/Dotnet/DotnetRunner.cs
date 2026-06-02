@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using Vice.Display.Rendering;
 
 namespace Vice.Build.Dotnet;
 
@@ -8,6 +9,7 @@ internal static class DotnetRunner
     internal static async Task<int> RunAsync(
         string executable,
         bool verbose,
+        IConsoleWriter console,
         CancellationToken ct,
         params string[] args)
     {
@@ -25,7 +27,7 @@ internal static class DotnetRunner
 
         if (verbose)
         {
-            Vice.Output.Line($"{executable} {string.Join(' ', args)}");
+            console.WriteLine($"{executable} {string.Join(' ', args)}");
         }
 
         Process? started;
@@ -35,18 +37,18 @@ internal static class DotnetRunner
         }
         catch (Win32Exception ex)
         {
-            Vice.Output.Error($"{executable} not found on PATH: {ex.Message}");
+            console.WriteError($"{executable} not found on PATH: {ex.Message}");
             return 127;
         }
         catch (FileNotFoundException ex)
         {
-            Vice.Output.Error($"{executable} not found on PATH: {ex.Message}");
+            console.WriteError($"{executable} not found on PATH: {ex.Message}");
             return 127;
         }
 
         if (started is null)
         {
-            Vice.Output.Error("Failed to start dotnet process.");
+            console.WriteError("Failed to start dotnet process.");
             return 127;
         }
 
@@ -54,8 +56,8 @@ internal static class DotnetRunner
 
         await using var killOnCancel = ct.Register(() => KillTree(proc));
 
-        var stdoutTask = StreamLinesAsync(proc.StandardOutput, line => Vice.Output.Line(line));
-        var stderrTask = StreamLinesAsync(proc.StandardError, line => Vice.Output.Error(line));
+        var stdoutTask = StreamLinesAsync(proc.StandardOutput, line => console.WriteLine(line));
+        var stderrTask = StreamLinesAsync(proc.StandardError, line => console.WriteError(line));
 
         await stdoutTask.ConfigureAwait(false);
         await stderrTask.ConfigureAwait(false);

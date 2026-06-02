@@ -84,7 +84,8 @@ internal sealed class GutenbergSource : IResearchSource
     public async Task<DownloadTarget> ResolveDownloadAsync(HttpClient http,
                                                            string id,
                                                            string? format,
-                                                           CancellationToken ct)
+                                                           CancellationToken ct,
+                                                           IViceLogger logger)
     {
         var extension = format switch
         {
@@ -96,7 +97,7 @@ internal sealed class GutenbergSource : IResearchSource
         using var meta = await GetBookAsync(http, id, ct).ConfigureAwait(false);
         var url = SelectFormat(meta.RootElement, format)
             ?? throw new BadArgument($"Gutenberg book {id} has no downloadable '{format ?? "text"}' format.");
-        Vice.Log.Emit(ViceLogLevel.Debug,
+        logger.Log(ViceLogLevel.Debug,
                       $"research source {Name} resolved {id} to {url}");
         return new DownloadTarget(new Uri(url), extension);
     }

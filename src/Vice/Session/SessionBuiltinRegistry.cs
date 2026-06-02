@@ -51,14 +51,14 @@ internal sealed class SessionBuiltinRegistry
         var jobs = _jobManager.GetJobs();
         if (jobs.Count == 0)
         {
-            Vice.Output.Line("No jobs.");
+            ctx.Console.WriteLine("No jobs.");
             return Task.FromResult(0);
         }
 
         foreach (var job in jobs)
         {
             var view = JobView.From(job);
-            Vice.Output.Line($"  #{view.Id}  {view.Kind,-10} {view.Label,-30} {view.Status,-10} {view.Progress}");
+            ctx.Console.WriteLine($"  #{view.Id}  {view.Kind,-10} {view.Label,-30} {view.Status,-10} {view.Progress}");
         }
         return Task.FromResult(0);
     }
@@ -70,7 +70,7 @@ internal sealed class SessionBuiltinRegistry
             throw new BadArgument("Invalid job ID.");
         }
         await _jobManager.PauseAsync(id, ct).ConfigureAwait(false);
-        Vice.Output.Line($"Job #{id} paused.");
+        ctx.Console.WriteLine($"Job #{id} paused.");
         return 0;
     }
 
@@ -81,7 +81,7 @@ internal sealed class SessionBuiltinRegistry
             throw new BadArgument("Invalid job ID.");
         }
         await _jobManager.ResumeAsync(id, ct).ConfigureAwait(false);
-        Vice.Output.Line($"Job #{id} resumed.");
+        ctx.Console.WriteLine($"Job #{id} resumed.");
         return 0;
     }
 
@@ -92,7 +92,7 @@ internal sealed class SessionBuiltinRegistry
             throw new BadArgument("Invalid job ID.");
         }
         await _jobManager.CancelAsync(id, ct).ConfigureAwait(false);
-        Vice.Output.Line($"Job #{id} cancelled.");
+        ctx.Console.WriteLine($"Job #{id} cancelled.");
         return 0;
     }
 
@@ -101,13 +101,13 @@ internal sealed class SessionBuiltinRegistry
         var entries = _history.GetHistory();
         if (entries.Count == 0)
         {
-            Vice.Output.Line("No history.");
+            ctx.Console.WriteLine("No history.");
             return Task.FromResult(0);
         }
 
         for (var i = 0; i < entries.Count; i++)
         {
-            Vice.Output.Line($"  {i + 1}  {entries[i]}");
+            ctx.Console.WriteLine($"  {i + 1}  {entries[i]}");
         }
 
         return Task.FromResult(0);
@@ -115,7 +115,7 @@ internal sealed class SessionBuiltinRegistry
 
     private Task<int> HandleClear(CommandContext ctx, CancellationToken ct)
     {
-        Vice.Output.Write("\x1b[2J\x1b[H");
+        ctx.Console.Write("\x1b[2J\x1b[H");
         return Task.FromResult(0);
     }
 }

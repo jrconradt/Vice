@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using CsCheck;
 using Vice.Contracts;
 using Vice.Ipc;
+using Vice.Logging;
 using Xunit;
 
 namespace Vice.Tests;
@@ -97,7 +98,7 @@ public class IpcProtocolPropertyTests
                 });
             }
             return Task.FromResult<PipeMessage?>(null);
-        });
+        }, NullViceLogger.Instance);
 
         using var serverCts = new CancellationTokenSource();
         await server.StartAsync(serverCts.Token);

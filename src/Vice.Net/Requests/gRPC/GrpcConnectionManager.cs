@@ -24,11 +24,12 @@ public sealed class GrpcConnectionManager : IAsyncDisposable
     private readonly ConcurrentDictionary<Task, byte> _drainTasks = new();
     private readonly CancellationTokenSource _evictionCts = new();
     private readonly Task _evictionLoop;
+    private readonly IViceLogger _logger;
     private int _shuttingDown;
 
     public GrpcConnectionManager(IViceLogger? logger = null)
     {
-        _ = logger;
+        _logger = logger ?? NullViceLogger.Instance;
         _evictionLoop = Task.Run(() => EvictionLoopAsync(_evictionCts.Token));
     }
 
@@ -93,7 +94,7 @@ public sealed class GrpcConnectionManager : IAsyncDisposable
         }
         catch (Exception ex)
         {
-            Vice.Log.Emit(ViceLogLevel.Warn, "gRPC connection eviction loop faulted", ex);
+            _logger.Log(ViceLogLevel.Warn, "gRPC connection eviction loop faulted", ex);
         }
     }
 
@@ -104,28 +105,13 @@ public sealed class GrpcConnectionManager : IAsyncDisposable
             ? $"TLS chain validation bypassed for {endpoint} via --insecure; certificate pinned to {PinnedCertEnvVar}"
             : $"TLS certificate validation disabled for {endpoint} via --insecure flag";
 
-        if (logger is not null)
-        {
-            logger.Log(ViceLogLevel.Warn, headline);
-        }
-        else
-        {
-            Vice.Log.Emit(ViceLogLevel.Warn, headline);
-        }
+        (logger ?? NullViceLogger.Instance).Log(ViceLogLevel.Warn, headline);
 
         var lines = BuildInsecureBanner(endpoint, pinned);
-        if (writer is not null)
-        {
-            foreach (var line in lines)
-            {
-                writer.WriteError(line);
-            }
-            return;
-        }
-
+        var sink = writer ?? Vice.Display.NullConsoleWriter.Instance;
         foreach (var line in lines)
         {
-            Vice.Output.Error(line);
+            sink.WriteError(line);
         }
     }
 
@@ -229,7 +215,7 @@ public sealed class GrpcConnectionManager : IAsyncDisposable
 
     private void DrainAndDispose(string endpoint, ConnectionEntry entry, string reason)
     {
-        var task = DrainAndDisposeAsync(endpoint, entry, reason);
+        var task = DrainAndDisposeAsync(endpoint, entry, reason, _logger);
         if (!task.IsCompleted)
         {
             _drainTasks.TryAdd(task, 0);
@@ -246,7 +232,11 @@ public sealed class GrpcConnectionManager : IAsyncDisposable
         }
     }
 
-    private static async Task DrainAndDisposeAsync(string endpoint, ConnectionEntry entry, string reason)
+    private static async Task DrainAndDisposeAsync(
+        string endpoint,
+        ConnectionEntry entry,
+        string reason,
+        IViceLogger logger)
     {
         try
         {
@@ -254,7 +244,7 @@ public sealed class GrpcConnectionManager : IAsyncDisposable
         }
         catch (Exception ex)
         {
-            Vice.Log.Emit(ViceLogLevel.Warn, $"gRPC {reason} channel drain failed for {endpoint}", ex);
+            logger.Log(ViceLogLevel.Warn, $"gRPC {reason} channel drain failed for {endpoint}", ex);
         }
 
         try
@@ -263,7 +253,7 @@ public sealed class GrpcConnectionManager : IAsyncDisposable
         }
         catch (Exception ex)
         {
-            Vice.Log.Emit(ViceLogLevel.Warn, $"gRPC {reason} channel dispose failed for {endpoint}", ex);
+            logger.Log(ViceLogLevel.Warn, $"gRPC {reason} channel dispose failed for {endpoint}", ex);
         }
 
         try
@@ -272,7 +262,7 @@ public sealed class GrpcConnectionManager : IAsyncDisposable
         }
         catch (Exception ex)
         {
-            Vice.Log.Emit(ViceLogLevel.Warn, $"gRPC {reason} handler dispose failed for {endpoint}", ex);
+            logger.Log(ViceLogLevel.Warn, $"gRPC {reason} handler dispose failed for {endpoint}", ex);
         }
     }
 
@@ -318,7 +308,7 @@ public sealed class GrpcConnectionManager : IAsyncDisposable
             }
             catch (Exception ex)
             {
-                Vice.Log.Emit(ViceLogLevel.Warn, $"gRPC channel dispose for {endpoint} failed", ex);
+                _logger.Log(ViceLogLevel.Warn, $"gRPC channel dispose for {endpoint} failed", ex);
             }
         }
         return true;
@@ -358,7 +348,7 @@ public sealed class GrpcConnectionManager : IAsyncDisposable
             }
             catch (Exception ex)
             {
-                Vice.Log.Emit(ViceLogLevel.Warn, $"gRPC channel shutdown for {entry.Endpoint} failed", ex);
+                _logger.Log(ViceLogLevel.Warn, $"gRPC channel shutdown for {entry.Endpoint} failed", ex);
             }
             finally
             {
@@ -368,7 +358,7 @@ public sealed class GrpcConnectionManager : IAsyncDisposable
                 }
                 catch (Exception ex)
                 {
-                    Vice.Log.Emit(ViceLogLevel.Warn, $"gRPC channel dispose for {entry.Endpoint} failed", ex);
+                    _logger.Log(ViceLogLevel.Warn, $"gRPC channel dispose for {entry.Endpoint} failed", ex);
                 }
 
                 try
@@ -377,7 +367,7 @@ public sealed class GrpcConnectionManager : IAsyncDisposable
                 }
                 catch (Exception ex)
                 {
-                    Vice.Log.Emit(ViceLogLevel.Warn, $"gRPC handler dispose for {entry.Endpoint} failed", ex);
+                    _logger.Log(ViceLogLevel.Warn, $"gRPC handler dispose for {entry.Endpoint} failed", ex);
                 }
             }
         });
@@ -393,7 +383,7 @@ public sealed class GrpcConnectionManager : IAsyncDisposable
         }
         catch (Exception ex)
         {
-            Vice.Log.Emit(ViceLogLevel.Trace, "gRPC connection eviction cancel observed exception", ex);
+            _logger.Log(ViceLogLevel.Trace, "gRPC connection eviction cancel observed exception", ex);
         }
 
         try
@@ -405,11 +395,11 @@ public sealed class GrpcConnectionManager : IAsyncDisposable
         }
         catch (TimeoutException)
         {
-            Vice.Log.Emit(ViceLogLevel.Trace, "gRPC connection eviction loop did not finish within dispose timeout");
+            _logger.Log(ViceLogLevel.Trace, "gRPC connection eviction loop did not finish within dispose timeout");
         }
         catch (Exception ex)
         {
-            Vice.Log.Emit(ViceLogLevel.Trace, "gRPC connection eviction loop dispose observed exception", ex);
+            _logger.Log(ViceLogLevel.Trace, "gRPC connection eviction loop dispose observed exception", ex);
         }
 
         try
@@ -418,7 +408,7 @@ public sealed class GrpcConnectionManager : IAsyncDisposable
         }
         catch (Exception ex)
         {
-            Vice.Log.Emit(ViceLogLevel.Trace, "gRPC connection eviction cts dispose observed exception", ex);
+            _logger.Log(ViceLogLevel.Trace, "gRPC connection eviction cts dispose observed exception", ex);
         }
 
         await ShutdownAsync(DefaultShutdownTimeout).ConfigureAwait(false);
@@ -432,14 +422,14 @@ public sealed class GrpcConnectionManager : IAsyncDisposable
             }
             catch (Exception ex)
             {
-                Vice.Log.Emit(ViceLogLevel.Trace, "gRPC eviction drain tasks did not finish within dispose timeout", ex);
+                _logger.Log(ViceLogLevel.Trace, "gRPC eviction drain tasks did not finish within dispose timeout", ex);
             }
         }
     }
 
     private ConnectionEntry CreateEntry(string endpoint, bool plaintext, bool insecure)
     {
-        var (channel, handler) = CreateChannel(endpoint, plaintext, insecure);
+        var (channel, handler) = CreateChannel(endpoint, plaintext, insecure, _logger);
         return new ConnectionEntry
         {
             Channel = channel,
@@ -453,7 +443,7 @@ public sealed class GrpcConnectionManager : IAsyncDisposable
     }
 
     private static (GrpcChannel channel, IDisposable? handler) CreateChannel(
-        string endpoint, bool plaintext, bool insecure)
+        string endpoint, bool plaintext, bool insecure, IViceLogger logger)
     {
         var options = new GrpcChannelOptions
         {
@@ -475,7 +465,7 @@ public sealed class GrpcConnectionManager : IAsyncDisposable
         {
             handler.SslOptions = new System.Net.Security.SslClientAuthenticationOptions
             {
-                RemoteCertificateValidationCallback = BuildInsecureValidationCallback(),
+                RemoteCertificateValidationCallback = BuildInsecureValidationCallback(logger),
             };
         }
 
@@ -505,7 +495,7 @@ public sealed class GrpcConnectionManager : IAsyncDisposable
         return -1;
     }
 
-    internal static System.Net.Security.RemoteCertificateValidationCallback BuildInsecureValidationCallback()
+    internal static System.Net.Security.RemoteCertificateValidationCallback BuildInsecureValidationCallback(IViceLogger logger)
     {
         var configured = Environment.GetEnvironmentVariable(PinnedCertEnvVar);
         var parse = ParsePin(configured);
@@ -513,7 +503,7 @@ public sealed class GrpcConnectionManager : IAsyncDisposable
         {
             var message =
                 $"{PinnedCertEnvVar} is set but is not a valid SHA-256 certificate pin (expected 64 hex characters, separators ':' and ' ' allowed). Refusing to connect rather than silently accepting any certificate. Fix the pin value or unset {PinnedCertEnvVar}.";
-            Vice.Log.Emit(ViceLogLevel.Error, message);
+            logger.Log(ViceLogLevel.Error, message);
             throw new InvalidOperationException(message);
         }
 

@@ -80,10 +80,11 @@ internal sealed class ArxivSource : IResearchSource
     public Task<DownloadTarget> ResolveDownloadAsync(HttpClient http,
                                                      string id,
                                                      string? format,
-                                                     CancellationToken ct)
+                                                     CancellationToken ct,
+                                                     IViceLogger logger)
     {
         var uri = new Uri($"https://export.arxiv.org/pdf/{WebUtility.UrlEncode(id)}");
-        Vice.Log.Emit(ViceLogLevel.Debug,
+        logger.Log(ViceLogLevel.Debug,
                       $"research source {Name} resolved {id} to {uri}");
         return Task.FromResult(new DownloadTarget(uri, DefaultExtension));
     }

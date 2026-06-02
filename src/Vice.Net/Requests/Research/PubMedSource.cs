@@ -87,10 +87,11 @@ internal sealed class PubMedSource : IResearchSource
     public Task<DownloadTarget> ResolveDownloadAsync(HttpClient http,
                                                      string id,
                                                      string? format,
-                                                     CancellationToken ct)
+                                                     CancellationToken ct,
+                                                     IViceLogger logger)
     {
         var uri = new Uri($"{Base}/efetch.fcgi?db=pubmed&id={WebUtility.UrlEncode(id)}&rettype=abstract&retmode=xml{Identification()}");
-        Vice.Log.Emit(ViceLogLevel.Debug,
+        logger.Log(ViceLogLevel.Debug,
                       $"research source {Name} resolved {id} to {uri}");
         return Task.FromResult(new DownloadTarget(uri, DefaultExtension));
     }

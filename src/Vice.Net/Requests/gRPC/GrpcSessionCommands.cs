@@ -26,7 +26,7 @@ public static class GrpcSessionCommands
                 }
 
                 connections.Connect(endpoint, plaintext, insecure);
-                Vice.Output.Line($"Connected to {endpoint}.");
+                ctx.Console.WriteLine($"Connected to {endpoint}.");
                 return 0;
             });
 
@@ -38,11 +38,11 @@ public static class GrpcSessionCommands
                 var endpoint = ctx["endpoint"] ?? throw new InvalidOperationException("Target 'endpoint' not bound.");
                 if (connections.Disconnect(endpoint))
                 {
-                    Vice.Output.Line($"Disconnected from {endpoint}.");
+                    ctx.Console.WriteLine($"Disconnected from {endpoint}.");
                 }
                 else
                 {
-                    Vice.Output.Error($"Not connected to {endpoint}.");
+                    ctx.Console.WriteError($"Not connected to {endpoint}.");
                 }
 
                 return 0;
@@ -56,13 +56,13 @@ public static class GrpcSessionCommands
                 var conns = connections.GetConnections();
                 if (conns.Count == 0)
                 {
-                    Vice.Output.Line("No active connections.");
+                    ctx.Console.WriteLine("No active connections.");
                     return 0;
                 }
 
                 foreach (var conn in conns)
                 {
-                    Vice.Output.Line($"  {conn.Endpoint,-30} connected {conn.ConnectedAt:u}  {conn.CallCount} calls");
+                    ctx.Console.WriteLine($"  {conn.Endpoint,-30} connected {conn.ConnectedAt:u}  {conn.CallCount} calls");
                 }
 
                 return 0;
@@ -75,7 +75,7 @@ public static class GrpcSessionCommands
             {
                 if (ctx.NonInteractive)
                 {
-                    Vice.Output.Error("--non-interactive: refusing to start interactive bidi stream.");
+                    ctx.Console.WriteError("--non-interactive: refusing to start interactive bidi stream.");
                     return Vice.Execution.ViceExitCode.USAGE_ERROR;
                 }
 

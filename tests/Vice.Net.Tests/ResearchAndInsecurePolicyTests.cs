@@ -1,6 +1,7 @@
 using System.Net.Security;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using Vice.Logging;
 using Vice.Net.Requests.Grpc;
 using Vice.Net.Research;
 using Xunit;
@@ -22,7 +23,8 @@ public sealed class ResearchAndInsecurePolicyTests
             Client(_ => StubHttpMessageHandler.Ok("{}", "application/json")),
             "2401.00001",
             null,
-            CancellationToken.None);
+            CancellationToken.None,
+            NullViceLogger.Instance);
 
         Assert.Equal("export.arxiv.org", target.Uri.Host);
         Assert.Equal("/pdf/2401.00001", target.Uri.AbsolutePath);
@@ -96,7 +98,7 @@ public sealed class ResearchAndInsecurePolicyTests
         {
             Environment.SetEnvironmentVariable(GrpcConnectionManager.PinnedCertEnvVar, null);
 
-            var callback = GrpcConnectionManager.BuildInsecureValidationCallback();
+            var callback = GrpcConnectionManager.BuildInsecureValidationCallback(NullViceLogger.Instance);
             using var cert = SelfSigned("CN=any");
 
             Assert.True(callback(this, cert, null, SslPolicyErrors.RemoteCertificateChainErrors));
@@ -119,7 +121,7 @@ public sealed class ResearchAndInsecurePolicyTests
             var pin = Convert.ToHexString(SHA256.HashData(expected.GetRawCertData()));
             Environment.SetEnvironmentVariable(GrpcConnectionManager.PinnedCertEnvVar, pin);
 
-            var callback = GrpcConnectionManager.BuildInsecureValidationCallback();
+            var callback = GrpcConnectionManager.BuildInsecureValidationCallback(NullViceLogger.Instance);
 
             Assert.True(callback(this, expected, null, SslPolicyErrors.RemoteCertificateChainErrors));
             Assert.False(callback(this, attacker, null, SslPolicyErrors.RemoteCertificateChainErrors));

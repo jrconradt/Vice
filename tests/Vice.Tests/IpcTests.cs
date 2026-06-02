@@ -1,6 +1,7 @@
 using System.Threading;
 using System.Threading.Tasks;
 using Vice.Ipc;
+using Vice.Logging;
 using Xunit;
 
 namespace Vice.Tests;
@@ -24,7 +25,7 @@ public class IpcTests
                 });
             }
             return Task.FromResult<PipeMessage?>(null);
-        });
+        }, NullViceLogger.Instance);
 
         using var serverCts = new CancellationTokenSource();
         await server.StartAsync(serverCts.Token);
@@ -57,7 +58,7 @@ public class IpcTests
                 });
             }
             return Task.FromResult<PipeMessage?>(null);
-        });
+        }, NullViceLogger.Instance);
 
         using var serverCts = new CancellationTokenSource();
         await server.StartAsync(serverCts.Token);

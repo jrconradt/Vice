@@ -350,7 +350,7 @@ internal sealed class PipelineExecutor
                 }
                 catch (ObjectDisposedException ode)
                 {
-                    Quietly.Swallow(ode);
+                    Quietly.Swallow(ode, _logger);
                 }
             }
 
@@ -425,7 +425,7 @@ internal sealed class PipelineExecutor
         Exception? producerEx,
         Exception? consumerEx)
     {
-        var primary = StagePairReconciler.ResolvePrimary(producerEx, consumerEx);
+        var primary = StagePairReconciler.ResolvePrimary(producerEx, consumerEx, _logger);
 
         var producerDisposition = producerEx is not null
             ? HandleDisposition.Fail
@@ -453,20 +453,20 @@ internal sealed class PipelineExecutor
         return Task.Run(async () =>
         {
             Exception? failure = null;
-            Vice.Log.Emit(new CommandStarted(stageName));
+            ctx.Logger.Log(new CommandStarted(stageName));
             var sw = Stopwatch.StartNew();
             try
             {
                 var exitCode = await launcher.InvokeProducerAsync(ctx, channel, ct).ConfigureAwait(false);
                 sw.Stop();
-                Vice.Log.Emit(new CommandCompleted(stageName, exitCode, sw.Elapsed));
+                ctx.Logger.Log(new CommandCompleted(stageName, exitCode, sw.Elapsed));
                 return exitCode;
             }
             catch (Exception ex)
             {
                 sw.Stop();
                 failure = ex;
-                Vice.Log.Emit(new CommandFailed(stageName, ex, sw.Elapsed));
+                ctx.Logger.Log(new CommandFailed(stageName, ex, sw.Elapsed));
                 throw;
             }
             finally
@@ -492,26 +492,26 @@ internal sealed class PipelineExecutor
     {
         return Task.Run(async () =>
         {
-            Vice.Log.Emit(new CommandStarted(stageName));
+            ctx.Logger.Log(new CommandStarted(stageName));
             var sw = Stopwatch.StartNew();
             try
             {
                 var exitCode = await launcher.InvokeConsumerAsync(ctx, channel, linkedCts.Token).ConfigureAwait(false);
                 sw.Stop();
-                Vice.Log.Emit(new CommandCompleted(stageName, exitCode, sw.Elapsed));
+                ctx.Logger.Log(new CommandCompleted(stageName, exitCode, sw.Elapsed));
                 return exitCode;
             }
             catch (Exception ex)
             {
                 sw.Stop();
-                Vice.Log.Emit(new CommandFailed(stageName, ex, sw.Elapsed));
+                ctx.Logger.Log(new CommandFailed(stageName, ex, sw.Elapsed));
                 try
                 {
                     linkedCts.Cancel();
                 }
                 catch (ObjectDisposedException ode)
                 {
-                    Quietly.Swallow(ode);
+                    Quietly.Swallow(ode, ctx.Logger);
                 }
 
                 throw;
@@ -548,19 +548,19 @@ internal sealed class PipelineExecutor
         { CancellationToken = context.Ct };
 
         var stageName = ResolveStageName(stage, label);
-        Vice.Log.Emit(new CommandStarted(stageName));
+        ctx.Logger.Log(new CommandStarted(stageName));
         var sw = Stopwatch.StartNew();
         int exitCode;
         try
         {
             exitCode = await stage.Handler(ctx, context.Ct);
             sw.Stop();
-            Vice.Log.Emit(new CommandCompleted(stageName, exitCode, sw.Elapsed));
+            ctx.Logger.Log(new CommandCompleted(stageName, exitCode, sw.Elapsed));
         }
         catch (Exception ex)
         {
             sw.Stop();
-            Vice.Log.Emit(new CommandFailed(stageName, ex, sw.Elapsed));
+            ctx.Logger.Log(new CommandFailed(stageName, ex, sw.Elapsed));
             handle.Fail();
             throw;
         }

@@ -238,7 +238,7 @@ public sealed class ResearchSourcesTests
     {
         var gutenberg = new GutenbergSource();
         await Assert.ThrowsAsync<BadArgument>(() =>
-            gutenberg.ResolveDownloadAsync(Client(_ => ResearchSourcesTests.Json("{}")), "not-a-number", null, CancellationToken.None));
+            gutenberg.ResolveDownloadAsync(Client(_ => ResearchSourcesTests.Json("{}")), "not-a-number", null, CancellationToken.None, NullViceLogger.Instance));
     }
 
     [Fact]
@@ -249,7 +249,7 @@ public sealed class ResearchSourcesTests
             """;
 
         var gutenberg = new GutenbergSource();
-        var target = await gutenberg.ResolveDownloadAsync(Client(_ => ResearchSourcesTests.Json(Json)), "42", null, CancellationToken.None);
+        var target = await gutenberg.ResolveDownloadAsync(Client(_ => ResearchSourcesTests.Json(Json)), "42", null, CancellationToken.None, NullViceLogger.Instance);
 
         Assert.Equal("txt", target.Extension);
         Assert.Equal("https://gutenberg.org/files/42/42-0.txt", target.Uri.AbsoluteUri);
@@ -324,6 +324,6 @@ public sealed class ResearchSourcesTests
 
         var alphafold = new AlphaFoldSource();
         await Assert.ThrowsAsync<BadArgument>(() =>
-            alphafold.ResolveDownloadAsync(Client(_ => ResearchSourcesTests.Json(Json)), "P12345", "bcif", CancellationToken.None));
+            alphafold.ResolveDownloadAsync(Client(_ => ResearchSourcesTests.Json(Json)), "P12345", "bcif", CancellationToken.None, NullViceLogger.Instance));
     }
 }

@@ -19,8 +19,9 @@ public sealed class ViceApp : IViceApp, IAsyncDisposable
     private readonly string _name;
     private readonly string _version;
     private readonly string? _description;
-    private readonly CommandRegistry _registry = new();
+    private readonly CommandRegistry _registry;
     private readonly IConsoleWriter _console;
+    private readonly IOutputSink _outputSink;
     private readonly IStatusDisplay _status;
     private readonly TerminalCapabilities _capabilities;
     private readonly int _concurrency;
@@ -79,6 +80,7 @@ public sealed class ViceApp : IViceApp, IAsyncDisposable
         _jobRunners = jobRunners ?? Array.Empty<IJobRunner>();
         _sessionServices = sessionServices ?? new Dictionary<Type, object>();
         _logger = logger ?? NullViceLogger.Instance;
+        _registry = new CommandRegistry(_logger);
         _shutdownTimeout = shutdownTimeout ?? TimeSpan.FromSeconds(10);
 
         foreach (var opt in FrameworkGlobalOptions)
@@ -100,17 +102,25 @@ public sealed class ViceApp : IViceApp, IAsyncDisposable
 
         try
         {
+            IOutputSink resolvedSink;
             if (outputSink is not null)
             {
+                resolvedSink = outputSink;
                 Vice.Output.Configure(outputSink);
             }
             else if (console is null)
             {
                 var ownedSink = new ConsoleOutputSink();
                 _ownedOutputSink = ownedSink;
+                resolvedSink = ownedSink;
                 Vice.Output.Configure(ownedSink);
             }
-            _console = console ?? new ConsoleWriter();
+            else
+            {
+                resolvedSink = Vice.Output.Current;
+            }
+            _outputSink = resolvedSink;
+            _console = console ?? new ConsoleWriter(resolvedSink);
             _capabilities = capabilities ?? TerminalCapabilities.Detect();
             if (status is null && _console is ConsoleWriter
                 && !System.Console.IsErrorRedirected)
@@ -203,12 +213,12 @@ public sealed class ViceApp : IViceApp, IAsyncDisposable
     {
         if (RawArgsSplitter.ContainsPiping(args) && ShouldUseMultiProcessPipeline(args))
         {
-            return await MultiProcessPipeline.RunAsync(_name, RawArgsSplitter.Split(args), _registry, ct).ConfigureAwait(false);
+            return await MultiProcessPipeline.RunAsync(_name, RawArgsSplitter.Split(args), _registry, _logger, ct).ConfigureAwait(false);
         }
 
-        if (PluginDispatcher.TryFind(_name, args, _registry, out var pluginPath, out var pluginArgs))
+        if (PluginDispatcher.TryFind(_name, args, _registry, _logger, out var pluginPath, out var pluginArgs))
         {
-            return await PluginDispatcher.RunAsync(pluginPath, pluginArgs, ct).ConfigureAwait(false);
+            return await PluginDispatcher.RunAsync(pluginPath, pluginArgs, _logger, ct).ConfigureAwait(false);
         }
 
         var state = SessionState.For(_name);
@@ -240,7 +250,7 @@ public sealed class ViceApp : IViceApp, IAsyncDisposable
 
             var verb = seg.Args[0];
             return !verb.StartsWith("-", StringComparison.Ordinal) && _registry.FindByVerb(verb) is null
-                && PluginDispatcher.TryFindOnPath($"{_name}-{verb}", out _);
+                && PluginDispatcher.TryFindOnPath($"{_name}-{verb}", _logger, out _);
         });
     }
 
@@ -249,7 +259,7 @@ public sealed class ViceApp : IViceApp, IAsyncDisposable
         IConsoleWriter? console = null,
         IStatusDisplay? status = null,
         SessionBuiltinRegistry? builtins = null) =>
-        new(_registry, _options.Values, console ?? _console, status ?? _status, _capabilities,
+        new(_registry, _options.Values, console ?? _console, status ?? _status, _capabilities, _outputSink,
             session: session, appName: _name, version: _version, description: _description,
             logger: _logger, builtins: builtins);
 
@@ -331,7 +341,7 @@ public sealed class ViceApp : IViceApp, IAsyncDisposable
             NullConsoleWriter.Instance,
             DaemonMessageHandler.DaemonControlVerbs);
 
-        await using var server = new PipeServer(state.PipeName, handler.HandleAsync);
+        await using var server = new PipeServer(state.PipeName, handler.HandleAsync, _logger);
 
         handler.BindLiveness(() => new DaemonLiveness(
             server.IsListening,

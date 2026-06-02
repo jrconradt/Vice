@@ -28,6 +28,12 @@ internal sealed class CommandRegistry : ICommandRegistry
     }
 
     private Snapshot _snapshot = new(Array.Empty<CommandRegistration>());
+    private readonly IViceLogger _logger;
+
+    public CommandRegistry(IViceLogger? logger = null)
+    {
+        _logger = logger ?? NullViceLogger.Instance;
+    }
 
     public IReadOnlyList<CommandRegistration> Registrations => Volatile.Read(ref _snapshot).Registrations;
 
@@ -118,7 +124,7 @@ internal sealed class CommandRegistry : ICommandRegistry
                     }
                     catch (Exception ex)
                     {
-                        Vice.Log.Emit(ViceLogLevel.Warn, "streaming producer faulted during drain failure", ex);
+                        ctx.Logger.Log(ViceLogLevel.Warn, "streaming producer faulted during drain failure", ex);
                     }
                     throw;
                 }
@@ -281,7 +287,7 @@ internal sealed class CommandRegistry : ICommandRegistry
                 producerBuffer.Flush();
                 consumerBuffer.Flush();
 
-                var primary = StagePairReconciler.ResolvePrimary(producerEx, consumerEx);
+                var primary = StagePairReconciler.ResolvePrimary(producerEx, consumerEx, ctx.Logger);
                 if (primary is not null)
                 {
                     throw primary;
@@ -302,7 +308,7 @@ internal sealed class CommandRegistry : ICommandRegistry
             {
                 foreach (var msg in collisions)
                 {
-                    Vice.Log.Emit(ViceLogLevel.Warn, "command registry collision: " + msg);
+                    _logger.Log(ViceLogLevel.Warn, "command registry collision: " + msg);
                 }
             }
         }

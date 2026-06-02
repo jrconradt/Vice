@@ -16,7 +16,9 @@ internal sealed class GrpcBidiSession
     private static readonly TimeSpan MaxReconnectBackoff = TimeSpan.FromSeconds(30);
 
     private readonly GrpcConnectionManager _connections;
+    private readonly IConsoleWriter _console;
     private readonly TextReader _reader;
+    private readonly IViceLogger _logger;
 
     public GrpcBidiSession(
         GrpcConnectionManager connections,
@@ -24,16 +26,16 @@ internal sealed class GrpcBidiSession
         TextReader reader,
         IViceLogger? logger = null)
     {
-        _ = console;
-        _ = logger;
         _connections = connections;
+        _console = console;
         _reader = reader;
+        _logger = logger ?? NullViceLogger.Instance;
     }
 
     public async Task<int> RunAsync(string endpoint, string method, CancellationToken ct)
     {
         var methodDef = BuildMethod(method);
-        Vice.Output.Line($"Streaming to {method} (Ctrl+D or 'done' to end)");
+        _console.WriteLine($"Streaming to {method} (Ctrl+D or 'done' to end)");
 
         var totalSent = 0;
         var totalReceived = 0;
@@ -49,8 +51,8 @@ internal sealed class GrpcBidiSession
             }
             catch (InvalidOperationException ex)
             {
-                Vice.Log.Emit(ViceLogLevel.Warn, $"bidi session: not connected to {endpoint}", ex);
-                Vice.Output.Error($"Not connected to {endpoint}. Use 'grpc connect {endpoint}' first.");
+                _logger.Log(ViceLogLevel.Warn, $"bidi session: not connected to {endpoint}", ex);
+                _console.WriteError($"Not connected to {endpoint}. Use 'grpc connect {endpoint}' first.");
                 exitCode = Vice.Execution.ViceExitCode.FAILURE;
                 break;
             }
@@ -85,21 +87,21 @@ internal sealed class GrpcBidiSession
             attempt++;
             if (attempt > MaxReconnectAttempts)
             {
-                Vice.Output.Error($"Connection lost; gave up after {MaxReconnectAttempts} reconnect attempts.");
+                _console.WriteError($"Connection lost; gave up after {MaxReconnectAttempts} reconnect attempts.");
                 exitCode = Vice.Execution.ViceExitCode.FAILURE;
                 break;
             }
 
-            Vice.Output.Error($"Connection lost, reconnecting (attempt {attempt}/{MaxReconnectAttempts})...");
+            _console.WriteError($"Connection lost, reconnecting (attempt {attempt}/{MaxReconnectAttempts})...");
             if (!await TryReestablishAsync(endpoint, attempt, ct).ConfigureAwait(false))
             {
-                Vice.Output.Error($"Reconnect to {endpoint} failed.");
+                _console.WriteError($"Reconnect to {endpoint} failed.");
                 exitCode = Vice.Execution.ViceExitCode.FAILURE;
                 break;
             }
         }
 
-        Vice.Output.Line($"Stream closed. {totalSent} sent, {totalReceived} received.");
+        _console.WriteLine($"Stream closed. {totalSent} sent, {totalReceived} received.");
         return exitCode;
     }
 
@@ -126,7 +128,7 @@ internal sealed class GrpcBidiSession
             {
                 lease.Renew();
                 var json = System.Text.Encoding.UTF8.GetString(response);
-                Vice.Output.Line($"<- {json}");
+                _console.WriteLine($"<- {json}");
                 Interlocked.Increment(ref received);
             }
         }, ct);
@@ -136,7 +138,7 @@ internal sealed class GrpcBidiSession
         {
             while (!ct.IsCancellationRequested)
             {
-                Vice.Output.Write("grpc> ");
+                _console.Write("grpc> ");
                 string? line;
                 try
                 {
@@ -172,15 +174,15 @@ internal sealed class GrpcBidiSession
                 }
                 catch (RpcException ex) when (IsTransient(ex))
                 {
-                    Vice.Log.Emit(ViceLogLevel.Warn, "bidi session send hit transient fault", ex);
+                    _logger.Log(ViceLogLevel.Warn, "bidi session send hit transient fault", ex);
                     transientFault = true;
                     writeFaulted = true;
                     break;
                 }
                 catch (Exception ex)
                 {
-                    Vice.Log.Emit(ViceLogLevel.Warn, "bidi session send failed", ex);
-                    Vice.Output.Error($"Send failed: {ex.Message}");
+                    _logger.Log(ViceLogLevel.Warn, "bidi session send failed", ex);
+                    _console.WriteError($"Send failed: {ex.Message}");
                 }
             }
 
@@ -191,7 +193,7 @@ internal sealed class GrpcBidiSession
         }
         catch (RpcException ex) when (IsTransient(ex))
         {
-            Vice.Log.Emit(ViceLogLevel.Warn, "bidi session request stream hit transient fault", ex);
+            _logger.Log(ViceLogLevel.Warn, "bidi session request stream hit transient fault", ex);
             transientFault = true;
         }
         finally
@@ -202,28 +204,28 @@ internal sealed class GrpcBidiSession
             }
             catch (RpcException ex) when (ex.StatusCode == StatusCode.Cancelled)
             {
-                Vice.Log.Emit(ViceLogLevel.Trace, "bidi session reader cancelled");
+                _logger.Log(ViceLogLevel.Trace, "bidi session reader cancelled");
             }
             catch (OperationCanceledException)
             {
-                Vice.Log.Emit(ViceLogLevel.Trace, "bidi session reader cancelled");
+                _logger.Log(ViceLogLevel.Trace, "bidi session reader cancelled");
             }
             catch (RpcException ex) when (IsTransient(ex))
             {
                 transientFault = true;
-                Vice.Log.Emit(ViceLogLevel.Warn, "bidi session reader transient fault", ex);
+                _logger.Log(ViceLogLevel.Warn, "bidi session reader transient fault", ex);
             }
             catch (RpcException ex)
             {
                 hardFault = true;
-                Vice.Log.Emit(ViceLogLevel.Warn, "bidi session reader rpc fault", ex);
-                Vice.Output.Error($"Stream error: {ex.Status.Detail}");
+                _logger.Log(ViceLogLevel.Warn, "bidi session reader rpc fault", ex);
+                _console.WriteError($"Stream error: {ex.Status.Detail}");
             }
             catch (Exception ex)
             {
                 hardFault = true;
-                Vice.Log.Emit(ViceLogLevel.Warn, "bidi session reader fault", ex);
-                Vice.Output.Error($"Stream error: {ex.Message}");
+                _logger.Log(ViceLogLevel.Warn, "bidi session reader fault", ex);
+                _console.WriteError($"Stream error: {ex.Message}");
             }
         }
 
@@ -248,7 +250,7 @@ internal sealed class GrpcBidiSession
         }
         catch (InvalidOperationException ex)
         {
-            Vice.Log.Emit(ViceLogLevel.Warn, $"bidi session: reconnect to {endpoint} found no channel", ex);
+            _logger.Log(ViceLogLevel.Warn, $"bidi session: reconnect to {endpoint} found no channel", ex);
             return false;
         }
     }

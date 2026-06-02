@@ -33,11 +33,11 @@ public static class TeeCommands
             var opens = new Task<ISink>[specs.Count];
             for (int i = 0; i < specs.Count; i++)
             {
-                opens[i] = SinkFactory.OpenAsync(specs[i], ct).AsTask();
+                opens[i] = SinkFactory.OpenAsync(specs[i], ct, ctx.Logger).AsTask();
             }
 
             sinks.AddRange(await Task.WhenAll(opens));
-            sinks.Add(new StreamSink(Console.OpenStandardOutput(), "stdout"));
+            sinks.Add(new StreamSink(Console.OpenStandardOutput(), "stdout", ctx.Logger));
         }
         catch
         {

@@ -10,26 +10,31 @@ public static class SafeWriteRoots
 
     private static RootsCache? _rootsCache;
 
-    public static bool IsAllowed(string fullPath, out string reason)
-        => IsAllowed(fullPath, out _, out reason);
+    public static bool IsAllowed(string fullPath, out string reason, IViceLogger? logger = null)
+        => IsAllowed(fullPath, out _, out reason, logger);
 
-    public static bool IsAllowed(string fullPath, out string canonical, out string reason)
+    public static bool IsAllowed(
+        string fullPath,
+        out string canonical,
+        out string reason,
+        IViceLogger? logger = null)
     {
+        var sink = logger ?? NullViceLogger.Instance;
         reason = "";
         canonical = fullPath;
         try
         {
-            canonical = CanonicalisePath(fullPath);
+            canonical = CanonicalisePath(fullPath, sink);
         }
         catch (Exception ex)
         {
             reason = $"invalid path ({ex.Message})";
-            Vice.Log.Emit(ViceLogLevel.Warn,
-                          $"safe-write-root denied: requested='{fullPath}' reason='{reason}'");
+            sink.Log(ViceLogLevel.Warn,
+                     $"safe-write-root denied: requested='{fullPath}' reason='{reason}'");
             return false;
         }
 
-        var roots = GetCachedRoots();
+        var roots = GetCachedRoots(sink);
         foreach (var root in roots.Where(r => !string.IsNullOrEmpty(r)))
         {
             var rooted = root.EndsWith(Path.DirectorySeparatorChar) ? root : root + Path.DirectorySeparatorChar;
@@ -41,12 +46,12 @@ public static class SafeWriteRoots
         }
 
         reason = $"outside allowed roots ({string.Join(", ", roots)})";
-        Vice.Log.Emit(ViceLogLevel.Warn,
-                      $"safe-write-root denied: requested='{fullPath}' canonical='{canonical}' reason='{reason}'");
+        sink.Log(ViceLogLevel.Warn,
+                 $"safe-write-root denied: requested='{fullPath}' canonical='{canonical}' reason='{reason}'");
         return false;
     }
 
-    private static IReadOnlyList<string> GetCachedRoots()
+    private static IReadOnlyList<string> GetCachedRoots(IViceLogger logger)
     {
         var key = ComputeRootsCacheKey();
         var nowUtc = DateTime.UtcNow;
@@ -58,7 +63,7 @@ public static class SafeWriteRoots
             return cached.Roots;
         }
 
-        var fresh = new RootsCache(CollectRoots(),
+        var fresh = new RootsCache(CollectRoots(logger),
                                    key,
                                    DateTime.UtcNow.AddSeconds(CACHE_TTL_SECONDS));
         Volatile.Write(ref _rootsCache, fresh);
@@ -87,7 +92,7 @@ public static class SafeWriteRoots
     private static string ComputeRootsCacheKey()
         => string.Join("|", RootSources().Select(s => s ?? ""));
 
-    private static List<string> CollectRoots()
+    private static List<string> CollectRoots(IViceLogger logger)
     {
         var raw = RootSources();
 
@@ -103,11 +108,11 @@ public static class SafeWriteRoots
             string canonical;
             try
             {
-                canonical = CanonicalisePath(entry);
+                canonical = CanonicalisePath(entry, logger);
             }
             catch (Exception ex) when (ex is ArgumentException or PathTooLongException or IOException or System.Security.SecurityException)
             {
-                Quietly.Swallow(ex);
+                Quietly.Swallow(ex, logger);
                 continue;
             }
 
@@ -116,20 +121,20 @@ public static class SafeWriteRoots
                 resolved.Add(canonical);
                 if (string.Equals(canonical, Path.GetPathRoot(canonical), StringComparison.Ordinal))
                 {
-                    Vice.Log.Emit(ViceLogLevel.Warn,
-                                  $"safe-write-root over-broad: root='{canonical}' grants write to the entire volume");
+                    logger.Log(ViceLogLevel.Warn,
+                               $"safe-write-root over-broad: root='{canonical}' grants write to the entire volume");
                 }
             }
         }
 
-        Vice.Log.Emit(ViceLogLevel.Info,
-                      $"safe-write-root active roots: {string.Join(", ", resolved)}");
+        logger.Log(ViceLogLevel.Info,
+                   $"safe-write-root active roots: {string.Join(", ", resolved)}");
         return resolved;
     }
 
     private const int MAX_LINK_HOPS = 256;
 
-    private static string CanonicalisePath(string raw)
+    private static string CanonicalisePath(string raw, IViceLogger logger)
     {
         var full = Path.GetFullPath(raw);
         var root = Path.GetPathRoot(full) ?? "";
@@ -155,13 +160,13 @@ public static class SafeWriteRoots
             }
             catch (IOException ex)
             {
-                Quietly.Swallow(ex);
+                Quietly.Swallow(ex, logger);
                 resolved = candidate;
                 continue;
             }
             catch (UnauthorizedAccessException ex)
             {
-                Quietly.Swallow(ex);
+                Quietly.Swallow(ex, logger);
                 resolved = candidate;
                 continue;
             }

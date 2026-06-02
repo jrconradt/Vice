@@ -1,4 +1,5 @@
 using System.Buffers;
+using Vice.Logging;
 using Vice.Mux.Sinks;
 
 namespace Vice.Mux.Routing;
@@ -10,7 +11,8 @@ public static class Router
         IReadOnlyList<RouteClause> clauses,
         Stream input,
         int chunkSize,
-        CancellationToken ct)
+        CancellationToken ct,
+        IViceLogger logger)
     {
         var matched = new List<RouteClause>(clauses.Count);
         foreach (var clause in clauses)
@@ -29,7 +31,7 @@ public static class Router
         var opens = new Task<ISink>[matched.Count];
         for (int i = 0; i < matched.Count; i++)
         {
-            opens[i] = SinkFactory.OpenAsync(matched[i].SinkSpec, ct).AsTask();
+            opens[i] = SinkFactory.OpenAsync(matched[i].SinkSpec, ct, logger).AsTask();
         }
 
         var sinks = await Task.WhenAll(opens);

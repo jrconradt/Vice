@@ -14,6 +14,7 @@ public sealed partial class OutdatedCommand : IViceCommand
         return DotnetRunner.RunAsync(
             "dotnet",
             ctx.Verbose,
+            ctx.Console,
             ct,
             "list",
             canonical,

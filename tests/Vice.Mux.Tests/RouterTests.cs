@@ -1,5 +1,6 @@
 using System.Text;
 using CsCheck;
+using Vice.Logging;
 using Vice.Mux.Routing;
 using Xunit;
 
@@ -230,7 +231,7 @@ public class RouterTests
         };
         var input = new MemoryStream(Encoding.ASCII.GetBytes("payload"));
 
-        var code = await Router.RouteAsync(1, clauses, input, 4, CancellationToken.None);
+        var code = await Router.RouteAsync(1, clauses, input, 4, CancellationToken.None, NullViceLogger.Instance);
 
         Assert.Equal(0, code);
         Assert.False(File.Exists(paths.Files[0]));
@@ -248,7 +249,7 @@ public class RouterTests
         };
         var input = new MemoryStream(Encoding.ASCII.GetBytes("payload"));
 
-        var code = await Router.RouteAsync(9, clauses, input, 4, CancellationToken.None);
+        var code = await Router.RouteAsync(9, clauses, input, 4, CancellationToken.None, NullViceLogger.Instance);
 
         Assert.Equal(0, code);
         Assert.False(File.Exists(paths.Files[0]));
@@ -266,7 +267,7 @@ public class RouterTests
         };
         var input = new MemoryStream(payload);
 
-        var code = await Router.RouteAsync(5, clauses, input, 8, CancellationToken.None);
+        var code = await Router.RouteAsync(5, clauses, input, 8, CancellationToken.None, NullViceLogger.Instance);
 
         Assert.Equal(0, code);
         Assert.Equal(payload, await File.ReadAllBytesAsync(paths.Files[0]));

@@ -16,6 +16,7 @@ internal static class MultiProcessPipeline
         string appName,
         IReadOnlyList<RawArgsSplitter.Segment> segments,
         ICommandRegistry registry,
+        IViceLogger logger,
         CancellationToken ct)
     {
         if (segments.Count < 2)
@@ -23,7 +24,7 @@ internal static class MultiProcessPipeline
             throw new ArgumentException("MultiProcessPipeline requires at least 2 segments");
         }
 
-        var resolution = ResolveSegments(appName, segments, registry);
+        var resolution = ResolveSegments(appName, segments, registry, logger);
         if (resolution.Error is int resolveError)
         {
             return resolveError;
@@ -39,13 +40,13 @@ internal static class MultiProcessPipeline
             var startError = StartProcesses(segments.Count, resolved, topology, procs, ref started);
             if (startError is int startCode)
             {
-                KillAll(procs);
+                KillAll(procs, logger);
                 return startCode;
             }
 
-            var pumps = WirePumps(segments.Count, topology, procs, ct);
+            var pumps = WirePumps(segments.Count, topology, procs, logger, ct);
 
-            using var registration = ct.Register(() => KillAll(procs));
+            using var registration = ct.Register(() => KillAll(procs, logger));
 
             await Task.WhenAll(pumps).ConfigureAwait(false);
 
@@ -65,14 +66,15 @@ internal static class MultiProcessPipeline
         }
         finally
         {
-            DisposeProcesses(procs, started);
+            DisposeProcesses(procs, started, logger);
         }
     }
 
     private static SegmentResolution ResolveSegments(
         string appName,
         IReadOnlyList<RawArgsSplitter.Segment> segments,
-        ICommandRegistry registry)
+        ICommandRegistry registry,
+        IViceLogger logger)
     {
         var resolved = new ResolvedSegment[segments.Count];
         for (int i = 0; i < segments.Count; i++)
@@ -92,7 +94,7 @@ internal static class MultiProcessPipeline
                 filePath = SelfExePath();
                 procArgs = seg.Args;
             }
-            else if (PluginDispatcher.TryFindOnPath($"{appName}-{verb}", out var pluginPath))
+            else if (PluginDispatcher.TryFindOnPath($"{appName}-{verb}", logger, out var pluginPath))
             {
                 filePath = pluginPath;
                 procArgs = seg.Args.AsSpan(1).ToArray();
@@ -176,6 +178,7 @@ internal static class MultiProcessPipeline
         int count,
         PipelineTopology topology,
         Process[] procs,
+        IViceLogger logger,
         CancellationToken ct)
     {
         var pumps = new List<Task>(count);
@@ -189,14 +192,14 @@ internal static class MultiProcessPipeline
             var src = procs[i].StandardOutput.BaseStream;
             var dsts = topology.Downstreams[i].Select(j => procs[j].StandardInput.BaseStream).ToArray();
             pumps.Add(dsts.Length == 1
-                ? PumpOneAsync(src, dsts[0], ct)
-                : PumpFanAsync(src, dsts, ct));
+                ? PumpOneAsync(src, dsts[0], logger, ct)
+                : PumpFanAsync(src, dsts, logger, ct));
         }
 
         return pumps;
     }
 
-    private static void KillAll(Process[] procs)
+    private static void KillAll(Process[] procs, IViceLogger logger)
     {
         foreach (var p in procs)
         {
@@ -209,7 +212,7 @@ internal static class MultiProcessPipeline
             }
             catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException or System.ComponentModel.Win32Exception)
             {
-                Vice.Quietly.Swallow(ex);
+                Vice.Quietly.Swallow(ex, logger);
             }
         }
     }
@@ -227,7 +230,7 @@ internal static class MultiProcessPipeline
         return 0;
     }
 
-    private static void DisposeProcesses(Process[] procs, int started)
+    private static void DisposeProcesses(Process[] procs, int started, IViceLogger logger)
     {
         for (int i = 0; i < started; i++)
         {
@@ -237,12 +240,12 @@ internal static class MultiProcessPipeline
             }
             catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException)
             {
-                Vice.Log.Emit(ViceLogLevel.Warn, $"pipeline segment {i + 1} process dispose failed", ex);
+                logger.Log(ViceLogLevel.Warn, $"pipeline segment {i + 1} process dispose failed", ex);
             }
         }
     }
 
-    private static async Task PumpOneAsync(Stream src, Stream dst, CancellationToken ct)
+    private static async Task PumpOneAsync(Stream src, Stream dst, IViceLogger logger, CancellationToken ct)
     {
         var buf = new byte[65536];
         try
@@ -255,11 +258,11 @@ internal static class MultiProcessPipeline
         }
         catch (IOException ex)
         {
-            Vice.Log.Emit(ViceLogLevel.Warn, "pipeline stream pump failed", ex);
+            logger.Log(ViceLogLevel.Warn, "pipeline stream pump failed", ex);
         }
         catch (OperationCanceledException ex)
         {
-            Vice.Quietly.Swallow(ex);
+            Vice.Quietly.Swallow(ex, logger);
         }
         finally
         {
@@ -288,7 +291,7 @@ internal static class MultiProcessPipeline
         }
     }
 
-    private static async Task PumpFanAsync(Stream src, Stream[] dsts, CancellationToken ct)
+    private static async Task PumpFanAsync(Stream src, Stream[] dsts, IViceLogger logger, CancellationToken ct)
     {
         var pool = ArrayPool<byte>.Shared;
         var queues = new Channel<FanChunk?>[dsts.Length];
@@ -330,11 +333,11 @@ internal static class MultiProcessPipeline
                 }
                 catch (IOException ex)
                 {
-                    Vice.Log.Emit(ViceLogLevel.Warn, "pipeline fan-out downstream write failed", ex);
+                    logger.Log(ViceLogLevel.Warn, "pipeline fan-out downstream write failed", ex);
                 }
                 catch (OperationCanceledException ex)
                 {
-                    Vice.Quietly.Swallow(ex);
+                    Vice.Quietly.Swallow(ex, logger);
                 }
                 finally
                 {
@@ -366,11 +369,11 @@ internal static class MultiProcessPipeline
         }
         catch (IOException ex)
         {
-            Vice.Log.Emit(ViceLogLevel.Warn, "pipeline fan-out source read failed", ex);
+            logger.Log(ViceLogLevel.Warn, "pipeline fan-out source read failed", ex);
         }
         catch (OperationCanceledException ex)
         {
-            Vice.Quietly.Swallow(ex);
+            Vice.Quietly.Swallow(ex, logger);
         }
         finally
         {

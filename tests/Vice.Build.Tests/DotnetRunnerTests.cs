@@ -1,22 +1,17 @@
 using Vice.Build.Dotnet;
+using Vice.Display;
 using Xunit;
 
 namespace Vice.Build.Tests;
 
-public class DotnetRunnerTests : IDisposable
+public class DotnetRunnerTests
 {
-    private readonly IOutputSink _prior;
     private readonly CapturingSink _capture = new();
+    private readonly ConsoleWriter _console;
 
     public DotnetRunnerTests()
     {
-        _prior = Vice.Output.Current;
-        Vice.Output.Configure(_capture);
-    }
-
-    public void Dispose()
-    {
-        Vice.Output.Configure(_prior);
+        _console = new ConsoleWriter(_capture);
     }
 
     [Fact]
@@ -25,6 +20,7 @@ public class DotnetRunnerTests : IDisposable
         var code = await DotnetRunner.RunAsync(
             "vice-nonexistent-executable-7f3a9c",
             verbose: false,
+            console: _console,
             ct: default,
             "--version");
 
@@ -38,6 +34,7 @@ public class DotnetRunnerTests : IDisposable
         var code = await DotnetRunner.RunAsync(
             "dotnet",
             verbose: false,
+            console: _console,
             ct: default,
             "--version");
 
@@ -50,7 +47,7 @@ public class DotnetRunnerTests : IDisposable
     public async Task Cancellation_KillsRunningProcessPromptly()
     {
         using var cts = new CancellationTokenSource();
-        var run = DotnetRunner.RunAsync("/bin/sleep", verbose: false, ct: cts.Token, "30");
+        var run = DotnetRunner.RunAsync("/bin/sleep", verbose: false, console: _console, ct: cts.Token, "30");
 
         cts.CancelAfter(TimeSpan.FromMilliseconds(200));
 

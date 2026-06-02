@@ -2,10 +2,11 @@ using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json;
 using Vice.Contracts;
+using Vice.Display.Rendering;
 
 namespace Vice.Display;
 
-public delegate void OutputRenderer(byte[] data, Encoding encoding);
+public delegate void OutputRenderer(byte[] data, Encoding encoding, IConsoleWriter writer);
 
 public static class OutputFormatter
 {
@@ -15,7 +16,7 @@ public static class OutputFormatter
     {
         Register(OutputFormatKind.Auto, WriteText);
         Register(OutputFormatKind.Text, WriteText);
-        Register(OutputFormatKind.Hex, static (data, _) => WriteHexDump(data));
+        Register(OutputFormatKind.Hex, static (data, _, writer) => WriteHexDump(data, writer));
         Register(OutputFormatKind.Json, WriteJson);
         Register(OutputFormatKind.Jsonl, WriteJson);
         Register(OutputFormatKind.Ndjson, WriteJson);
@@ -31,22 +32,26 @@ public static class OutputFormatter
         _renderers[format] = renderer;
     }
 
-    public static void WriteResponse(byte[] data, OutputFormatKind format, Encoding encoding)
+    public static void WriteResponse(
+        byte[] data,
+        OutputFormatKind format,
+        Encoding encoding,
+        IConsoleWriter writer)
     {
         if (!_renderers.TryGetValue(format, out var render))
         {
             render = WriteText;
         }
 
-        render(data, encoding);
+        render(data, encoding, writer);
     }
 
-    private static void WriteText(byte[] data, Encoding encoding)
+    private static void WriteText(byte[] data, Encoding encoding, IConsoleWriter writer)
     {
-        Vice.Output.Line(encoding.GetString(data));
+        writer.WriteLine(encoding.GetString(data));
     }
 
-    private static void WriteHexDump(byte[] data)
+    private static void WriteHexDump(byte[] data, IConsoleWriter writer)
     {
         for (var offset = 0; offset < data.Length; offset += 16)
         {
@@ -71,11 +76,11 @@ public static class OutputFormatter
             }
             parts.Add("|");
 
-            Vice.Output.Line(string.Concat(parts));
+            writer.WriteLine(string.Concat(parts));
         }
     }
 
-    private static void WriteJson(byte[] data, Encoding encoding)
+    private static void WriteJson(byte[] data, Encoding encoding, IConsoleWriter writer)
     {
         var payload = new OutputFormatJsonPayload(
             Bytes: data.Length,
@@ -83,6 +88,6 @@ public static class OutputFormatter
             Base64: Convert.ToBase64String(data));
 
         var json = JsonSerializer.Serialize(payload, OutputFormatterJsonContext.Default.OutputFormatJsonPayload);
-        Vice.Output.Line(json);
+        writer.WriteLine(json);
     }
 }

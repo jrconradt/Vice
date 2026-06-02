@@ -15,7 +15,7 @@ internal static class StreamCountConsumer
             bytes += chunk.Length;
             return ValueTask.CompletedTask;
         }, ct);
-        Vice.Output.Line($"chunks={chunks} bytes={bytes}");
+        ctx.Console.WriteLine($"chunks={chunks} bytes={bytes}");
         return 0;
     }
 }

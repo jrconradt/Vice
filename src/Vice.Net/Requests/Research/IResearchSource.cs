@@ -1,3 +1,5 @@
+using Vice.Logging;
+
 namespace Vice.Net.Research;
 
 public sealed record SearchHit(string Id,
@@ -35,5 +37,6 @@ public interface IResearchSource
     Task<DownloadTarget> ResolveDownloadAsync(HttpClient http,
                                               string id,
                                               string? format,
-                                              CancellationToken ct);
+                                              CancellationToken ct,
+                                              IViceLogger logger);
 }

@@ -82,16 +82,20 @@ public sealed record SafeNetPolicy(
         return FromEnvironment();
     }
 
-    public static SafeNetPolicy FromEnvironment()
-        => new(
-            ParseIpList(Environment.GetEnvironmentVariable(AllowIpsEnvVar), AllowIpsEnvVar, strictDeny: false),
-            ParseIpList(Environment.GetEnvironmentVariable(DenyIpsEnvVar), DenyIpsEnvVar, strictDeny: true),
-            ParseHostList(Environment.GetEnvironmentVariable(AllowHostsEnvVar), AllowHostsEnvVar, strictDeny: false),
-            ParseHostList(Environment.GetEnvironmentVariable(DenyHostsEnvVar), DenyHostsEnvVar, strictDeny: true));
+    public static SafeNetPolicy FromEnvironment(IViceLogger? logger = null)
+    {
+        var sink = logger ?? NullViceLogger.Instance;
+        return new(
+            ParseIpList(Environment.GetEnvironmentVariable(AllowIpsEnvVar), AllowIpsEnvVar, strictDeny: false, sink),
+            ParseIpList(Environment.GetEnvironmentVariable(DenyIpsEnvVar), DenyIpsEnvVar, strictDeny: true, sink),
+            ParseHostList(Environment.GetEnvironmentVariable(AllowHostsEnvVar), AllowHostsEnvVar, strictDeny: false, sink),
+            ParseHostList(Environment.GetEnvironmentVariable(DenyHostsEnvVar), DenyHostsEnvVar, strictDeny: true, sink));
+    }
 
     private static List<IpRange> ParseIpList(string? raw,
                                              string envVar,
-                                             bool strictDeny)
+                                             bool strictDeny,
+                                             IViceLogger logger)
     {
         var result = new List<IpRange>();
         if (string.IsNullOrWhiteSpace(raw))
@@ -113,7 +117,7 @@ public sealed record SafeNetPolicy(
             }
             else
             {
-                Vice.Log.Emit(
+                logger.Log(
                     ViceLogLevel.Warn,
                     $"SafeNet: ignoring unparsable IP range '{token}' from {envVar}; this entry will not be enforced.");
             }
@@ -123,7 +127,8 @@ public sealed record SafeNetPolicy(
 
     private static List<HostPattern> ParseHostList(string? raw,
                                                    string envVar,
-                                                   bool strictDeny)
+                                                   bool strictDeny,
+                                                   IViceLogger logger)
     {
         var result = new List<HostPattern>();
         if (string.IsNullOrWhiteSpace(raw))
@@ -145,7 +150,7 @@ public sealed record SafeNetPolicy(
             }
             else
             {
-                Vice.Log.Emit(
+                logger.Log(
                     ViceLogLevel.Warn,
                     $"SafeNet: ignoring unparsable host pattern '{token}' from {envVar}; this entry will not be enforced.");
             }

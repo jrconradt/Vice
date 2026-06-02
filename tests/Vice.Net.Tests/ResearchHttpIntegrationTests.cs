@@ -96,7 +96,7 @@ public sealed class ResearchHttpIntegrationTests : IAsyncLifetime, IDisposable
         Assert.Same(source, resolved);
 
         using var http = new HttpClient();
-        var target = await resolved.ResolveDownloadAsync(http, "doc-7", null, CancellationToken.None);
+        var target = await resolved.ResolveDownloadAsync(http, "doc-7", null, CancellationToken.None, NullViceLogger.Instance);
 
         Assert.Equal("txt", target.Extension);
         Assert.Equal($"{_server.BaseUrl}blob/doc-7.txt", target.Uri.AbsoluteUri);
@@ -290,7 +290,8 @@ public sealed class ResearchHttpIntegrationTests : IAsyncLifetime, IDisposable
         public Task<DownloadTarget> ResolveDownloadAsync(HttpClient http,
                                                          string id,
                                                          string? format,
-                                                         CancellationToken ct)
+                                                         CancellationToken ct,
+                                                         IViceLogger logger)
         {
             LastFormat = format;
             var uri = new Uri($"{_baseUrl}blob/{id}.txt");
@@ -345,7 +346,8 @@ public sealed class ResearchHttpIntegrationTests : IAsyncLifetime, IDisposable
         public async Task<DownloadTarget> ResolveDownloadAsync(HttpClient http,
                                                               string id,
                                                               string? format,
-                                                              CancellationToken ct)
+                                                              CancellationToken ct,
+                                                              IViceLogger logger)
         {
             var meta = await GetMetadataAsync(http, id, ct).ConfigureAwait(false);
             var downloadUrl = meta.GetProperty("downloadUrl").GetString()

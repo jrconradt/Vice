@@ -1,3 +1,4 @@
+using Vice.Logging;
 using Vice.Net.Research;
 using Xunit;
 
@@ -79,7 +80,8 @@ public sealed class ResearchSourcesLiveTests
         var target = await gutenberg.ResolveDownloadAsync(http,
                                                           "84",
                                                           null,
-                                                          CancellationToken.None);
+                                                          CancellationToken.None,
+                                                          NullViceLogger.Instance);
 
         Assert.False(string.IsNullOrWhiteSpace(target.Extension));
         Assert.True(target.Uri.IsAbsoluteUri);

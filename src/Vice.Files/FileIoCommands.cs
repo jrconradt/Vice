@@ -155,7 +155,7 @@ public static class FileIoCommands
         CancellationToken ct)
     {
         var requested = Path.GetFullPath(ctx.Require("path"));
-        if (!SafeWriteRoots.IsAllowed(requested, out var resolved, out var reason))
+        if (!SafeWriteRoots.IsAllowed(requested, out var resolved, out var reason, ctx.Logger))
         {
             throw new BadArgument($"Destination '{requested}' is outside allowed write roots: {reason}.");
         }
@@ -187,7 +187,7 @@ public static class FileIoCommands
         }
 
         var partial = resolved + ".partial";
-        if (!SafeWriteRoots.IsAllowed(partial, out var resolvedPartial, out var partialReason))
+        if (!SafeWriteRoots.IsAllowed(partial, out var resolvedPartial, out var partialReason, ctx.Logger))
         {
             throw new BadArgument($"Temporary destination '{partial}' is outside allowed write roots: {partialReason}.");
         }
@@ -235,7 +235,7 @@ public static class FileIoCommands
 
         if (!Archiving.IsArchive(resolvedArchive))
         {
-            Vice.Output.Error($"Not a supported archive: '{resolvedArchive}'. Supported: .zip, .tar, .tar.gz, .tgz");
+            ctx.Console.WriteError($"Not a supported archive: '{resolvedArchive}'. Supported: .zip, .tar, .tar.gz, .tgz");
             return ViceExitCode.USAGE_ERROR;
         }
 
@@ -244,15 +244,15 @@ public static class FileIoCommands
         if (dest is not null)
         {
             var requestedDest = Path.GetFullPath(dest);
-            if (!SafeWriteRoots.IsAllowed(requestedDest, out resolvedDest, out var reason))
+            if (!SafeWriteRoots.IsAllowed(requestedDest, out resolvedDest, out var reason, ctx.Logger))
             {
-                Vice.Output.Error($"Destination '{dest}' refused: {reason}.");
+                ctx.Console.WriteError($"Destination '{dest}' refused: {reason}.");
                 return ViceExitCode.USAGE_ERROR;
             }
         }
 
         var root = await Archiving.ExtractAsync(resolvedArchive, resolvedDest, ctx.Logger, ct).ConfigureAwait(false);
-        Vice.Output.Line(root);
+        ctx.Console.WriteLine(root);
         return ViceExitCode.SUCCESS;
     }
 }

@@ -79,19 +79,19 @@ public static class TcpUdpCommands
         }
         catch (ArgumentException ex)
         {
-            Vice.Output.Error(ex.Message);
+            ctx.Console.WriteError(ex.Message);
             exitCode = ViceExitCode.USAGE_ERROR;
             return false;
         }
         catch (IOException ex)
         {
-            Vice.Output.Error(ex.Message);
+            ctx.Console.WriteError(ex.Message);
             exitCode = ViceExitCode.FAILURE;
             return false;
         }
         catch (UnauthorizedAccessException ex)
         {
-            Vice.Output.Error(ex.Message);
+            ctx.Console.WriteError(ex.Message);
             exitCode = ViceExitCode.FAILURE;
             return false;
         }
@@ -119,7 +119,7 @@ public static class TcpUdpCommands
 
         try
         {
-            var addresses = await SafeOutboundConnection.CheckEndpointAsync(host, timeoutCts.Token);
+            var addresses = await SafeOutboundConnection.CheckEndpointAsync(host, timeoutCts.Token, ctx.Logger);
 
             using var client = new TcpClient();
             await client.ConnectAsync(addresses, port, timeoutCts.Token);
@@ -130,12 +130,12 @@ public static class TcpUdpCommands
             client.Client.Shutdown(SocketShutdown.Send);
 
             var response = await ReadAllAsync(stream, timeoutCts.Token);
-            OutputFormatter.WriteResponse(response, format, NetworkOptions.GetEncoding(ctx));
+            OutputFormatter.WriteResponse(response, format, NetworkOptions.GetEncoding(ctx), ctx.Console);
             return ViceExitCode.SUCCESS;
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            Vice.Output.Error($"TCP timeout after {timeoutMs} ms connecting to {host}:{port}.");
+            ctx.Console.WriteError($"TCP timeout after {timeoutMs} ms connecting to {host}:{port}.");
             return ViceExitCode.FAILURE;
         }
         catch (OperationCanceledException)
@@ -144,7 +144,7 @@ public static class TcpUdpCommands
         }
         catch (SafeNetBlockedException ex)
         {
-            Vice.Output.Error(ex.Message);
+            ctx.Console.WriteError(ex.Message);
             return ViceExitCode.FAILURE;
         }
         catch (SocketException ex)
@@ -153,7 +153,7 @@ public static class TcpUdpCommands
         }
         catch (IOException ex)
         {
-            Vice.Output.Error($"TCP error talking to {host}:{port}: {ex.Message}");
+            ctx.Console.WriteError($"TCP error talking to {host}:{port}: {ex.Message}");
             return ViceExitCode.FAILURE;
         }
     }
@@ -182,7 +182,7 @@ public static class TcpUdpCommands
 
         try
         {
-            var addresses = await SafeOutboundConnection.CheckEndpointAsync(host, timeoutCts.Token);
+            var addresses = await SafeOutboundConnection.CheckEndpointAsync(host, timeoutCts.Token, ctx.Logger);
 
             using var client = new UdpClient();
             await client.Client.ConnectAsync(addresses, port, timeoutCts.Token);
@@ -194,12 +194,12 @@ public static class TcpUdpCommands
             }
 
             var result = await client.ReceiveAsync(timeoutCts.Token);
-            OutputFormatter.WriteResponse(result.Buffer, format, NetworkOptions.GetEncoding(ctx));
+            OutputFormatter.WriteResponse(result.Buffer, format, NetworkOptions.GetEncoding(ctx), ctx.Console);
             return ViceExitCode.SUCCESS;
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            Vice.Output.Error($"UDP timeout after {timeoutMs} ms waiting for {host}:{port}.");
+            ctx.Console.WriteError($"UDP timeout after {timeoutMs} ms waiting for {host}:{port}.");
             return ViceExitCode.FAILURE;
         }
         catch (OperationCanceledException)
@@ -208,7 +208,7 @@ public static class TcpUdpCommands
         }
         catch (SafeNetBlockedException ex)
         {
-            Vice.Output.Error(ex.Message);
+            ctx.Console.WriteError(ex.Message);
             return ViceExitCode.FAILURE;
         }
         catch (SocketException ex)

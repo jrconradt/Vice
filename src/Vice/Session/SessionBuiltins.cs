@@ -55,7 +55,11 @@ internal static class SessionBuiltins
         registry.Register(
             Verbs.Clear(),
             "Clear the screen",
-            (ctx, ct) => { Vice.Output.Write("\x1b[2J\x1b[H"); return Task.FromResult(0); },
+            (ctx, ct) =>
+            {
+                ctx.Console.Write("\x1b[2J\x1b[H");
+                return Task.FromResult(0);
+            },
             isBuiltin: true,
             showInHelp: true);
     }

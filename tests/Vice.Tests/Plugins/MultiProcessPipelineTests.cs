@@ -1,4 +1,5 @@
 using Vice.Commands;
+using Vice.Logging;
 using Vice.Plugins;
 using Xunit;
 
@@ -16,6 +17,7 @@ public class MultiProcessPipelineTests
             "vice",
             segments,
             registry,
+            NullViceLogger.Instance,
             CancellationToken.None);
 
         Assert.Equal(127, exit);

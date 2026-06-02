@@ -2,6 +2,7 @@ using System.Threading.Tasks;
 using Vice;
 using Vice.Commands;
 using Vice.Display;
+using Vice.Logging;
 using Vice.Plugins;
 using Xunit;
 using static Vice.Dsl;
@@ -21,19 +22,22 @@ public class PluginDispatcherTests
     [Fact]
     public void EmptyArgs_NoPlugin()
     {
-        Assert.False(PluginDispatcher.TryFind("vice", Array.Empty<string>(), Registry(), out _, out _));
+        Assert.False(PluginDispatcher.TryFind("vice", Array.Empty<string>(), Registry(), NullViceLogger.Instance,
+out _, out _));
     }
 
     [Fact]
     public void DashDashFlag_NotConsideredPlugin()
     {
-        Assert.False(PluginDispatcher.TryFind("vice", new[] { "--help" }, Registry(), out _, out _));
+        Assert.False(PluginDispatcher.TryFind("vice", new[] { "--help" }, Registry(), NullViceLogger.Instance,
+out _, out _));
     }
 
     [Fact]
     public void SingleDashFlag_NotConsideredPlugin()
     {
-        Assert.False(PluginDispatcher.TryFind("vice", new[] { "-v" }, Registry(), out _, out _));
+        Assert.False(PluginDispatcher.TryFind("vice", new[] { "-v" }, Registry(), NullViceLogger.Instance,
+out _, out _));
     }
 
     [Fact]
@@ -54,7 +58,8 @@ public class PluginDispatcherTests
             ("VICE_PLUGIN_DIR", dir.Path),
             ("XDG_DATA_HOME", null));
 
-        Assert.False(PluginDispatcher.TryFind("vice", new[] { "list" }, Registry(), out _, out _));
+        Assert.False(PluginDispatcher.TryFind("vice", new[] { "list" }, Registry(), NullViceLogger.Instance,
+out _, out _));
     }
 
     [UnixOnlyFact]
@@ -73,8 +78,8 @@ public class PluginDispatcherTests
             ("VICE_PLUGIN_DIR", dir.Path),
             ("XDG_DATA_HOME", null));
 
-        var found = PluginDispatcher.TryFind("vice", new[] { "myextra", "arg1" }, Registry(),
-            out var resolvedPath, out var pluginArgs);
+        var found = PluginDispatcher.TryFind("vice", new[] { "myextra", "arg1" }, Registry(), NullViceLogger.Instance,
+out var resolvedPath, out var pluginArgs);
 
         Assert.True(found);
         Assert.Equal(pluginPath, resolvedPath);
@@ -90,7 +95,7 @@ public class PluginDispatcherTests
         UnixPerms.Set(pluginPath,
             UnixFileMode.UserRead | UnixFileMode.UserExecute | UnixFileMode.UserWrite);
 
-        var exit = await PluginDispatcher.RunAsync(pluginPath, Array.Empty<string>(), CancellationToken.None);
+        var exit = await PluginDispatcher.RunAsync(pluginPath, Array.Empty<string>(), NullViceLogger.Instance, CancellationToken.None);
 
         Assert.Equal(42, exit);
     }
@@ -105,7 +110,7 @@ public class PluginDispatcherTests
         UnixPerms.Set(pluginPath,
             UnixFileMode.UserRead | UnixFileMode.UserExecute | UnixFileMode.UserWrite);
 
-        var exit = await PluginDispatcher.RunAsync(pluginPath, new[] { "alpha", "beta gamma" }, CancellationToken.None);
+        var exit = await PluginDispatcher.RunAsync(pluginPath, new[] { "alpha", "beta gamma" }, NullViceLogger.Instance, CancellationToken.None);
 
         Assert.Equal(0, exit);
         var captured = File.ReadAllText(outFile).Trim();

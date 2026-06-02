@@ -41,9 +41,10 @@ public static class BuildCommands
         var canonical = CanonicalPath(ctx["path"]);
         var key = BuildKey(verb, canonical);
         var verbose = ctx.Verbose;
+        var console = ctx.Console;
         return queue.GetOrStart(
             key,
-            () => DotnetRunner.RunAsync("dotnet", verbose, ct, verb, canonical),
+            () => DotnetRunner.RunAsync("dotnet", verbose, console, ct, verb, canonical),
             ct);
     }
 

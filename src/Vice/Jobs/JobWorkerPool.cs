@@ -12,6 +12,7 @@ internal sealed class JobWorkerPool
     private readonly Func<JobStateHolder, Task> _executeJob;
     private readonly CancellationToken _shutdownToken;
     private readonly TimeSpan _shutdownTimeout;
+    private readonly IViceLogger _logger;
     private readonly Channel<JobStateHolder> _workChannel;
     private readonly Task[] _workers;
     private readonly ConcurrentDictionary<int, byte> _liveWorkers = new();
@@ -28,7 +29,8 @@ internal sealed class JobWorkerPool
         int maxConcurrency,
         Func<JobStateHolder, Task> executeJob,
         CancellationToken shutdownToken,
-        TimeSpan shutdownTimeout)
+        TimeSpan shutdownTimeout,
+        IViceLogger logger)
     {
         if (maxConcurrency <= 0)
         {
@@ -38,6 +40,7 @@ internal sealed class JobWorkerPool
         _executeJob = executeJob ?? throw new ArgumentNullException(nameof(executeJob));
         _shutdownToken = shutdownToken;
         _shutdownTimeout = shutdownTimeout;
+        _logger = logger ?? NullViceLogger.Instance;
         _configuredConcurrency = maxConcurrency;
         for (var i = 0; i < MAX_WORKER_RESTARTS; i++)
         {
@@ -72,11 +75,11 @@ internal sealed class JobWorkerPool
         }
         catch (TimeoutException)
         {
-            Vice.Log.Emit(ViceLogLevel.Warn, $"worker pool did not drain within {_shutdownTimeout}");
+            _logger.Log(ViceLogLevel.Warn, $"worker pool did not drain within {_shutdownTimeout}");
         }
         catch (Exception ex)
         {
-            Vice.Log.Emit(ViceLogLevel.Warn, "worker pool drain observed exception", ex);
+            _logger.Log(ViceLogLevel.Warn, "worker pool drain observed exception", ex);
         }
     }
 
@@ -107,17 +110,17 @@ internal sealed class JobWorkerPool
                 }
                 catch (Exception ex)
                 {
-                    Vice.Log.Emit(ViceLogLevel.Warn, $"job {jobId} worker observed unhandled exception", ex);
+                    _logger.Log(ViceLogLevel.Warn, $"job {jobId} worker observed unhandled exception", ex);
                 }
             }
 
             _liveWorkers.TryRemove(slot, out _);
-            Vice.Log.Emit(ViceLogLevel.Trace, $"job worker slot {slot} completed; work channel closed");
+            _logger.Log(ViceLogLevel.Trace, $"job worker slot {slot} completed; work channel closed");
         }
         catch (OperationCanceledException)
         {
             _liveWorkers.TryRemove(slot, out _);
-            Vice.Log.Emit(ViceLogLevel.Trace, $"job worker slot {slot} cancelled");
+            _logger.Log(ViceLogLevel.Trace, $"job worker slot {slot} cancelled");
         }
         catch (Exception ex)
         {
@@ -131,7 +134,7 @@ internal sealed class JobWorkerPool
         if (_shutdownToken.IsCancellationRequested
             || _workChannel.Reader.Completion.IsCompleted)
         {
-            Vice.Log.Emit(ViceLogLevel.Warn,
+            _logger.Log(ViceLogLevel.Warn,
                           $"POOL_WORKER_TERMINATED job worker slot {slot} terminated during shutdown",
                           ex);
             return;
@@ -139,13 +142,13 @@ internal sealed class JobWorkerPool
 
         if (!_restartTokens.TryDequeue(out _))
         {
-            Vice.Log.Emit(ViceLogLevel.Error,
+            _logger.Log(ViceLogLevel.Error,
                           $"POOL_DEGRADED job worker slot {slot} terminated and restart budget of {MAX_WORKER_RESTARTS} is exhausted; {_liveWorkers.Count} of {_configuredConcurrency} workers live",
                           ex);
             return;
         }
 
-        Vice.Log.Emit(ViceLogLevel.Error,
+        _logger.Log(ViceLogLevel.Error,
                       $"POOL_WORKER_TERMINATED job worker slot {slot} terminated with exception; restarting; {_liveWorkers.Count} of {_configuredConcurrency} workers live before restart",
                       ex);
 

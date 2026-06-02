@@ -1,5 +1,6 @@
 using System.Buffers;
 using BenchmarkDotNet.Attributes;
+using Vice.Logging;
 using Vice.Mux.Routing;
 
 namespace Vice.Benchmarks;
@@ -51,7 +52,7 @@ public class BufferedIoBenchmarks
             new RouteClause(Condition.Any, $"file:{_destPath}"),
         };
 
-        return await Router.RouteAsync(0, clauses, input, ChunkSize, CancellationToken.None).ConfigureAwait(false);
+        return await Router.RouteAsync(0, clauses, input, ChunkSize, CancellationToken.None, NullViceLogger.Instance).ConfigureAwait(false);
     }
 
     [Benchmark]

@@ -51,30 +51,30 @@ public static class GrpcReflectionCommands
             if (ctx.WantsJson)
             {
                 var quoted = services.Select(s => $"\"{JsonEncodedText.Encode(s)}\"");
-                Vice.Output.Line($"[{string.Join(",", quoted)}]");
+                ctx.Console.WriteLine($"[{string.Join(",", quoted)}]");
                 return ViceExitCode.SUCCESS;
             }
 
             if (services.Count == 0)
             {
-                Vice.Output.Line("No services exposed via reflection.");
+                ctx.Console.WriteLine("No services exposed via reflection.");
                 return ViceExitCode.SUCCESS;
             }
 
             foreach (var service in services)
             {
-                Vice.Output.Line(Sanitize(service));
+                ctx.Console.WriteLine(Sanitize(service));
             }
 
             return ViceExitCode.SUCCESS;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            return Interrupted(endpoint);
+            return Interrupted(ctx, endpoint);
         }
         catch (Exception ex)
         {
-            return Fail(endpoint, ex);
+            return Fail(ctx, endpoint, ex);
         }
     }
 
@@ -92,34 +92,34 @@ public static class GrpcReflectionCommands
             var descriptor = FindService(pool, service);
             if (descriptor is null)
             {
-                Vice.Output.Error($"Service '{service}' not found on {endpoint}.");
+                ctx.Console.WriteError($"Service '{service}' not found on {endpoint}.");
                 return ViceExitCode.FAILURE;
             }
 
             if (ctx.WantsJson)
             {
-                Vice.Output.Line(DescribeServiceJson(descriptor));
+                ctx.Console.WriteLine(DescribeServiceJson(descriptor));
                 return ViceExitCode.SUCCESS;
             }
 
-            Vice.Output.Line($"service {Sanitize(descriptor.FullName)} {{");
+            ctx.Console.WriteLine($"service {Sanitize(descriptor.FullName)} {{");
             foreach (var method in descriptor.Methods)
             {
                 var clientStream = method.IsClientStreaming ? "stream " : string.Empty;
                 var serverStream = method.IsServerStreaming ? "stream " : string.Empty;
-                Vice.Output.Line($"  rpc {Sanitize(method.Name)}({clientStream}{Sanitize(method.InputType.FullName)}) returns ({serverStream}{Sanitize(method.OutputType.FullName)});");
+                ctx.Console.WriteLine($"  rpc {Sanitize(method.Name)}({clientStream}{Sanitize(method.InputType.FullName)}) returns ({serverStream}{Sanitize(method.OutputType.FullName)});");
             }
 
-            Vice.Output.Line("}");
+            ctx.Console.WriteLine("}");
             return ViceExitCode.SUCCESS;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            return Interrupted(endpoint);
+            return Interrupted(ctx, endpoint);
         }
         catch (Exception ex)
         {
-            return Fail(endpoint, ex);
+            return Fail(ctx, endpoint, ex);
         }
     }
 
@@ -133,7 +133,7 @@ public static class GrpcReflectionCommands
         var payload = ctx["data"] ?? "{}";
         if (!GrpcMethodPath.TryParse(method, out var path))
         {
-            Vice.Output.Error($"Invalid method '{Sanitize(method)}'. Expected: package.Service/Method");
+            ctx.Console.WriteError($"Invalid method '{Sanitize(method)}'. Expected: package.Service/Method");
             return ViceExitCode.USAGE_ERROR;
         }
 
@@ -148,7 +148,7 @@ public static class GrpcReflectionCommands
             var methodDescriptor = service?.FindMethodByName(methodName);
             if (methodDescriptor is null)
             {
-                Vice.Output.Error($"Method '{methodName}' not found on service '{serviceName}'.");
+                ctx.Console.WriteError($"Method '{methodName}' not found on service '{serviceName}'.");
                 return ViceExitCode.FAILURE;
             }
 
@@ -166,11 +166,11 @@ public static class GrpcReflectionCommands
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            return Interrupted(endpoint);
+            return Interrupted(ctx, endpoint);
         }
         catch (Exception ex)
         {
-            return Fail(endpoint, ex);
+            return Fail(ctx, endpoint, ex);
         }
     }
 
@@ -196,7 +196,7 @@ public static class GrpcReflectionCommands
 
     private static void WarnPlaintext(CommandContext ctx, string endpoint)
     {
-        Vice.Log.Emit(
+        ctx.Logger.Log(
             ViceLogLevel.Warn,
             $"plaintext gRPC transport for {endpoint} via --plaintext flag; request bodies and metadata (auth tokens) are sent unencrypted");
         if (ctx.Quiet)
@@ -399,7 +399,7 @@ public static class GrpcReflectionCommands
     private static void WriteResponse(byte[] message, MessageDescriptor outputType, CommandContext ctx)
     {
         _ = ctx;
-        Vice.Output.Line(Sanitize(ProtobufJsonTranscoder.ProtobufToJson(message, outputType)));
+        ctx.Console.WriteLine(Sanitize(ProtobufJsonTranscoder.ProtobufToJson(message, outputType)));
     }
 
     private static MethodType MethodTypeFor(MethodDescriptor descriptor)
@@ -607,38 +607,38 @@ public static class GrpcReflectionCommands
         return new string(buffer.ToArray());
     }
 
-    private static int Interrupted(string endpoint)
+    private static int Interrupted(CommandContext ctx, string endpoint)
     {
-        Vice.Log.Emit(ViceLogLevel.Trace, $"gRPC reflection on {endpoint} cancelled");
+        ctx.Logger.Log(ViceLogLevel.Trace, $"gRPC reflection on {endpoint} cancelled");
         return ViceExitCode.INTERRUPTED;
     }
 
-    private static int Fail(string endpoint, Exception ex)
+    private static int Fail(CommandContext ctx, string endpoint, Exception ex)
     {
         switch (ex)
         {
             case ViceError viceError:
                 {
-                    Vice.Log.Emit(viceError.LogLevel, $"gRPC reflection on {endpoint} failed", viceError);
-                    Vice.Output.Error(ex.Message);
+                    ctx.Logger.Log(viceError.LogLevel, $"gRPC reflection on {endpoint} failed", viceError);
+                    ctx.Console.WriteError(ex.Message);
                     return viceError.ExitCode;
                 }
             case ArgumentException argument:
                 {
-                    Vice.Log.Emit(ViceLogLevel.Warn, $"gRPC reflection on {endpoint} failed", argument);
-                    Vice.Output.Error(argument.Message);
+                    ctx.Logger.Log(ViceLogLevel.Warn, $"gRPC reflection on {endpoint} failed", argument);
+                    ctx.Console.WriteError(argument.Message);
                     return ViceExitCode.USAGE_ERROR;
                 }
             case RpcException rpc:
                 {
-                    Vice.Log.Emit(ViceLogLevel.Warn, $"gRPC call to {endpoint} faulted", rpc);
-                    Vice.Output.Error($"gRPC error ({rpc.StatusCode}): {rpc.Status.Detail}");
+                    ctx.Logger.Log(ViceLogLevel.Warn, $"gRPC call to {endpoint} faulted", rpc);
+                    ctx.Console.WriteError($"gRPC error ({rpc.StatusCode}): {rpc.Status.Detail}");
                     return ViceExitCode.FAILURE;
                 }
             default:
                 {
-                    Vice.Log.Emit(ViceLogLevel.Error, $"gRPC operation on {endpoint} faulted", ex);
-                    Vice.Output.Error(ex.Message);
+                    ctx.Logger.Log(ViceLogLevel.Error, $"gRPC operation on {endpoint} faulted", ex);
+                    ctx.Console.WriteError(ex.Message);
                     return ViceExitCode.FAILURE;
                 }
         }

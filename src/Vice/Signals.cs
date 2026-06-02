@@ -7,7 +7,7 @@ public static class Signals
 {
     public static CancellationTokenSource HookGracefulShutdown(IConsoleWriter? console = null)
     {
-        var writer = console ?? new ConsoleWriter();
+        var writer = console ?? new ConsoleWriter(Output.Current);
         var cts = new ShutdownTokenSource();
         int count = 0;
         ConsoleCancelEventHandler handler = (_, e) =>

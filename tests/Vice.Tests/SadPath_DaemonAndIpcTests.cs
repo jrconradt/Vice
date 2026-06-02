@@ -5,6 +5,7 @@ using Vice;
 using Vice.Contracts;
 using Vice.Display;
 using Vice.Ipc;
+using Vice.Logging;
 using Vice.Session;
 using Xunit;
 
@@ -49,7 +50,7 @@ public class SadPath_DaemonAndIpcTests
             return msg is CommandMessage cmd
                 ? new CommandResponse { ExitCode = 0, Output = cmd.CommandLine }
                 : null;
-        });
+        }, NullViceLogger.Instance);
         using var cts = new CancellationTokenSource();
         await server.StartAsync(cts.Token);
 
@@ -86,7 +87,7 @@ public class SadPath_DaemonAndIpcTests
                 ExitCode = 0,
                 Output = bigPayload
             });
-        });
+        }, NullViceLogger.Instance);
         using var cts = new CancellationTokenSource();
         await server.StartAsync(cts.Token);
 

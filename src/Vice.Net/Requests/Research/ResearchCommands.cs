@@ -111,16 +111,16 @@ public static class ResearchCommands
             var hits = await RunSearchAsync(ctx, source, query, ct).ConfigureAwait(false);
             if (hits.Count == 0)
             {
-                Vice.Output.Line($"No results for '{query}' on {source.Name}.");
+                ctx.Console.WriteLine($"No results for '{query}' on {source.Name}.");
                 return ViceExitCode.SUCCESS;
             }
 
             foreach (var hit in hits)
             {
-                Vice.Output.Line($"{hit.Id,-16}  {Truncate(hit.Title, 70)}");
+                ctx.Console.WriteLine($"{hit.Id,-16}  {Truncate(hit.Title, 70)}");
                 if (hit.Summary.Length > 0)
                 {
-                    Vice.Output.Line($"                  {Truncate(hit.Summary, 70)}");
+                    ctx.Console.WriteLine($"                  {Truncate(hit.Summary, 70)}");
                 }
             }
 
@@ -150,16 +150,16 @@ public static class ResearchCommands
             using var cts = LinkTimeout(ctx, ct);
 
             var result = await source.FetchAsync(Http, id, cts.Token).ConfigureAwait(false);
-            Vice.Output.Line($"[{result.Id}] {result.Title}");
+            ctx.Console.WriteLine($"[{result.Id}] {result.Title}");
             foreach (var line in result.MetadataLines)
             {
-                Vice.Output.Line(line);
+                ctx.Console.WriteLine(line);
             }
 
             if (result.Preview.Length > 0)
             {
-                Vice.Output.Line();
-                Vice.Output.Line(result.Preview);
+                ctx.Console.WriteLine();
+                ctx.Console.WriteLine(result.Preview);
             }
 
             return ViceExitCode.SUCCESS;
@@ -189,18 +189,18 @@ public static class ResearchCommands
             var timeout = ResearchOptions.GetTimeout(ctx);
             using var cts = LinkTimeout(ctx, ct);
 
-            var target = await source.ResolveDownloadAsync(Http, id, format, cts.Token).ConfigureAwait(false);
+            var target = await source.ResolveDownloadAsync(Http, id, format, cts.Token, ctx.Logger).ConfigureAwait(false);
             var destination = ResearchDownloader.BuildDestinationPath(ctx["path"], source.Name, id, target.Extension);
 
             if (TrySubmitJob(ctx, source.Name, id, destination, target.Extension, format, timeout, ct, out var jobTask))
             {
-                Vice.Output.Line($"Queued download {source.Name}/{id} -> {destination}.");
+                ctx.Console.WriteLine($"Queued download {source.Name}/{id} -> {destination}.");
                 return await jobTask.ConfigureAwait(false);
             }
 
-            var reporter = ctx.Quiet ? null : ProgressLine($"{source.Name}/{id}");
+            var reporter = ctx.Quiet ? null : ProgressLine(ctx, $"{source.Name}/{id}");
             await ResearchDownloader.DownloadToFileAsync(Http, target.Uri, destination, reporter, cts.Token).ConfigureAwait(false);
-            Vice.Output.Line($"Saved {source.Name}/{id} -> {destination}.");
+            ctx.Console.WriteLine($"Saved {source.Name}/{id} -> {destination}.");
             return ViceExitCode.SUCCESS;
         }
         catch (OperationCanceledException ex) when (!ct.IsCancellationRequested)
@@ -237,7 +237,7 @@ public static class ResearchCommands
             var hits = await RunSearchAsync(ctx, source, query, cts.Token).ConfigureAwait(false);
             if (hits.Count == 0)
             {
-                Vice.Output.Line($"No results for '{query}' on {source.Name}.");
+                ctx.Console.WriteLine($"No results for '{query}' on {source.Name}.");
                 return ViceExitCode.SUCCESS;
             }
 
@@ -247,45 +247,45 @@ public static class ResearchCommands
                 cts.Token.ThrowIfCancellationRequested();
                 try
                 {
-                    var target = await source.ResolveDownloadAsync(Http, hit.Id, format, cts.Token).ConfigureAwait(false);
+                    var target = await source.ResolveDownloadAsync(Http, hit.Id, format, cts.Token, ctx.Logger).ConfigureAwait(false);
                     var destination = ResearchDownloader.BuildDestinationPath(directory, source.Name, hit.Id, target.Extension);
 
                     if (TrySubmitJob(ctx, source.Name, hit.Id, destination, target.Extension, format, timeout, ct, out var jobTask))
                     {
-                        Vice.Output.Line($"Queued {source.Name}/{hit.Id} -> {destination}.");
+                        ctx.Console.WriteLine($"Queued {source.Name}/{hit.Id} -> {destination}.");
                         var exitCode = await jobTask.ConfigureAwait(false);
                         if (exitCode != ViceExitCode.SUCCESS)
                         {
                             failures++;
-                            Vice.Output.Error($"Failed {source.Name}/{hit.Id}: queued download exited with code {exitCode}.");
+                            ctx.Console.WriteError($"Failed {source.Name}/{hit.Id}: queued download exited with code {exitCode}.");
                         }
 
                         continue;
                     }
 
-                    var reporter = ctx.Quiet ? null : ProgressLine($"{source.Name}/{hit.Id}");
+                    var reporter = ctx.Quiet ? null : ProgressLine(ctx, $"{source.Name}/{hit.Id}");
                     await ResearchDownloader.DownloadToFileAsync(Http, target.Uri, destination, reporter, cts.Token).ConfigureAwait(false);
-                    Vice.Output.Line($"Saved {source.Name}/{hit.Id} -> {destination}.");
+                    ctx.Console.WriteLine($"Saved {source.Name}/{hit.Id} -> {destination}.");
                 }
                 catch (OperationCanceledException) when (!ct.IsCancellationRequested)
                 {
                     failures++;
-                    Vice.Output.Error($"Failed {source.Name}/{hit.Id}: request timed out.");
+                    ctx.Console.WriteError($"Failed {source.Name}/{hit.Id}: request timed out.");
                 }
                 catch (HttpRequestException ex)
                 {
                     failures++;
-                    Vice.Output.Error($"Failed {source.Name}/{hit.Id}: {ex.Message}");
+                    ctx.Console.WriteError($"Failed {source.Name}/{hit.Id}: {ex.Message}");
                 }
                 catch (IOException ex)
                 {
                     failures++;
-                    Vice.Output.Error($"Failed {source.Name}/{hit.Id}: {ex.Message}");
+                    ctx.Console.WriteError($"Failed {source.Name}/{hit.Id}: {ex.Message}");
                 }
                 catch (UnauthorizedAccessException ex)
                 {
                     failures++;
-                    Vice.Output.Error($"Failed {source.Name}/{hit.Id}: {ex.Message}");
+                    ctx.Console.WriteError($"Failed {source.Name}/{hit.Id}: {ex.Message}");
                 }
             }
 
@@ -321,9 +321,9 @@ public static class ResearchCommands
             var fileName = RawDownloadFileName(uri);
             var destination = ResearchDownloader.BuildUrlDestinationPath(ctx["path"], fileName);
 
-            var reporter = ctx.Quiet ? null : ProgressLine(uri.Host);
+            var reporter = ctx.Quiet ? null : ProgressLine(ctx, uri.Host);
             await ResearchDownloader.DownloadToFileAsync(Http, uri, destination, reporter, cts.Token).ConfigureAwait(false);
-            Vice.Output.Line($"Saved {uri} -> {destination}.");
+            ctx.Console.WriteLine($"Saved {uri} -> {destination}.");
             return ViceExitCode.SUCCESS;
         }
         catch (OperationCanceledException ex) when (!ct.IsCancellationRequested)
@@ -464,12 +464,12 @@ public static class ResearchCommands
         return cts;
     }
 
-    private static IProgress<DownloadProgress> ProgressLine(string label)
+    private static IProgress<DownloadProgress> ProgressLine(CommandContext ctx, string label)
     {
         return new Progress<DownloadProgress>(p =>
         {
             var pct = p.Percentage is { } v ? $"{v:0.0}%" : p.FormatSize();
-            Vice.Output.Write($"\r{label}: {pct}      ");
+            ctx.Console.Write($"\r{label}: {pct}      ");
         });
     }
 

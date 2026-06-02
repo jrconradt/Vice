@@ -40,13 +40,17 @@ public static class SafeOutboundConnection
         }
     }
 
-    public static async ValueTask<IPAddress[]> CheckEndpointAsync(string host, CancellationToken ct)
+    public static async ValueTask<IPAddress[]> CheckEndpointAsync(
+        string host,
+        CancellationToken ct,
+        Vice.Logging.IViceLogger? logger = null)
     {
+        var sink = logger ?? Vice.Logging.NullViceLogger.Instance;
         var policy = Policy;
         var hostDecision = policy.EvaluateHost(host);
         if (hostDecision == SafeNetDecision.Refuse)
         {
-            Vice.Log.Emit(
+            sink.Log(
                 Vice.Logging.ViceLogLevel.Warn,
                 $"SafeNet: refused outbound connection to '{host}': host on deny list.");
             throw new SafeNetBlockedException(
@@ -69,7 +73,7 @@ public static class SafeOutboundConnection
             var ipDecision = policy.EvaluateAddress(addr);
             if (ipDecision == SafeNetDecision.Refuse)
             {
-                Vice.Log.Emit(
+                sink.Log(
                     Vice.Logging.ViceLogLevel.Warn,
                     $"SafeNet: refused outbound connection to '{host}': address {addr} on deny list.");
                 throw new SafeNetBlockedException(
@@ -83,7 +87,7 @@ public static class SafeOutboundConnection
 
             if (IsPrivateOrLocal(addr))
             {
-                Vice.Log.Emit(
+                sink.Log(
                     Vice.Logging.ViceLogLevel.Warn,
                     $"SafeNet: refused outbound connection to '{host}': resolves to private/local address {addr}.");
                 throw new SafeNetBlockedException(

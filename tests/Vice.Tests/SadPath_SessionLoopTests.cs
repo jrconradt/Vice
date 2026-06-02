@@ -34,7 +34,7 @@ public class SadPath_SessionLoopTests
 
         var executor = new CommandExecutor(
             registry, TestOptions.All, console,
-            NullStatusDisplay.Instance, TerminalCapabilities.None,
+            NullStatusDisplay.Instance, TerminalCapabilities.None, NullOutputSink.Instance,
             builtins: builtins);
 
         await jobs.SubmitAsync(JobDescriptor.ForDownload("s", "r", "/d", ".x"), default);
@@ -64,7 +64,7 @@ public class SadPath_SessionLoopTests
         var builtins = new SessionBuiltinRegistry(jobs, history);
         var executor = new CommandExecutor(
             registry, TestOptions.All, console,
-            NullStatusDisplay.Instance, TerminalCapabilities.None,
+            NullStatusDisplay.Instance, TerminalCapabilities.None, NullOutputSink.Instance,
             builtins: builtins);
 
         var loop = new SessionLoop(executor, jobs, history, console,
@@ -96,7 +96,7 @@ public class SadPath_SessionLoopTests
         var builtins = new SessionBuiltinRegistry(jobs, history);
         var executor = new CommandExecutor(
             registry, TestOptions.All, console,
-            NullStatusDisplay.Instance, TerminalCapabilities.None,
+            NullStatusDisplay.Instance, TerminalCapabilities.None, NullOutputSink.Instance,
             builtins: builtins);
 
         var loop = new SessionLoop(executor, jobs, history, console,

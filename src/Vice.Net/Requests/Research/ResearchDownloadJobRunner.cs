@@ -12,6 +12,7 @@ public sealed class ResearchDownloadJobRunner : IJobRunner
 
     private readonly ResearchSourceRegistry _registry;
     private readonly Func<HttpClient> _httpFactory;
+    private readonly IViceLogger _logger;
 
     public ResearchDownloadJobRunner()
         : this(new ResearchSourceRegistry(), ResearchHttp.Create)
@@ -19,10 +20,12 @@ public sealed class ResearchDownloadJobRunner : IJobRunner
     }
 
     internal ResearchDownloadJobRunner(ResearchSourceRegistry registry,
-                                       Func<HttpClient> httpFactory)
+                                       Func<HttpClient> httpFactory,
+                                       IViceLogger? logger = null)
     {
         _registry = registry ?? throw new ArgumentNullException(nameof(registry));
         _httpFactory = httpFactory ?? throw new ArgumentNullException(nameof(httpFactory));
+        _logger = logger ?? NullViceLogger.Instance;
     }
 
     public bool CanHandle(JobKind kind) => kind == JobKind.Download;
@@ -39,18 +42,18 @@ public sealed class ResearchDownloadJobRunner : IJobRunner
         DownloadTarget target;
         try
         {
-            target = await source.ResolveDownloadAsync(http, job.ResourceId, format, ct).ConfigureAwait(false);
+            target = await source.ResolveDownloadAsync(http, job.ResourceId, format, ct, _logger).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            Vice.Log.Emit(ViceLogLevel.Warn,
-                          $"research download could not resolve upstream for {job.Source}/{job.ResourceId}",
-                          ex);
+            _logger.Log(ViceLogLevel.Warn,
+                        $"research download could not resolve upstream for {job.Source}/{job.ResourceId}",
+                        ex);
             throw;
         }
 
-        Vice.Log.Emit(ViceLogLevel.Debug,
-                      $"research download resolved {job.Source}/{job.ResourceId} to {target.Uri} (resume offset {job.BytesDownloaded}) -> {job.DestinationPath}");
+        _logger.Log(ViceLogLevel.Debug,
+                    $"research download resolved {job.Source}/{job.ResourceId} to {target.Uri} (resume offset {job.BytesDownloaded}) -> {job.DestinationPath}");
 
         var reporter = new Progress<DownloadProgress>(p =>
         {
@@ -67,15 +70,16 @@ public sealed class ResearchDownloadJobRunner : IJobRunner
                                                        job.DestinationPath,
                                                        job.BytesDownloaded,
                                                        reporter,
-                                                       ct).ConfigureAwait(false);
-            Vice.Log.Emit(ViceLogLevel.Debug,
-                          $"research download completed {job.Source}/{job.ResourceId} from {target.Uri}: wrote {written} bytes to {job.DestinationPath}");
+                                                       ct,
+                                                       _logger).ConfigureAwait(false);
+            _logger.Log(ViceLogLevel.Debug,
+                        $"research download completed {job.Source}/{job.ResourceId} from {target.Uri}: wrote {written} bytes to {job.DestinationPath}");
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            Vice.Log.Emit(ViceLogLevel.Warn,
-                          $"research download failed {job.Source}/{job.ResourceId} from {target.Uri} -> {job.DestinationPath}",
-                          ex);
+            _logger.Log(ViceLogLevel.Warn,
+                        $"research download failed {job.Source}/{job.ResourceId} from {target.Uri} -> {job.DestinationPath}",
+                        ex);
             throw;
         }
     }
@@ -85,7 +89,8 @@ public sealed class ResearchDownloadJobRunner : IJobRunner
                                                            string destinationPath,
                                                            long recordedOffset,
                                                            IProgress<DownloadProgress> progress,
-                                                           CancellationToken ct)
+                                                           CancellationToken ct,
+                                                           IViceLogger logger)
     {
         var fullPath = AtomicDownload.ResolveDestination(destinationPath);
         var partial = $"{fullPath}.partial";
@@ -103,7 +108,7 @@ public sealed class ResearchDownloadJobRunner : IJobRunner
 
             if (startOffset > 0)
             {
-                Vice.Log.Emit(ViceLogLevel.Debug,
+                logger.Log(ViceLogLevel.Debug,
                               $"research download resuming {uri} at byte offset {startOffset}");
             }
 
@@ -127,7 +132,7 @@ public sealed class ResearchDownloadJobRunner : IJobRunner
             {
                 attempt++;
                 var backoff = ComputeBackoff(attempt);
-                Vice.Log.Emit(ViceLogLevel.Warn,
+                logger.Log(ViceLogLevel.Warn,
                               $"research download transient failure for {uri} (retry {attempt}/{MAX_DOWNLOAD_RETRIES} after {backoff.TotalMilliseconds:0}ms)",
                               ex);
                 await Task.Delay(backoff, ct).ConfigureAwait(false);

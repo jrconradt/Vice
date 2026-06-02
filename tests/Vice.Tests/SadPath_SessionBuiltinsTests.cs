@@ -26,7 +26,7 @@ public class SadPath_SessionBuiltinsTests
         var builtins = new SessionBuiltinRegistry(jobs, history);
         var executor = new CommandExecutor(
             registry, TestOptions.All, console,
-            NullStatusDisplay.Instance, TerminalCapabilities.None,
+            NullStatusDisplay.Instance, TerminalCapabilities.None, NullOutputSink.Instance,
             builtins: builtins);
 
         return await Task.FromResult((executor, jobs, console));

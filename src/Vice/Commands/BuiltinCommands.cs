@@ -42,15 +42,15 @@ internal static class BuiltinCommands
                         }
                         if (matches.Count > 1)
                         {
-                            Vice.Output.Line($"'{commandName}' appears in multiple commands:");
+                            ctx.Console.WriteLine($"'{commandName}' appears in multiple commands:");
                             foreach (var m in matches)
                             {
-                                Vice.Output.Line($"  {HelpFormatter.FormatChain(m.Chain)}");
+                                ctx.Console.WriteLine($"  {HelpFormatter.FormatChain(m.Chain)}");
                             }
 
                             return 0;
                         }
-                        Vice.Output.Error($"Unknown command: '{commandName}'.");
+                        ctx.Console.WriteError($"Unknown command: '{commandName}'.");
                         return ViceExitCode.USAGE_ERROR;
                     }
 
@@ -66,7 +66,7 @@ internal static class BuiltinCommands
             "Show version",
             async (ctx, ct) =>
             {
-                Vice.Output.Line($"{app.Name} v{app.Version}");
+                ctx.Console.WriteLine($"{app.Name} v{app.Version}");
                 return 0;
             },
             isBuiltin: true);
@@ -78,7 +78,7 @@ internal static class BuiltinCommands
             {
                 foreach (var reg in registry.UserRegistrations)
                 {
-                    Vice.Output.Line(HelpFormatter.FormatChain(reg.Chain));
+                    ctx.Console.WriteLine(HelpFormatter.FormatChain(reg.Chain));
                 }
 
                 return 0;
@@ -104,12 +104,12 @@ internal static class BuiltinCommands
                 }
                 catch (UnauthorizedAccessException ex)
                 {
-                    Vice.Output.Error($"Permission denied connecting to daemon pipe '{state.PipeName}': {ex.Message}");
+                    ctx.Console.WriteError($"Permission denied connecting to daemon pipe '{state.PipeName}': {ex.Message}");
                     return ViceExitCode.FAILURE;
                 }
                 if (client is null)
                 {
-                    Vice.Output.Line($"No {app.Name} daemon running.");
+                    ctx.Console.WriteLine($"No {app.Name} daemon running.");
                     return ViceExitCode.SUCCESS;
                 }
                 await using (client)
@@ -117,32 +117,32 @@ internal static class BuiltinCommands
                     var healthResponse = await client.SendAsync(new HealthRequest(), ct).ConfigureAwait(false);
                     if (healthResponse is not HealthResponse health)
                     {
-                        Vice.Output.Error("Daemon returned unexpected response.");
+                        ctx.Console.WriteError("Daemon returned unexpected response.");
                         return ViceExitCode.FAILURE;
                     }
 
                     var listening = health.Listening && !health.AcceptLoopCrashed;
-                    Vice.Output.Line($"{app.Name} daemon v{health.Version} — {(listening ? "healthy" : "unhealthy")}");
-                    Vice.Output.Line($"  listening: {(health.Listening ? "yes" : "no")}");
-                    Vice.Output.Line($"  accept loop: {(health.AcceptLoopCrashed ? $"crashed ({health.FaultSummary ?? "unknown fault"})" : "running")}");
-                    Vice.Output.Line($"  uptime: {health.UptimeSeconds:0.0}s");
-                    Vice.Output.Line($"  workers: {health.LiveWorkers}/{health.ConfiguredWorkers}{(health.WorkerPoolDegraded ? " (degraded)" : "")}");
-                    Vice.Output.Line($"  jobs: {health.JobCount}");
+                    ctx.Console.WriteLine($"{app.Name} daemon v{health.Version} — {(listening ? "healthy" : "unhealthy")}");
+                    ctx.Console.WriteLine($"  listening: {(health.Listening ? "yes" : "no")}");
+                    ctx.Console.WriteLine($"  accept loop: {(health.AcceptLoopCrashed ? $"crashed ({health.FaultSummary ?? "unknown fault"})" : "running")}");
+                    ctx.Console.WriteLine($"  uptime: {health.UptimeSeconds:0.0}s");
+                    ctx.Console.WriteLine($"  workers: {health.LiveWorkers}/{health.ConfiguredWorkers}{(health.WorkerPoolDegraded ? " (degraded)" : "")}");
+                    ctx.Console.WriteLine($"  jobs: {health.JobCount}");
 
                     var jobsResponse = await client.SendAsync(new JobStatusRequest(), ct).ConfigureAwait(false);
                     if (jobsResponse is not JobStatusResponse statuses)
                     {
-                        Vice.Output.Error("Daemon returned unexpected response.");
+                        ctx.Console.WriteError("Daemon returned unexpected response.");
                         return ViceExitCode.FAILURE;
                     }
                     if (statuses.Jobs.Count == 0)
                     {
-                        Vice.Output.Line("No jobs.");
+                        ctx.Console.WriteLine("No jobs.");
                         return listening ? ViceExitCode.SUCCESS : ViceExitCode.FAILURE;
                     }
                     foreach (var job in statuses.Jobs)
                     {
-                        Vice.Output.Line($"#{job.Id} [{job.Kind}] {job.Status} — {job.Label}");
+                        ctx.Console.WriteLine($"#{job.Id} [{job.Kind}] {job.Status} — {job.Label}");
                     }
 
                     return listening ? ViceExitCode.SUCCESS : ViceExitCode.FAILURE;
@@ -161,7 +161,7 @@ internal static class BuiltinCommands
                     app.Description,
                     registry.HelpVisibleRegistrations,
                     OrderGlobalOptions(app.RegisteredGlobalOptions, StringComparer.Ordinal));
-                Vice.Output.Line(page);
+                ctx.Console.WriteLine(page);
                 return 0;
             },
             isBuiltin: true);
@@ -182,10 +182,10 @@ internal static class BuiltinCommands
                 };
                 if (script is null)
                 {
-                    Vice.Output.Error($"Unsupported shell '{shell}'. Supported: bash, zsh.");
+                    ctx.Console.WriteError($"Unsupported shell '{shell}'. Supported: bash, zsh.");
                     return ViceExitCode.USAGE_ERROR;
                 }
-                Vice.Output.Line(script);
+                ctx.Console.WriteLine(script);
                 return 0;
             },
             isBuiltin: true);

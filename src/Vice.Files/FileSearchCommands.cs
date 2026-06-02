@@ -73,7 +73,7 @@ public static class FileSearchCommands
         var predicates = BuildPredicates(ctx);
         if (predicates is null)
         {
-            Vice.Output.Error("search files: no valid predicate. Use 'by <axis> <pattern>'.");
+            ctx.Console.WriteError("search files: no valid predicate. Use 'by <axis> <pattern>'.");
             return Task.FromResult(ViceExitCode.USAGE_ERROR);
         }
 
@@ -82,7 +82,7 @@ public static class FileSearchCommands
         foreach (var path in Walk(root, WalkKind.Files, predicates, options, ct))
         {
             ct.ThrowIfCancellationRequested();
-            Vice.Output.Line(path);
+            ctx.Console.WriteLine(path);
         }
 
         return Task.FromResult(ViceExitCode.SUCCESS);
@@ -93,7 +93,7 @@ public static class FileSearchCommands
         var predicates = BuildPredicates(ctx);
         if (predicates is null)
         {
-            Vice.Output.Error("search folders: no valid predicate. Use 'by <axis> <pattern>'.");
+            ctx.Console.WriteError("search folders: no valid predicate. Use 'by <axis> <pattern>'.");
             return Task.FromResult(ViceExitCode.USAGE_ERROR);
         }
 
@@ -102,7 +102,7 @@ public static class FileSearchCommands
         foreach (var path in Walk(root, WalkKind.Folders, predicates, options, ct))
         {
             ct.ThrowIfCancellationRequested();
-            Vice.Output.Line(path);
+            ctx.Console.WriteLine(path);
         }
 
         return Task.FromResult(ViceExitCode.SUCCESS);
@@ -173,7 +173,7 @@ public static class FileSearchCommands
         var predicates = new List<Predicate>(count);
         for (int i = 0; i < count; i++)
         {
-            var predicate = Predicate.Parse(axes[i], patterns[i], useRegex);
+            var predicate = Predicate.Parse(axes[i], patterns[i], useRegex, ctx.Logger);
             if (predicate is null)
             {
                 return null;
@@ -352,12 +352,12 @@ public static class FileSearchCommands
     {
         public abstract bool Evaluate(FileSystemInfo info);
 
-        public static Predicate? Parse(string axis, string pattern, bool useRegex)
+        public static Predicate? Parse(string axis, string pattern, bool useRegex, IViceLogger logger)
         {
             return axis.ToLowerInvariant() switch
             {
-                "name" => NamePredicate.Create(pattern, useRegex, fullPath: false),
-                "path" => NamePredicate.Create(pattern, useRegex, fullPath: true),
+                "name" => NamePredicate.Create(pattern, useRegex, fullPath: false, logger),
+                "path" => NamePredicate.Create(pattern, useRegex, fullPath: true, logger),
                 "type" => new TypePredicate(pattern),
                 "size" => SizePredicate.Parse(pattern),
                 "mtime" => MtimePredicate.Parse(pattern),
@@ -371,20 +371,22 @@ public static class FileSearchCommands
         private readonly string _pattern;
         private readonly Regex? _regex;
         private readonly bool _fullPath;
+        private readonly IViceLogger _logger;
         private bool _timeoutWarned;
 
-        private NamePredicate(string pattern, Regex? regex, bool fullPath)
+        private NamePredicate(string pattern, Regex? regex, bool fullPath, IViceLogger logger)
         {
             _pattern = pattern;
             _regex = regex;
             _fullPath = fullPath;
+            _logger = logger;
         }
 
-        public static NamePredicate? Create(string pattern, bool useRegex, bool fullPath)
+        public static NamePredicate? Create(string pattern, bool useRegex, bool fullPath, IViceLogger logger)
         {
             if (!useRegex)
             {
-                return new NamePredicate(pattern, null, fullPath);
+                return new NamePredicate(pattern, null, fullPath, logger);
             }
 
             try
@@ -393,7 +395,7 @@ public static class FileSearchCommands
                     pattern,
                     RegexOptions.Compiled | RegexOptions.CultureInvariant,
                     RegexTimeout);
-                return new NamePredicate(pattern, regex, fullPath);
+                return new NamePredicate(pattern, regex, fullPath, logger);
             }
             catch (ArgumentException)
             {
@@ -415,7 +417,7 @@ public static class FileSearchCommands
                     if (!_timeoutWarned)
                     {
                         _timeoutWarned = true;
-                        Vice.Log.Emit(
+                        _logger.Log(
                             ViceLogLevel.Warn,
                             $"search: regex pattern '{_pattern}' timed out evaluating an entry; results may be incomplete.");
                     }

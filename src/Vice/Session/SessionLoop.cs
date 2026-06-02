@@ -13,6 +13,7 @@ internal sealed class SessionLoop : ISessionLoop, IDisposable
     private readonly InputHistory _history;
     private readonly IConsoleWriter _console;
     private readonly TextReader _reader;
+    private readonly IViceLogger _logger;
     private readonly string _prompt;
 
     private readonly Channel<string> _notifications = Channel.CreateBounded<string>(
@@ -39,12 +40,12 @@ internal sealed class SessionLoop : ISessionLoop, IDisposable
         IViceLogger? logger = null,
         string prompt = "vice> ")
     {
-        _ = logger;
         _executor = executor;
         _jobManager = jobManager;
         _history = history;
         _console = console;
         _reader = reader;
+        _logger = logger ?? NullViceLogger.Instance;
         _prompt = prompt;
 
         _onJobCompletedHandler = OnJobCompleted;
@@ -105,7 +106,7 @@ internal sealed class SessionLoop : ISessionLoop, IDisposable
                 }
                 catch (Exception ex)
                 {
-                    Vice.Log.Emit(ViceLogLevel.Error, "REPL handler exception", ex);
+                    _logger.Log(ViceLogLevel.Error, "REPL handler exception", ex);
                     _console.WriteError($"Error: {ex.Message} (run with VICE_LOG_LEVEL=debug for stack)");
                     continue;
                 }
@@ -158,7 +159,7 @@ internal sealed class SessionLoop : ISessionLoop, IDisposable
     {
         if (!_notifications.Writer.TryWrite(message))
         {
-            Vice.Log.Emit(ViceLogLevel.Debug, $"Notification channel closed; dropped: {message}");
+            _logger.Log(ViceLogLevel.Debug, $"Notification channel closed; dropped: {message}");
         }
     }
 

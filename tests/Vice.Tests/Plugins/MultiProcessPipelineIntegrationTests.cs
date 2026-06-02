@@ -1,5 +1,6 @@
 using System.Text;
 using Vice.Commands;
+using Vice.Logging;
 using Vice.Plugins;
 using Vice.Tests;
 using Xunit;
@@ -51,6 +52,7 @@ public class MultiProcessPipelineIntegrationTests
             "vice",
             segments,
             new CommandRegistry(),
+            NullViceLogger.Instance,
             CancellationToken.None);
 
         Assert.Equal(0, exit);
@@ -84,6 +86,7 @@ public class MultiProcessPipelineIntegrationTests
             "vice",
             segments,
             new CommandRegistry(),
+            NullViceLogger.Instance,
             CancellationToken.None);
 
         Assert.Equal(0, exit);

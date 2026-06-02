@@ -53,14 +53,21 @@ public static class AtomicFile
         }
     }
 
-    public static async Task<string?> ReadAllTextOrNullAsync(string path, CancellationToken ct)
+    public static async Task<string?> ReadAllTextOrNullAsync(
+        string path,
+        CancellationToken ct,
+        IViceLogger? logger = null)
     {
-        var bytes = await ReadAllBytesOrNullAsync(path, ct).ConfigureAwait(false);
+        var bytes = await ReadAllBytesOrNullAsync(path, ct, logger).ConfigureAwait(false);
         return bytes is null ? null : Encoding.UTF8.GetString(bytes);
     }
 
-    public static async Task<byte[]?> ReadAllBytesOrNullAsync(string path, CancellationToken ct)
+    public static async Task<byte[]?> ReadAllBytesOrNullAsync(
+        string path,
+        CancellationToken ct,
+        IViceLogger? logger = null)
     {
+        var sink = logger ?? NullViceLogger.Instance;
         if (!File.Exists(path))
         {
             return null;
@@ -71,8 +78,8 @@ public static class AtomicFile
             await using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
             if (fs.Length > MAX_READ_BYTES)
             {
-                Vice.Log.Emit(ViceLogLevel.Warn,
-                              $"AtomicFile read rejected: {path} is {fs.Length} bytes, exceeds cap {MAX_READ_BYTES}");
+                sink.Log(ViceLogLevel.Warn,
+                         $"AtomicFile read rejected: {path} is {fs.Length} bytes, exceeds cap {MAX_READ_BYTES}");
                 return null;
             }
 
@@ -90,12 +97,12 @@ public static class AtomicFile
         }
         catch (UnauthorizedAccessException ex)
         {
-            Vice.Log.Emit(ViceLogLevel.Warn, $"AtomicFile read denied: {path}", ex);
+            sink.Log(ViceLogLevel.Warn, $"AtomicFile read denied: {path}", ex);
             return null;
         }
         catch (IOException ex)
         {
-            Vice.Log.Emit(ViceLogLevel.Warn, $"AtomicFile read failed: {path}", ex);
+            sink.Log(ViceLogLevel.Warn, $"AtomicFile read failed: {path}", ex);
             return null;
         }
     }

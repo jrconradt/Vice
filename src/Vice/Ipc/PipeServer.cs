@@ -17,6 +17,7 @@ internal sealed class PipeServer : IPipeServer
 
     private readonly string _pipeName;
     private readonly Func<PipeMessage, CancellationToken, Task<PipeMessage?>> _messageHandler;
+    private readonly IViceLogger _logger;
     private readonly CancellationTokenSource _cts = new();
     private readonly ConcurrentDictionary<int, Task> _clientTasks = new();
     private int _nextClientId;
@@ -28,10 +29,12 @@ internal sealed class PipeServer : IPipeServer
 
     public PipeServer(
         string pipeName,
-        Func<PipeMessage, CancellationToken, Task<PipeMessage?>> messageHandler)
+        Func<PipeMessage, CancellationToken, Task<PipeMessage?>> messageHandler,
+        IViceLogger logger)
     {
         _pipeName = pipeName;
         _messageHandler = messageHandler;
+        _logger = logger ?? NullViceLogger.Instance;
     }
 
     public bool IsListening => _isListening;
@@ -88,7 +91,7 @@ internal sealed class PipeServer : IPipeServer
                     }
                     catch (Exception ex)
                     {
-                        Vice.Log.Emit(ViceLogLevel.Warn, $"pipe wait-for-connection failed on '{_pipeName}'", ex);
+                        _logger.Log(ViceLogLevel.Warn, $"pipe wait-for-connection failed on '{_pipeName}'", ex);
                         await serverStream.DisposeAsync().ConfigureAwait(false);
                         serverStream = null;
                         continue;
@@ -134,13 +137,13 @@ internal sealed class PipeServer : IPipeServer
                         }
                         catch (Exception disposeEx)
                         {
-                            Vice.Log.Emit(ViceLogLevel.Warn, "pipe server stream dispose failed", disposeEx);
+                            _logger.Log(ViceLogLevel.Warn, "pipe server stream dispose failed", disposeEx);
                         }
                     }
 
                     if (!everBound)
                     {
-                        Vice.Log.Emit(ViceLogLevel.Error,
+                        _logger.Log(ViceLogLevel.Error,
                             $"pipe server '{_pipeName}' could not bind (another daemon may already own this pipe); not starting a second listener",
                             ex);
                         _acceptLoopCrashed = true;
@@ -159,7 +162,7 @@ internal sealed class PipeServer : IPipeServer
 
                     if (consecutiveFailures >= MAX_CONSECUTIVE_ACCEPT_FAILURES)
                     {
-                        Vice.Log.Emit(ViceLogLevel.Error,
+                        _logger.Log(ViceLogLevel.Error,
                             $"pipe accept loop on '{_pipeName}' failed {consecutiveFailures} consecutive times; faulting so a supervisor can restart",
                             ex);
                         _acceptLoopCrashed = true;
@@ -167,7 +170,7 @@ internal sealed class PipeServer : IPipeServer
                         break;
                     }
 
-                    Vice.Log.Emit(ViceLogLevel.Error,
+                    _logger.Log(ViceLogLevel.Error,
                         $"pipe accept loop iteration failed on '{_pipeName}'; backing off and retrying", ex);
 
                     try
@@ -183,13 +186,13 @@ internal sealed class PipeServer : IPipeServer
         }
         catch (OperationCanceledException)
         {
-            Vice.Log.Emit(ViceLogLevel.Trace, $"pipe accept loop cancelled on '{_pipeName}'");
+            _logger.Log(ViceLogLevel.Trace, $"pipe accept loop cancelled on '{_pipeName}'");
         }
         catch (Exception ex)
         {
             _acceptLoopCrashed = true;
             _faulted = ex;
-            Vice.Log.Emit(ViceLogLevel.Error, $"pipe accept loop crashed on '{_pipeName}'", ex);
+            _logger.Log(ViceLogLevel.Error, $"pipe accept loop crashed on '{_pipeName}'", ex);
 
             if (!readyCompleted)
             {
@@ -259,7 +262,7 @@ internal sealed class PipeServer : IPipeServer
                 }
                 catch (Exception ex)
                 {
-                    Vice.Log.Emit(ViceLogLevel.Warn, "umask restore failed", ex);
+                    _logger.Log(ViceLogLevel.Warn, "umask restore failed", ex);
                 }
             }
         }
@@ -329,9 +332,9 @@ internal sealed class PipeServer : IPipeServer
         return new PeerCheck(authorized, peerUid, peerPid);
     }
 
-    private static void EmitAudit(string message)
+    private void EmitAudit(string message)
     {
-        Vice.Log.Emit(ViceLogLevel.Info, message);
+        _logger.Log(ViceLogLevel.Info, message);
     }
 
     internal static bool AuthorizePeer(int peerUid, int euid, bool gotEuid, bool gotPeer)
@@ -396,12 +399,12 @@ internal sealed class PipeServer : IPipeServer
                 }
                 catch (IOException ex)
                 {
-                    Vice.Log.Emit(ViceLogLevel.Debug, "pipe client read failed", ex);
+                    _logger.Log(ViceLogLevel.Debug, "pipe client read failed", ex);
                     break;
                 }
                 catch (System.Text.Json.JsonException ex)
                 {
-                    Vice.Log.Emit(ViceLogLevel.Warn, "pipe client sent malformed frame; rejecting and keeping connection", ex);
+                    _logger.Log(ViceLogLevel.Warn, "pipe client sent malformed frame; rejecting and keeping connection", ex);
 
                     try
                     {
@@ -421,7 +424,7 @@ internal sealed class PipeServer : IPipeServer
                     }
                     catch (IOException writeEx)
                     {
-                        Vice.Log.Emit(ViceLogLevel.Debug, "pipe client write failed after malformed frame", writeEx);
+                        _logger.Log(ViceLogLevel.Debug, "pipe client write failed after malformed frame", writeEx);
                         break;
                     }
 
@@ -452,7 +455,7 @@ internal sealed class PipeServer : IPipeServer
                 }
                 catch (Exception ex)
                 {
-                    Vice.Log.Emit(ViceLogLevel.Warn, "pipe message handler threw", ex);
+                    _logger.Log(ViceLogLevel.Warn, "pipe message handler threw", ex);
                     response = new CommandResponse
                     {
                         ExitCode = 1,
@@ -473,7 +476,7 @@ internal sealed class PipeServer : IPipeServer
                     }
                     catch (IOException ex)
                     {
-                        Vice.Log.Emit(ViceLogLevel.Debug, "pipe client write failed", ex);
+                        _logger.Log(ViceLogLevel.Debug, "pipe client write failed", ex);
                         break;
                     }
                 }
@@ -481,7 +484,7 @@ internal sealed class PipeServer : IPipeServer
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            Vice.Log.Emit(ViceLogLevel.Warn, "pipe client handler threw", ex);
+            _logger.Log(ViceLogLevel.Warn, "pipe client handler threw", ex);
         }
         finally
         {
@@ -502,11 +505,11 @@ internal sealed class PipeServer : IPipeServer
             }
             catch (OperationCanceledException)
             {
-                Vice.Log.Emit(ViceLogLevel.Trace, "pipe accept loop cancelled during dispose");
+                _logger.Log(ViceLogLevel.Trace, "pipe accept loop cancelled during dispose");
             }
             catch (Exception ex)
             {
-                Vice.Log.Emit(ViceLogLevel.Warn, "pipe accept loop faulted during dispose", ex);
+                _logger.Log(ViceLogLevel.Warn, "pipe accept loop faulted during dispose", ex);
             }
         }
 
@@ -520,16 +523,16 @@ internal sealed class PipeServer : IPipeServer
             }
             catch (OperationCanceledException)
             {
-                Vice.Log.Emit(ViceLogLevel.Trace, "pipe client tasks cancelled during dispose");
+                _logger.Log(ViceLogLevel.Trace, "pipe client tasks cancelled during dispose");
             }
             catch (TimeoutException)
             {
-                Vice.Log.Emit(ViceLogLevel.Warn,
+                _logger.Log(ViceLogLevel.Warn,
                     $"pipe client tasks did not finish within {ClientDisposeTimeout.TotalSeconds:0.0}s; proceeding with dispose");
             }
             catch (Exception ex)
             {
-                Vice.Log.Emit(ViceLogLevel.Warn, "pipe client task faulted during dispose", ex);
+                _logger.Log(ViceLogLevel.Warn, "pipe client task faulted during dispose", ex);
             }
         }
 

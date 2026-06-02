@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using Vice.Logging;
 using Vice.Mux.Sinks;
 using Xunit;
 
@@ -18,7 +19,7 @@ public class SinkLoopbackTests
         try
         {
             var acceptTask = listener.AcceptTcpClientAsync();
-            await using (var sink = SinkFactory.Open($"tcp:127.0.0.1:{port}"))
+            await using (var sink = SinkFactory.Open($"tcp:127.0.0.1:{port}", NullViceLogger.Instance))
             {
                 using var server = await acceptTask;
                 await sink.WriteAsync(payload, CancellationToken.None);
@@ -55,7 +56,7 @@ public class SinkLoopbackTests
         var payload = Encoding.ASCII.GetBytes("process-sink-roundtrip");
         try
         {
-            await using (var sink = SinkFactory.Open($"exec:tee {outPath}"))
+            await using (var sink = SinkFactory.Open($"exec:tee {outPath}", NullViceLogger.Instance))
             {
                 await sink.WriteAsync(payload, CancellationToken.None);
                 await sink.FlushAsync(CancellationToken.None);

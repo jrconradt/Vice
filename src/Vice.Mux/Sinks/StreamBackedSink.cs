@@ -5,11 +5,13 @@ namespace Vice.Mux.Sinks;
 internal abstract class StreamBackedSink : ISink
 {
     private readonly Stream _stream;
+    private protected readonly IViceLogger Logger;
 
-    protected StreamBackedSink(Stream stream, string label)
+    protected StreamBackedSink(Stream stream, string label, IViceLogger logger)
     {
         _stream = stream;
         Label = label;
+        Logger = logger ?? NullViceLogger.Instance;
     }
 
     public string Label { get; }
@@ -28,9 +30,9 @@ internal abstract class StreamBackedSink : ISink
         }
         catch (Exception ex) when (ex is IOException or ObjectDisposedException)
         {
-            Log.Emit(ViceLogLevel.Warn,
-                     $"Sink '{Label}' final flush failed during dispose.",
-                     ex);
+            Logger.Log(ViceLogLevel.Warn,
+                       $"Sink '{Label}' final flush failed during dispose.",
+                       ex);
         }
         try
         {
@@ -38,9 +40,9 @@ internal abstract class StreamBackedSink : ISink
         }
         catch (Exception ex) when (ex is IOException or ObjectDisposedException)
         {
-            Log.Emit(ViceLogLevel.Warn,
-                     $"Sink '{Label}' stream dispose failed.",
-                     ex);
+            Logger.Log(ViceLogLevel.Warn,
+                       $"Sink '{Label}' stream dispose failed.",
+                       ex);
         }
 
         await DisposeUnderlyingAsync().ConfigureAwait(false);

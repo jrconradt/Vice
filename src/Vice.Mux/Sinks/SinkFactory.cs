@@ -1,35 +1,36 @@
 using System.Diagnostics;
 using System.Net.Sockets;
+using Vice.Logging;
 
 namespace Vice.Mux.Sinks;
 
 public static class SinkFactory
 {
-    public static ISink Open(string spec)
+    public static ISink Open(string spec, IViceLogger logger)
     {
         var (scheme, rest) = Split(spec);
         return scheme switch
         {
-            "file" => OpenFile(rest, append: false),
-            "append" => OpenFile(rest, append: true),
-            "tcp" => OpenTcp(rest),
-            "exec" => OpenExec(rest),
-            "pipe" => OpenPipe(rest),
+            "file" => OpenFile(rest, append: false, logger),
+            "append" => OpenFile(rest, append: true, logger),
+            "tcp" => OpenTcp(rest, logger),
+            "exec" => OpenExec(rest, logger),
+            "pipe" => OpenPipe(rest, logger),
             "null" => new NullSink(),
             _ => throw new ArgumentException($"unknown sink scheme '{scheme}' in '{spec}'"),
         };
     }
 
-    public static async ValueTask<ISink> OpenAsync(string spec, CancellationToken ct)
+    public static async ValueTask<ISink> OpenAsync(string spec, CancellationToken ct, IViceLogger logger)
     {
         var (scheme, rest) = Split(spec);
         return scheme switch
         {
-            "file" => OpenFile(rest, append: false),
-            "append" => OpenFile(rest, append: true),
-            "tcp" => await OpenTcpAsync(rest, ct),
-            "exec" => OpenExec(rest),
-            "pipe" => OpenPipe(rest),
+            "file" => OpenFile(rest, append: false, logger),
+            "append" => OpenFile(rest, append: true, logger),
+            "tcp" => await OpenTcpAsync(rest, ct, logger),
+            "exec" => OpenExec(rest, logger),
+            "pipe" => OpenPipe(rest, logger),
             "null" => new NullSink(),
             _ => throw new ArgumentException($"unknown sink scheme '{scheme}' in '{spec}'"),
         };
@@ -51,16 +52,16 @@ public static class SinkFactory
         return (spec[..colon].ToLowerInvariant(), spec[(colon + 1)..]);
     }
 
-    private static ISink OpenFile(string path, bool append)
+    private static ISink OpenFile(string path, bool append, IViceLogger logger)
     {
         var full = Path.GetFullPath(path);
         Directory.CreateDirectory(Path.GetDirectoryName(full)!);
         var mode = append ? FileMode.Append : FileMode.Create;
         var stream = new FileStream(full, mode, FileAccess.Write, FileShare.Read, 65536, useAsync: true);
-        return new StreamSink(stream, $"file:{full}");
+        return new StreamSink(stream, $"file:{full}", logger);
     }
 
-    private static ISink OpenTcp(string hostPort)
+    private static ISink OpenTcp(string hostPort, IViceLogger logger)
     {
         var (host, port) = ParseEndpoint(hostPort);
         var client = new TcpClient();
@@ -78,10 +79,10 @@ public static class SinkFactory
         }
 
         client.NoDelay = true;
-        return new TcpSink(client, $"tcp:{host}:{port}");
+        return new TcpSink(client, $"tcp:{host}:{port}", logger);
     }
 
-    private static async ValueTask<ISink> OpenTcpAsync(string hostPort, CancellationToken ct)
+    private static async ValueTask<ISink> OpenTcpAsync(string hostPort, CancellationToken ct, IViceLogger logger)
     {
         var (host, port) = ParseEndpoint(hostPort);
         var client = new TcpClient();
@@ -105,7 +106,7 @@ public static class SinkFactory
         }
 
         client.NoDelay = true;
-        return new TcpSink(client, $"tcp:{host}:{port}");
+        return new TcpSink(client, $"tcp:{host}:{port}", logger);
     }
 
     private static (string host, int port) ParseEndpoint(string hostPort)
@@ -127,7 +128,7 @@ public static class SinkFactory
         return (host, port);
     }
 
-    private static ISink OpenExec(string commandLine)
+    private static ISink OpenExec(string commandLine, IViceLogger logger)
     {
         var parts = SplitCommand(commandLine);
         if (parts.Count == 0)
@@ -147,13 +148,13 @@ public static class SinkFactory
         }
 
         var proc = Process.Start(psi) ?? throw new InvalidOperationException($"exec sink failed to start '{commandLine}'");
-        return new ProcessSink(proc, $"exec:{commandLine}");
+        return new ProcessSink(proc, $"exec:{commandLine}", logger);
     }
 
-    private static ISink OpenPipe(string path)
+    private static ISink OpenPipe(string path, IViceLogger logger)
     {
         var stream = new FileStream(path, FileMode.Open, FileAccess.Write, FileShare.ReadWrite, 65536, useAsync: true);
-        return new StreamSink(stream, $"pipe:{path}");
+        return new StreamSink(stream, $"pipe:{path}", logger);
     }
 
     private static List<string> SplitCommand(string line)

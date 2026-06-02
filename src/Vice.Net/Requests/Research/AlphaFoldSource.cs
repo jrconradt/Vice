@@ -55,7 +55,8 @@ internal sealed class AlphaFoldSource : IResearchSource
     public async Task<DownloadTarget> ResolveDownloadAsync(HttpClient http,
                                                            string id,
                                                            string? format,
-                                                           CancellationToken ct)
+                                                           CancellationToken ct,
+                                                           IViceLogger logger)
     {
         var entry = await GetPredictionAsync(http, id, ct).ConfigureAwait(false);
 
@@ -72,7 +73,7 @@ internal sealed class AlphaFoldSource : IResearchSource
             throw new BadArgument($"AlphaFold prediction for {id} has no '{format ?? "pdb"}' structure URL.");
         }
 
-        Vice.Log.Emit(ViceLogLevel.Debug,
+        logger.Log(ViceLogLevel.Debug,
                       $"research source {Name} resolved {id} to {url}");
         return new DownloadTarget(new Uri(url), extension);
     }

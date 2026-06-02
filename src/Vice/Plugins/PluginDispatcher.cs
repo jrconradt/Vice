@@ -11,6 +11,7 @@ internal static class PluginDispatcher
         string appName,
         string[] args,
         ICommandRegistry registry,
+        IViceLogger logger,
         out string pluginPath,
         out string[] pluginArgs)
     {
@@ -73,7 +74,7 @@ internal static class PluginDispatcher
         if (!IsTrustedPluginFile(candidate, pluginDir, out var rejection))
         {
             var rejectionMessage = $"plugin rejected as untrusted: candidate='{candidate}' reason={rejection}";
-            Vice.Log.Emit(ViceLogLevel.Warn, rejectionMessage);
+            logger.Log(ViceLogLevel.Warn, rejectionMessage);
             Vice.Audit.Emit(ViceLogLevel.Warn, rejectionMessage);
             return false;
         }
@@ -83,7 +84,7 @@ internal static class PluginDispatcher
         return true;
     }
 
-    public static bool TryFindOnPath(string name, out string pluginPath)
+    public static bool TryFindOnPath(string name, IViceLogger logger, out string pluginPath)
     {
         pluginPath = "";
         if (string.IsNullOrEmpty(name))
@@ -117,7 +118,7 @@ internal static class PluginDispatcher
         if (!IsTrustedPluginFile(candidate, pluginDir, out var rejection))
         {
             var rejectionMessage = $"plugin rejected as untrusted: candidate='{candidate}' reason={rejection}";
-            Vice.Log.Emit(ViceLogLevel.Warn, rejectionMessage);
+            logger.Log(ViceLogLevel.Warn, rejectionMessage);
             Vice.Audit.Emit(ViceLogLevel.Warn, rejectionMessage);
             return false;
         }
@@ -365,10 +366,14 @@ internal static class PluginDispatcher
         }
     }
 
-    public static async Task<int> RunAsync(string pluginPath, string[] args, CancellationToken ct)
+    public static async Task<int> RunAsync(
+        string pluginPath,
+        string[] args,
+        IViceLogger logger,
+        CancellationToken ct)
     {
         var executionMessage = $"plugin execution: path='{pluginPath}' argc={args.Length}";
-        Vice.Log.Emit(ViceLogLevel.Info, executionMessage);
+        logger.Log(ViceLogLevel.Info, executionMessage);
         Vice.Audit.Emit(ViceLogLevel.Info, executionMessage);
         var psi = new ProcessStartInfo
         {
@@ -390,7 +395,7 @@ internal static class PluginDispatcher
         }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
         {
-            Vice.Log.Emit(ViceLogLevel.Error, $"plugin failed to execute: path='{pluginPath}'", ex);
+            logger.Log(ViceLogLevel.Error, $"plugin failed to execute: path='{pluginPath}'", ex);
             return 127;
         }
 

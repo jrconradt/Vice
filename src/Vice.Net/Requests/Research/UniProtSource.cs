@@ -92,7 +92,8 @@ internal sealed class UniProtSource : IResearchSource
     public Task<DownloadTarget> ResolveDownloadAsync(HttpClient http,
                                                      string id,
                                                      string? format,
-                                                     CancellationToken ct)
+                                                     CancellationToken ct,
+                                                     IViceLogger logger)
     {
         var extension = format switch
         {
@@ -103,7 +104,7 @@ internal sealed class UniProtSource : IResearchSource
         };
 
         var uri = new Uri($"{Base}/{WebUtility.UrlEncode(id)}.{extension}");
-        Vice.Log.Emit(ViceLogLevel.Debug,
+        logger.Log(ViceLogLevel.Debug,
                       $"research source {Name} resolved {id} to {uri}");
         return Task.FromResult(new DownloadTarget(uri, extension));
     }

@@ -29,7 +29,7 @@ public class SessionLoopTests
 
         var executor = new CommandExecutor(
             registry, TestOptions.All, console,
-            NullStatusDisplay.Instance, TerminalCapabilities.None,
+            NullStatusDisplay.Instance, TerminalCapabilities.None, NullOutputSink.Instance,
             builtins: builtins);
 
         var loop = new SessionLoop(executor, jobs, history, console,

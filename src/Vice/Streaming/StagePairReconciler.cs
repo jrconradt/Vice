@@ -4,12 +4,15 @@ namespace Vice.Streaming;
 
 internal static class StagePairReconciler
 {
-    public static Exception? ResolvePrimary(Exception? producerEx, Exception? consumerEx)
+    public static Exception? ResolvePrimary(
+        Exception? producerEx,
+        Exception? consumerEx,
+        IViceLogger logger)
     {
         if (producerEx is not null
             && consumerEx is not null)
         {
-            Vice.Log.Emit(ViceLogLevel.Warn, "secondary stage exception (consumer)", consumerEx);
+            logger.Log(ViceLogLevel.Warn, "secondary stage exception (consumer)", consumerEx);
             return producerEx;
         }
 

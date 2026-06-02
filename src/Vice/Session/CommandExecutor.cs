@@ -20,6 +20,7 @@ internal sealed class CommandExecutor : ICommandExecutor
     private readonly FrozenSet<string> _flagNames;
     private readonly Vice.Parser.OptionRegistry _optionRegistry;
     private readonly IConsoleWriter _console;
+    private readonly IOutputSink _outputSink;
     private readonly IStatusDisplay _status;
     private readonly TerminalCapabilities _capabilities;
     private readonly SessionContext? _session;
@@ -35,6 +36,7 @@ internal sealed class CommandExecutor : ICommandExecutor
         IConsoleWriter console,
         IStatusDisplay status,
         TerminalCapabilities capabilities,
+        IOutputSink outputSink,
         SessionContext? session = null,
         string appName = "",
         string version = "",
@@ -50,6 +52,7 @@ internal sealed class CommandExecutor : ICommandExecutor
             .ToFrozenSet(StringComparer.OrdinalIgnoreCase);
         _optionRegistry = OptionRegistryBuilder.Build(globalOptions);
         _console = console;
+        _outputSink = outputSink ?? NullOutputSink.Instance;
         _status = status;
         _capabilities = capabilities;
         _session = session;
@@ -217,9 +220,9 @@ internal sealed class CommandExecutor : ICommandExecutor
         return exitCode;
     }
 
-    private static void FlushOutput()
+    private void FlushOutput()
     {
-        if (Vice.Output.Current is ConsoleOutputSink sink)
+        if (_outputSink is ConsoleOutputSink sink)
         {
             sink.Flush();
         }
@@ -232,19 +235,19 @@ internal sealed class CommandExecutor : ICommandExecutor
         CancellationToken ct,
         IStatusHandle handle)
     {
-        Vice.Log.Emit(new CommandStarted(commandName));
+        ctx.Logger.Log(new CommandStarted(commandName));
         var sw = Stopwatch.StartNew();
         try
         {
             var result = await handler(ctx, ct).ConfigureAwait(false);
             sw.Stop();
-            Vice.Log.Emit(new CommandCompleted(commandName, result, sw.Elapsed));
+            ctx.Logger.Log(new CommandCompleted(commandName, result, sw.Elapsed));
             return result;
         }
         catch (Exception ex)
         {
             sw.Stop();
-            Vice.Log.Emit(new CommandFailed(commandName, ex, sw.Elapsed));
+            ctx.Logger.Log(new CommandFailed(commandName, ex, sw.Elapsed));
             handle.Fail();
             throw;
         }

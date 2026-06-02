@@ -45,7 +45,8 @@ public static class RouteCommands
                                  clauses,
                                  Console.OpenStandardInput(),
                                  chunkSize,
-                                 ct);
+                                 ct,
+                                 ctx.Logger);
     }
 
     private static int ParseCode(string? v)
