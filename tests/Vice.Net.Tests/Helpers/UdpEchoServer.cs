@@ -36,13 +36,13 @@ internal sealed class UdpEchoServer : IAsyncDisposable
                     {
                         await _udp.SendAsync(r.Buffer, r.Buffer.Length, r.RemoteEndPoint);
                     }
-                    catch (Exception ex) when (ex is SocketException or ObjectDisposedException)
+                    catch (SocketException ex)
                     {
                         System.Diagnostics.Trace.WriteLine(ex);
                     }
                 }
             }
-            catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException or SocketException)
+            catch (Exception ex) when (ex is OperationCanceledException or SocketException)
             {
                 System.Diagnostics.Trace.WriteLine(ex);
             }
@@ -52,22 +52,7 @@ internal sealed class UdpEchoServer : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         _cts.Cancel();
-        try
-        {
-            _udp.Close();
-        }
-        catch (Exception ex) when (ex is SocketException or ObjectDisposedException)
-        {
-            System.Diagnostics.Trace.WriteLine(ex);
-        }
-        try
-        {
-            await _loop;
-        }
-        catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException)
-        {
-            System.Diagnostics.Trace.WriteLine(ex);
-        }
+        await _loop;
         _cts.Dispose();
         _udp.Dispose();
     }

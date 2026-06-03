@@ -56,7 +56,7 @@ public static class GrpcSessionCommands
 
                 foreach (var conn in conns)
                 {
-                    ctx.Console.WriteLine($"  {conn.Endpoint,-30} connected {conn.ConnectedAt:u}  {conn.CallCount} calls");
+                    ctx.Console.WriteLine($"  {conn.Endpoint,-30} connected {conn.ConnectedAt:u}");
                 }
 
                 return 0;

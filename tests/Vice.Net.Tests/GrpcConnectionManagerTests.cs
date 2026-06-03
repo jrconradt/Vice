@@ -52,6 +52,17 @@ public class GrpcConnectionManagerTests
     }
 
     [Fact]
+    public async Task GetChannel_returns_the_channel_the_owner_connected()
+    {
+        await using var conn = new GrpcConnectionManager(NullViceLogger.Instance);
+
+        var connected = conn.Connect(Endpoint, plaintext: true);
+        var borrowed = conn.GetChannel(Endpoint);
+
+        Assert.Same(connected, borrowed);
+    }
+
+    [Fact]
     public async Task Disconnect_returns_false_for_unknown_and_true_after_connect()
     {
         await using var conn = new GrpcConnectionManager(NullViceLogger.Instance);
@@ -64,19 +75,64 @@ public class GrpcConnectionManagerTests
     }
 
     [Fact]
-    public async Task GetConnections_reflects_connected_endpoints_and_call_count()
+    public async Task Disconnect_disposes_the_channel()
+    {
+        await using var conn = new GrpcConnectionManager(NullViceLogger.Instance);
+
+        var channel = conn.Connect(Endpoint, plaintext: true);
+        conn.Disconnect(Endpoint);
+
+        Assert.Throws<ObjectDisposedException>(() => channel.CreateCallInvoker());
+    }
+
+    [Fact]
+    public async Task GetChannel_after_disconnect_throws_InvalidOperationException()
+    {
+        await using var conn = new GrpcConnectionManager(NullViceLogger.Instance);
+
+        conn.Connect(Endpoint, plaintext: true);
+        conn.Disconnect(Endpoint);
+
+        var ex = Assert.Throws<InvalidOperationException>(() => conn.GetChannel(Endpoint));
+        Assert.Contains("Not connected", ex.Message);
+    }
+
+    [Fact]
+    public async Task Connect_after_disconnect_creates_a_new_channel()
+    {
+        await using var conn = new GrpcConnectionManager(NullViceLogger.Instance);
+
+        var first = conn.Connect(Endpoint, plaintext: true);
+        conn.Disconnect(Endpoint);
+        var second = conn.Connect(Endpoint, plaintext: true);
+
+        Assert.NotSame(first, second);
+        second.CreateCallInvoker();
+    }
+
+    [Fact]
+    public async Task GetConnections_reflects_connected_endpoints()
     {
         await using var conn = new GrpcConnectionManager(NullViceLogger.Instance);
 
         Assert.Empty(conn.GetConnections());
 
         conn.Connect(Endpoint, plaintext: true);
-        conn.GetChannel(Endpoint);
 
         var connections = conn.GetConnections();
         var info = Assert.Single(connections);
         Assert.Equal(Endpoint, info.Endpoint);
-        Assert.Equal(1, info.CallCount);
+    }
+
+    [Fact]
+    public async Task GetConnections_excludes_disconnected_endpoints()
+    {
+        await using var conn = new GrpcConnectionManager(NullViceLogger.Instance);
+
+        conn.Connect(Endpoint, plaintext: true);
+        conn.Disconnect(Endpoint);
+
+        Assert.Empty(conn.GetConnections());
     }
 
     [Fact]
@@ -97,6 +153,23 @@ public class GrpcConnectionManagerTests
 
         var ex = Assert.Throws<InvalidOperationException>(() => conn.Connect(Endpoint, plaintext: true));
         Assert.Contains("shutting down", ex.Message);
+
+        await conn.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Shutdown_disposes_every_connected_channel()
+    {
+        var conn = new GrpcConnectionManager(NullViceLogger.Instance);
+
+        var first = conn.Connect("127.0.0.1:50111", plaintext: true);
+        var second = conn.Connect("127.0.0.1:50112", plaintext: true);
+
+        await conn.ShutdownAsync(TimeSpan.FromSeconds(1));
+
+        Assert.Throws<ObjectDisposedException>(() => first.CreateCallInvoker());
+        Assert.Throws<ObjectDisposedException>(() => second.CreateCallInvoker());
+        Assert.Empty(conn.GetConnections());
 
         await conn.DisposeAsync();
     }

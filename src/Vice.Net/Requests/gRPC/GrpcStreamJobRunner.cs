@@ -184,8 +184,7 @@ internal sealed class GrpcStreamJobRunner : IJobRunner
         IProgress<JobProgress> progress,
         CancellationToken ct)
     {
-        using var lease = _connectionManager.LeaseChannel(job.Endpoint!);
-        var invoker = lease.Channel.CreateCallInvoker();
+        var invoker = _connectionManager.GetChannel(job.Endpoint!).CreateCallInvoker();
 
         var callOptions = new CallOptions(cancellationToken: ct)
             .WithDeadline(DateTime.UtcNow.Add(_callDeadline));
@@ -201,7 +200,6 @@ internal sealed class GrpcStreamJobRunner : IJobRunner
             var lastReport = Stopwatch.GetTimestamp();
             while (await MoveNextWithIdleTimeoutAsync(streamingCall.ResponseStream, ct).ConfigureAwait(false))
             {
-                lease.Renew();
                 var responseBytes = streamingCall.ResponseStream.Current;
                 var responseLine = Encoding.UTF8.GetString(responseBytes);
 
