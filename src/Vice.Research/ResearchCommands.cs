@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using Vice.Composition;
 using Vice.Contracts;
+using Vice.Core;
 using Vice.Execution;
 using Vice.Foundation.Execution;
 using Vice.Jobs;
@@ -14,15 +15,25 @@ namespace Vice.Research;
 [ViceCommandPack]
 public static class ResearchCommands
 {
-    private static readonly ResearchSourceRegistry Sources = new();
+    private static readonly ResearchSourceRegistry DefaultSources = new();
 
-    private static readonly Lazy<HttpClient> SharedHttp =
-        new(ResearchHttp.Create, LazyThreadSafetyMode.ExecutionAndPublication);
+    private static IResearchSource ResolveSource(ICommandContext ctx,
+                                                 string name)
+    {
+        var registry = ctx.Session?.GetService<ResearchSourceRegistry>() ?? DefaultSources;
+        return registry.Resolve(name);
+    }
+
+    private static readonly ConcurrentDictionary<IViceLogger, HttpClient> HttpByLogger =
+        new(ReferenceEqualityComparer.Instance);
 
     private static readonly ConcurrentDictionary<string, Lazy<Task<IReadOnlyList<SearchHit>>>> InFlightSearches =
         new(StringComparer.Ordinal);
 
-    private static HttpClient Http => SharedHttp.Value;
+    private static HttpClient HttpFor(ICommandContext ctx)
+    {
+        return HttpByLogger.GetOrAdd(ctx.Logger, ResearchHttp.Create);
+    }
 
     public static void Register(IViceApp app)
     {
@@ -174,11 +185,11 @@ public static class ResearchCommands
     {
         return RunGuarded(ctx, ct, async () =>
         {
-            var source = Sources.Resolve(Require(ctx, "source"));
+            var source = ResolveSource(ctx, Require(ctx, "source"));
             var id = Require(ctx, "id");
             using var cts = LinkTimeout(ctx, ct);
 
-            var result = await source.FetchAsync(Http, id, cts.Token).ConfigureAwait(false);
+            var result = await source.FetchAsync(HttpFor(ctx), id, cts.Token).ConfigureAwait(false);
             ctx.Console.WriteLine($"[{result.Id}] {result.Title}");
             foreach (var line in result.MetadataLines)
             {
@@ -200,13 +211,14 @@ public static class ResearchCommands
     {
         return RunGuarded(ctx, ct, async () =>
         {
-            var source = Sources.Resolve(Require(ctx, "source"));
+            var source = ResolveSource(ctx, Require(ctx, "source"));
             var id = Require(ctx, "id");
             var format = ResearchOptions.GetFormat(ctx);
             var timeout = ResearchOptions.GetTimeout(ctx);
             using var cts = LinkTimeout(ctx, ct);
 
-            var target = await source.ResolveDownloadAsync(Http, id, format, cts.Token, ctx.Logger).ConfigureAwait(false);
+            var http = HttpFor(ctx);
+            var target = await source.ResolveDownloadAsync(http, id, format, cts.Token, ctx.Logger).ConfigureAwait(false);
             var destination = ResearchDownloader.BuildDestinationPath(ctx["path"], source.Name, id, target.Extension);
 
             if (TrySubmitJob(ctx, source.Name, id, destination, target.Extension, format, timeout, ct, out var jobTask))
@@ -216,7 +228,7 @@ public static class ResearchCommands
             }
 
             var reporter = ctx.Quiet ? null : ProgressLine(ctx, $"{source.Name}/{id}");
-            await ResearchDownloader.DownloadToFileAsync(Http, target.Uri, destination, reporter, cts.Token).ConfigureAwait(false);
+            await ResearchDownloader.DownloadToFileAsync(http, target.Uri, destination, reporter, ctx.Logger, cts.Token).ConfigureAwait(false);
             ctx.Console.WriteLine($"Saved {source.Name}/{id} -> {destination}.");
             return ViceExitCode.SUCCESS;
         });
@@ -227,7 +239,7 @@ public static class ResearchCommands
     {
         return RunGuarded(ctx, ct, async () =>
         {
-            var source = Sources.Resolve(Require(ctx, "source"));
+            var source = ResolveSource(ctx, Require(ctx, "source"));
             if (!source.Searchable)
             {
                 throw new BadArgument($"Source '{source.Name}' is not searchable and cannot be archived; use 'fetch' or 'download' with an id.");
@@ -252,7 +264,7 @@ public static class ResearchCommands
                 cts.Token.ThrowIfCancellationRequested();
                 try
                 {
-                    var target = await source.ResolveDownloadAsync(Http, hit.Id, format, cts.Token, ctx.Logger).ConfigureAwait(false);
+                    var target = await source.ResolveDownloadAsync(HttpFor(ctx), hit.Id, format, cts.Token, ctx.Logger).ConfigureAwait(false);
                     var destination = ResearchDownloader.BuildDestinationPath(directory, source.Name, hit.Id, target.Extension);
 
                     if (TrySubmitJob(ctx, source.Name, hit.Id, destination, target.Extension, format, timeout, ct, out var jobTask))
@@ -269,7 +281,7 @@ public static class ResearchCommands
                     }
 
                     var reporter = ctx.Quiet ? null : ProgressLine(ctx, $"{source.Name}/{hit.Id}");
-                    await ResearchDownloader.DownloadToFileAsync(Http, target.Uri, destination, reporter, cts.Token).ConfigureAwait(false);
+                    await ResearchDownloader.DownloadToFileAsync(HttpFor(ctx), target.Uri, destination, reporter, ctx.Logger, cts.Token).ConfigureAwait(false);
                     ctx.Console.WriteLine($"Saved {source.Name}/{hit.Id} -> {destination}.");
                 }
                 catch (OperationCanceledException) when (!ct.IsCancellationRequested)
@@ -315,7 +327,7 @@ public static class ResearchCommands
             var destination = ResearchDownloader.BuildUrlDestinationPath(ctx["path"], fileName);
 
             var reporter = ctx.Quiet ? null : ProgressLine(ctx, uri.Host);
-            await ResearchDownloader.DownloadToFileAsync(Http, uri, destination, reporter, cts.Token).ConfigureAwait(false);
+            await ResearchDownloader.DownloadToFileAsync(HttpFor(ctx), uri, destination, reporter, ctx.Logger, cts.Token).ConfigureAwait(false);
             ctx.Console.WriteLine($"Saved {uri} -> {destination}.");
             return ViceExitCode.SUCCESS;
         });
@@ -356,17 +368,19 @@ public static class ResearchCommands
             throw new BadArgument($"Source '{source.Name}' is not searchable; use 'fetch' or 'download' with an id.");
         }
 
+        var http = HttpFor(ctx);
         var paging = ResearchOptions.GetPaging(ctx);
         var timeout = ResearchOptions.GetTimeout(ctx);
         var inflightKey = $"{source.Name}|{query}|{paging.Limit}|{paging.Offset}";
         var lazy = InFlightSearches.GetOrAdd(inflightKey, k => new Lazy<Task<IReadOnlyList<SearchHit>>>(
-            () => CoalescedFetchAsync(source, query, paging, timeout, k),
+            () => CoalescedFetchAsync(http, source, query, paging, timeout, k),
             LazyThreadSafetyMode.ExecutionAndPublication));
 
         return await lazy.Value.WaitAsync(ct).ConfigureAwait(false);
     }
 
-    private static async Task<IReadOnlyList<SearchHit>> CoalescedFetchAsync(IResearchSource source,
+    private static async Task<IReadOnlyList<SearchHit>> CoalescedFetchAsync(HttpClient http,
+                                                                            IResearchSource source,
                                                                             string query,
                                                                             ResearchPaging paging,
                                                                             TimeSpan timeout,
@@ -374,7 +388,7 @@ public static class ResearchCommands
     {
         try
         {
-            return await FetchSearchAsync(source, query, paging, timeout, CancellationToken.None).ConfigureAwait(false);
+            return await FetchSearchAsync(http, source, query, paging, timeout, CancellationToken.None).ConfigureAwait(false);
         }
         finally
         {
@@ -385,7 +399,8 @@ public static class ResearchCommands
         }
     }
 
-    private static async Task<IReadOnlyList<SearchHit>> FetchSearchAsync(IResearchSource source,
+    private static async Task<IReadOnlyList<SearchHit>> FetchSearchAsync(HttpClient http,
+                                                                         IResearchSource source,
                                                                          string query,
                                                                          ResearchPaging paging,
                                                                          TimeSpan timeout,
@@ -393,12 +408,12 @@ public static class ResearchCommands
     {
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         cts.CancelAfter(timeout);
-        return await source.SearchAsync(Http, query, paging.Limit, paging.Offset, cts.Token).ConfigureAwait(false);
+        return await source.SearchAsync(http, query, paging.Limit, paging.Offset, cts.Token).ConfigureAwait(false);
     }
 
     private static (IResearchSource source, string query) ResolveSearch(ICommandContext ctx)
     {
-        var source = Sources.Resolve(Require(ctx, "source"));
+        var source = ResolveSource(ctx, Require(ctx, "source"));
         var query = Require(ctx, "query");
         return (source, query);
     }

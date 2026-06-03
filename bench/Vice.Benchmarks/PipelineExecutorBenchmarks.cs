@@ -1,9 +1,10 @@
 using BenchmarkDotNet.Attributes;
-using Vice;
+using Vice.Core;
 using Vice.Display;
 using Vice.Execution;
+using Vice.Host;
 using Vice.Lexicon;
-using static Vice.Dsl;
+using static Vice.Core.Dsl;
 
 namespace Vice.Benchmarks;
 

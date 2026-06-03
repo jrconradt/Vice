@@ -2,7 +2,7 @@ using Vice.Commands;
 using Vice.Jobs;
 using Vice.Lexicon;
 using Vice.Logging;
-using static Vice.Dsl;
+using static Vice.Core.Dsl;
 
 namespace Vice.Session;
 

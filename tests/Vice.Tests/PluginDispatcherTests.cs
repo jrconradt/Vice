@@ -1,17 +1,25 @@
 using System.Threading.Tasks;
-using Vice;
 using Vice.Commands;
+using Vice.Core;
 using Vice.Display;
+using Vice.Host;
 using Vice.Logging;
 using Vice.Plugins;
 using Xunit;
-using static Vice.Dsl;
+using static Vice.Core.Dsl;
 
 namespace Vice.Tests;
 
 [Collection("EnvVarSerial")]
 public class PluginDispatcherTests
 {
+    private readonly EnvVarSerialFixture _serial;
+
+    public PluginDispatcherTests(EnvVarSerialFixture serial)
+    {
+        _serial = serial;
+    }
+
     private static CommandRegistry Registry()
     {
         var r = new CommandRegistry();
@@ -55,6 +63,7 @@ out _, out _));
         }
 
         using var env = new EnvScope(
+            _serial,
             ("VICE_PLUGIN_DIR", dir.Path),
             ("XDG_DATA_HOME", null));
 
@@ -75,6 +84,7 @@ out _, out _));
             UnixFileMode.UserRead | UnixFileMode.UserExecute | UnixFileMode.UserWrite);
 
         using var env = new EnvScope(
+            _serial,
             ("VICE_PLUGIN_DIR", dir.Path),
             ("XDG_DATA_HOME", null));
 
@@ -131,6 +141,7 @@ out var resolvedPath, out var pluginArgs);
             UnixFileMode.UserRead | UnixFileMode.UserExecute | UnixFileMode.UserWrite);
 
         using var env = new EnvScope(
+            _serial,
             ("VICE_PLUGIN_DIR", dir.Path),
             ("XDG_DATA_HOME", null));
 

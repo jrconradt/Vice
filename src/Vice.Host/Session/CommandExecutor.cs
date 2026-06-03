@@ -2,6 +2,7 @@ using System.Collections.Frozen;
 using System.Diagnostics;
 using Vice.Commands;
 using Vice.Contracts;
+using Vice.Core;
 using Vice.Display;
 using Vice.Display.Rendering;
 using Vice.Execution;

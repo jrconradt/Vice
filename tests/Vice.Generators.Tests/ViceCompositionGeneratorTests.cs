@@ -46,7 +46,7 @@ public class ViceCompositionGeneratorTests
     {
         const string SOURCE = """
             using Vice.Composition;
-            using Vice;
+            using Vice.Core;
             namespace MyApp;
 
             [ViceHost]
@@ -222,7 +222,7 @@ public class ViceCompositionGeneratorTests
         const string SOURCE = """
             using System.Threading;
             using System.Threading.Tasks;
-            using Vice;
+            using Vice.Core;
             using Vice.Composition;
             using Vice.Execution;
 
@@ -260,7 +260,7 @@ public class ViceCompositionGeneratorTests
         const string SOURCE = """
             using System.Threading;
             using System.Threading.Tasks;
-            using Vice;
+            using Vice.Core;
             using Vice.Composition;
             using Vice.Execution;
 
@@ -298,7 +298,7 @@ public class ViceCompositionGeneratorTests
         const string SOURCE = """
             using System.Threading;
             using System.Threading.Tasks;
-            using Vice;
+            using Vice.Core;
             using Vice.Composition;
             using Vice.Execution;
 

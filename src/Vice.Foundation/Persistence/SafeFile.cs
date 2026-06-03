@@ -1,4 +1,5 @@
 using Microsoft.Win32.SafeHandles;
+using Vice.Logging;
 
 namespace Vice.Persistence;
 

@@ -7,11 +7,12 @@ using Grpc.Net.Client;
 using Grpc.Reflection.V1Alpha;
 using Vice.Composition;
 using Vice.Contracts;
+using Vice.Core;
 using Vice.Foundation.Execution;
 using Vice.Lexicon;
 using Vice.Logging;
 using Vice.Net.Commands.Network;
-using static Vice.Dsl;
+using static Vice.Core.Dsl;
 
 namespace Vice.Net.Requests.Grpc;
 

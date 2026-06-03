@@ -3,6 +3,9 @@ namespace Vice.Jobs;
 internal sealed class JobStateHolder
 {
     private JobState _state;
+    private CancellationTokenSource? _cts;
+    private Task? _activeTask;
+    private int _terminalRecorded;
 
     public JobStateHolder(JobState initial)
     {
@@ -10,6 +13,31 @@ internal sealed class JobStateHolder
     }
 
     public JobState Read() => Volatile.Read(ref _state);
+
+    public int Id => Read().Id;
+
+    public Task? ActiveTask => Volatile.Read(ref _activeTask);
+
+    public void SetActiveTask(Task task) => Volatile.Write(ref _activeTask, task);
+
+    public void ClearActiveTask(Task expected)
+        => Interlocked.CompareExchange(ref _activeTask, null, expected);
+
+    public bool TryRegisterCts(CancellationTokenSource cts)
+        => Interlocked.CompareExchange(ref _cts, cts, null) is null;
+
+    public CancellationTokenSource? Cts => Volatile.Read(ref _cts);
+
+    public CancellationTokenSource? TakeCts(CancellationTokenSource expected)
+        => ReferenceEquals(Interlocked.CompareExchange(ref _cts, null, expected), expected)
+            ? expected
+            : null;
+
+    public CancellationTokenSource? TakeCts()
+        => Interlocked.Exchange(ref _cts, null);
+
+    public bool MarkTerminalRecorded()
+        => Interlocked.Exchange(ref _terminalRecorded, 1) == 0;
 
     public bool TryUpdate(Func<JobState, JobState?> mutator)
     {

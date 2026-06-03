@@ -11,7 +11,7 @@ using Microsoft.CodeAnalysis.Text;
 namespace Vice.Generators;
 
 [Generator]
-public sealed partial class ViceCompositionGenerator : IIncrementalGenerator
+public sealed class ViceCompositionGenerator : IIncrementalGenerator
 {
     const string HOST_ATTR = "Vice.Composition.ViceHostAttribute";
     const string PACK_ATTR = "Vice.Composition.ViceCommandPackAttribute";
@@ -36,7 +36,7 @@ public sealed partial class ViceCompositionGenerator : IIncrementalGenerator
 
     static readonly DiagnosticDescriptor NoRegisterMethod = new(
         "VICE004", "[ViceCommandPack] has no Register(IViceApp, ...) method",
-        "[ViceCommandPack] class '{0}' must declare a static method 'Register' whose first parameter is Vice.IViceApp",
+        "[ViceCommandPack] class '{0}' must declare a static method 'Register' whose first parameter is Vice.Core.IViceApp",
         "Vice.Composition", DiagnosticSeverity.Error, isEnabledByDefault: true);
 
     static readonly DiagnosticDescriptor DuplicateFactory = new(
@@ -107,7 +107,7 @@ public sealed partial class ViceCompositionGenerator : IIncrementalGenerator
 
         var localCommands = context.SyntaxProvider
             .ForAttributeWithMetadataName(
-                COMMAND_ATTR,
+                ViceGeneratorHelpers.COMMAND_ATTR,
                 predicate: static (node, _) => node is TypeDeclarationSyntax,
                 transform: static (ctx, _) => ctx.TargetSymbol as INamedTypeSymbol)
             .Where(static t => t is not null)
@@ -127,8 +127,6 @@ public sealed partial class ViceCompositionGenerator : IIncrementalGenerator
             var localDiscovery = new LocalDiscovery(packs, jobRunners, sessionServices, options, commands);
             Run(spc, hostList, localDiscovery, comp);
         });
-
-        InitializeTargetsPipeline(context);
     }
 
     sealed class LocalDiscovery
@@ -381,7 +379,7 @@ public sealed partial class ViceCompositionGenerator : IIncrementalGenerator
     {
         var lines = new List<string>();
         var members = host.GetMembers()
-            .Where(m => !m.IsStatic && HasAttr(m, SESSION_SERVICE_ATTR))
+            .Where(m => !m.IsStatic && ViceGeneratorHelpers.HasAttr(m, SESSION_SERVICE_ATTR))
             .ToList();
         members.Sort(static (a, b) => string.CompareOrdinal(a.Name, b.Name));
         foreach (var hostMember in members)
@@ -477,12 +475,11 @@ public sealed partial class ViceCompositionGenerator : IIncrementalGenerator
         return
             $"#nullable enable\n" +
             $"using System;\n" +
-            $"using Vice;\n" +
             $"\n" +
             $"{namespaceBlock}" +
             $"{visibility} static class ViceComposition\n" +
             $"{{\n" +
-            $"    {visibility} static global::Vice.ViceAppBuilder ComposeFromAttributes(this global::Vice.ViceAppBuilder builder, {hostFq} host)\n" +
+            $"    {visibility} static global::Vice.Host.ViceAppBuilder ComposeFromAttributes(this global::Vice.Host.ViceAppBuilder builder, {hostFq} host)\n" +
             $"    {{\n" +
             $"        if (builder is null)\n" +
             $"        {{\n" +
@@ -493,7 +490,7 @@ public sealed partial class ViceCompositionGenerator : IIncrementalGenerator
             $"        return builder;\n" +
             $"    }}\n" +
             $"\n" +
-            $"    {visibility} static global::Vice.IViceApp RegisterDiscoveredPacks(this global::Vice.IViceApp app, {hostFq} host)\n" +
+            $"    {visibility} static global::Vice.Core.IViceApp RegisterDiscoveredPacks(this global::Vice.Core.IViceApp app, {hostFq} host)\n" +
             $"    {{\n" +
             $"        if (app is null)\n" +
             $"        {{\n" +
@@ -642,14 +639,14 @@ public sealed partial class ViceCompositionGenerator : IIncrementalGenerator
             sink.Packs.Add(new PackEntry(t));
         }
 
-        if (HasAttr(t, COMMAND_ATTR)
+        if (ViceGeneratorHelpers.HasAttr(t, ViceGeneratorHelpers.COMMAND_ATTR)
             && IsUsableCommand(t))
         {
             sink.CommandClasses.Add(t);
         }
 
         if (!t.IsAbstract
-            && HasAttr(t, OPTION_ATTR)
+            && ViceGeneratorHelpers.HasAttr(t, OPTION_ATTR)
             && !SymbolEqualityComparer.Default.Equals(t.ContainingAssembly, frameworkAssembly))
         {
             sink.GlobalOptions.Add(t);
@@ -660,7 +657,7 @@ public sealed partial class ViceCompositionGenerator : IIncrementalGenerator
             switch (m)
             {
                 case IMethodSymbol method when IsAccessibleFrom(method, consumer):
-                    if (HasAttr(method, JOB_RUNNER_ATTR))
+                    if (ViceGeneratorHelpers.HasAttr(method, JOB_RUNNER_ATTR))
                     {
                         if (IsUsableFactory(method))
                         {
@@ -675,7 +672,7 @@ public sealed partial class ViceCompositionGenerator : IIncrementalGenerator
                         }
                     }
 
-                    if (HasAttr(method, SESSION_SERVICE_ATTR))
+                    if (ViceGeneratorHelpers.HasAttr(method, SESSION_SERVICE_ATTR))
                     {
                         if (IsUsableFactory(method))
                         {
@@ -728,19 +725,6 @@ public sealed partial class ViceCompositionGenerator : IIncrementalGenerator
         public List<INamedTypeSymbol> CommandClasses { get; } = new();
     }
 
-    static bool HasAttr(ISymbol sym, string fullName)
-    {
-        foreach (var a in sym.GetAttributes())
-        {
-            if (a.AttributeClass?.ToDisplayString() == fullName)
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
     static bool IsContainerVisible(IMethodSymbol method)
     {
         return method.ContainingType is { DeclaredAccessibility: not Accessibility.Private };
@@ -788,7 +772,7 @@ public sealed partial class ViceCompositionGenerator : IIncrementalGenerator
 
     static IMethodSymbol? FindPackRegister(INamedTypeSymbol pack, Compilation comp)
     {
-        var viceApp = comp.GetTypeByMetadataName("Vice.IViceApp");
+        var viceApp = comp.GetTypeByMetadataName("Vice.Core.IViceApp");
         if (viceApp is null)
         {
             return null;
@@ -802,24 +786,11 @@ public sealed partial class ViceCompositionGenerator : IIncrementalGenerator
                 && IsAccessibleFrom(m, comp.Assembly));
     }
 
-    static bool ImplementsIViceCommand(INamedTypeSymbol t)
-    {
-        foreach (var i in t.AllInterfaces)
-        {
-            if (i.ToDisplayString() == "Vice.Composition.IViceCommand")
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
     static bool IsUsableCommand(INamedTypeSymbol t)
     {
         if (t.IsAbstract
             || t.TypeKind != TypeKind.Class
-            || !ImplementsIViceCommand(t))
+            || !ViceGeneratorHelpers.ImplementsIViceCommand(t))
         {
             return false;
         }
@@ -838,16 +809,16 @@ public sealed partial class ViceCompositionGenerator : IIncrementalGenerator
 
     static string RenderCommandRegistration(INamedTypeSymbol cmd)
     {
-        var attr = cmd.GetAttributes().FirstOrDefault(a => a.AttributeClass?.ToDisplayString() == COMMAND_ATTR);
+        var attr = cmd.GetAttributes().FirstOrDefault(a => a.AttributeClass?.ToDisplayString() == ViceGeneratorHelpers.COMMAND_ATTR);
         var fq = cmd.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
         var verb = ReadCommandVerb(attr, cmd);
-        var targets = ReadExplicitTargets(attr) ?? new List<string>();
+        var targets = ViceGeneratorHelpers.ReadExplicitTargets(attr) ?? new List<string>();
         var description = ReadCommandDescription(attr);
 
-        var chain = $"global::Vice.Dsl.verb({SymbolDisplay.FormatLiteral(verb, true)})";
+        var chain = $"global::Vice.Core.Dsl.verb({SymbolDisplay.FormatLiteral(verb, true)})";
         foreach (var target in targets)
         {
-            chain += $" * global::Vice.Dsl.target({SymbolDisplay.FormatLiteral(target, true)})";
+            chain += $" * global::Vice.Core.Dsl.target({SymbolDisplay.FormatLiteral(target, true)})";
         }
 
         return $"        global::Vice.Composition.ViceCommandRegistration.Register<{fq}>(app, {chain}, {SymbolDisplay.FormatLiteral(description, true)});\n";
@@ -868,7 +839,7 @@ public sealed partial class ViceCompositionGenerator : IIncrementalGenerator
             }
         }
 
-        return KebabFromTypeName(cmd.Name);
+        return ViceGeneratorHelpers.KebabFromTypeName(cmd.Name);
     }
 
     static string ReadCommandDescription(AttributeData? attr)
@@ -886,34 +857,6 @@ public sealed partial class ViceCompositionGenerator : IIncrementalGenerator
         }
 
         return "";
-    }
-
-    static string KebabFromTypeName(string name)
-    {
-        var core = name.EndsWith("Command", StringComparison.Ordinal) && name.Length > 7
-            ? name.Substring(0, name.Length - 7)
-            : name;
-
-        var result = "";
-        for (int i = 0; i < core.Length; i++)
-        {
-            var c = core[i];
-            if (char.IsUpper(c))
-            {
-                if (i > 0)
-                {
-                    result += "-";
-                }
-
-                result += char.ToLowerInvariant(c);
-            }
-            else
-            {
-                result += c;
-            }
-        }
-
-        return result.Length == 0 ? name.ToLowerInvariant() : result;
     }
 
     static bool TryRenderFactoryCall(

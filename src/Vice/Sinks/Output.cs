@@ -1,4 +1,4 @@
-namespace Vice;
+namespace Vice.Core;
 
 public static class Output
 {

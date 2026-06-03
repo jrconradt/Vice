@@ -1,3 +1,4 @@
+using System.Threading.Channels;
 using Grpc.Core;
 using Grpc.Net.Client;
 using Vice.Display.Rendering;
@@ -43,59 +44,105 @@ internal sealed class GrpcBidiSession
         var attempt = 0;
         var exitCode = 0;
 
-        while (true)
+        var lines = Channel.CreateBounded<string?>(new BoundedChannelOptions(1)
         {
-            GrpcChannel channel;
+            SingleReader = true,
+            SingleWriter = true,
+            FullMode = BoundedChannelFullMode.Wait,
+        });
+
+        var readerThread = new Thread(() =>
+        {
             try
             {
-                channel = _connections.GetChannel(endpoint);
+                while (true)
+                {
+                    var line = _reader.ReadLine();
+                    lines.Writer.WriteAsync(line, ct).AsTask().GetAwaiter().GetResult();
+                    if (line is null)
+                    {
+                        break;
+                    }
+                }
             }
-            catch (InvalidOperationException ex)
+            catch (OperationCanceledException)
             {
-                _logger.Log(ViceLogLevel.Warn, $"bidi session: not connected to {endpoint}", ex);
-                _console.WriteError($"Not connected to {endpoint}. Use 'grpc connect {endpoint}' first.");
-                exitCode = Vice.Foundation.Execution.ViceExitCode.FAILURE;
-                break;
             }
-
-            var leg = await RunLegAsync(channel, methodDef, ct).ConfigureAwait(false);
-
-            totalSent += leg.Sent;
-            totalReceived += leg.Received;
-
-            if (leg.HardFault)
+            catch (Exception ex)
             {
-                exitCode = Vice.Foundation.Execution.ViceExitCode.FAILURE;
-                break;
+                _logger.Log(ViceLogLevel.Trace, "bidi session stdin reader thread ended", ex);
             }
-
-            if (leg.UserEnded
-                || !leg.TransientFault)
+            finally
             {
-                break;
+                lines.Writer.TryComplete();
             }
+        })
+        {
+            IsBackground = true,
+            Name = "grpc-bidi-stdin",
+        };
+        readerThread.Start();
 
-            if (ct.IsCancellationRequested)
+        try
+        {
+            while (true)
             {
-                exitCode = Vice.Foundation.Execution.ViceExitCode.FAILURE;
-                break;
-            }
+                GrpcChannel channel;
+                try
+                {
+                    channel = _connections.GetChannel(endpoint);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    _logger.Log(ViceLogLevel.Warn, $"bidi session: not connected to {endpoint}", ex);
+                    _console.WriteError($"Not connected to {endpoint}. Use 'grpc connect {endpoint}' first.");
+                    exitCode = Vice.Foundation.Execution.ViceExitCode.FAILURE;
+                    break;
+                }
 
-            attempt++;
-            if (attempt > MaxReconnectAttempts)
-            {
-                _console.WriteError($"Connection lost; gave up after {MaxReconnectAttempts} reconnect attempts.");
-                exitCode = Vice.Foundation.Execution.ViceExitCode.FAILURE;
-                break;
-            }
+                var leg = await RunLegAsync(channel, methodDef, lines.Reader, ct).ConfigureAwait(false);
 
-            _console.WriteError($"Connection lost, reconnecting (attempt {attempt}/{MaxReconnectAttempts})...");
-            if (!await TryReestablishAsync(endpoint, attempt, ct).ConfigureAwait(false))
-            {
-                _console.WriteError($"Reconnect to {endpoint} failed.");
-                exitCode = Vice.Foundation.Execution.ViceExitCode.FAILURE;
-                break;
+                totalSent += leg.Sent;
+                totalReceived += leg.Received;
+
+                if (leg.HardFault)
+                {
+                    exitCode = Vice.Foundation.Execution.ViceExitCode.FAILURE;
+                    break;
+                }
+
+                if (leg.UserEnded
+                    || !leg.TransientFault)
+                {
+                    break;
+                }
+
+                if (ct.IsCancellationRequested)
+                {
+                    exitCode = Vice.Foundation.Execution.ViceExitCode.FAILURE;
+                    break;
+                }
+
+                attempt++;
+                if (attempt > MaxReconnectAttempts)
+                {
+                    _console.WriteError($"Connection lost; gave up after {MaxReconnectAttempts} reconnect attempts.");
+                    exitCode = Vice.Foundation.Execution.ViceExitCode.FAILURE;
+                    break;
+                }
+
+                _console.WriteError($"Connection lost, reconnecting (attempt {attempt}/{MaxReconnectAttempts})...");
+                if (!await TryReestablishAsync(endpoint, attempt, ct).ConfigureAwait(false))
+                {
+                    _console.WriteError($"Reconnect to {endpoint} failed.");
+                    exitCode = Vice.Foundation.Execution.ViceExitCode.FAILURE;
+                    break;
+                }
             }
+        }
+        finally
+        {
+            lines.Writer.TryComplete();
         }
 
         _console.WriteLine($"Stream closed. {totalSent} sent, {totalReceived} received.");
@@ -105,6 +152,7 @@ internal sealed class GrpcBidiSession
     private async Task<LegResult> RunLegAsync(
         GrpcChannel channel,
         Method<byte[], byte[]> methodDef,
+        ChannelReader<string?> lines,
         CancellationToken ct)
     {
         var invoker = channel.CreateCallInvoker();
@@ -138,13 +186,15 @@ internal sealed class GrpcBidiSession
                 string? line;
                 try
                 {
-                    line = await Task.Factory.StartNew(() => _reader.ReadLine(),
-                                                       ct,
-                                                       TaskCreationOptions.LongRunning,
-                                                       TaskScheduler.Default).WaitAsync(ct).ConfigureAwait(false);
+                    line = await lines.ReadAsync(ct).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException)
                 {
+                    break;
+                }
+                catch (ChannelClosedException)
+                {
+                    userEnded = true;
                     break;
                 }
 

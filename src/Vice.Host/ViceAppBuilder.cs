@@ -1,10 +1,11 @@
+using Vice.Core;
 using Vice.Display;
 using Vice.Display.Rendering;
 using Vice.Jobs;
 using Vice.Logging;
 using Vice.Options;
 
-namespace Vice;
+namespace Vice.Host;
 
 public sealed class ViceAppBuilder
 {

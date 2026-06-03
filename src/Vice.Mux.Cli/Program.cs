@@ -1,5 +1,6 @@
-using Vice;
+using Vice.Core;
 using Vice.Foundation.Execution;
+using Vice.Host;
 using Vice.Logging;
 using Vice.Mux.Cli;
 
@@ -15,7 +16,7 @@ await using var app = ViceApp.Create("vice-mux", "1.0.0")
     .Build()
     .RegisterDiscoveredPacks(host);
 
-using var cts = Vice.Signals.HookGracefulShutdown();
+using var cts = Vice.Core.Signals.HookGracefulShutdown();
 
 try
 {
@@ -25,7 +26,7 @@ catch (OperationCanceledException)
 {
     return ViceExitCode.INTERRUPTED;
 }
-catch (IOException ex) when (Vice.Signals.IsBrokenPipe(ex))
+catch (IOException ex) when (Vice.Core.Signals.IsBrokenPipe(ex))
 {
     return ViceExitCode.SUCCESS;
 }

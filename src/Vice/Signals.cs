@@ -2,7 +2,7 @@ using System.Runtime.InteropServices;
 using Vice.Display;
 using Vice.Display.Rendering;
 
-namespace Vice;
+namespace Vice.Core;
 
 public static class Signals
 {

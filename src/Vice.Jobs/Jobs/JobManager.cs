@@ -16,10 +16,7 @@ internal sealed class JobManager : IJobManager
     private readonly TimeSpan _shutdownTimeout;
 
     private readonly ConcurrentDictionary<int, JobStateHolder> _jobs = new();
-    private readonly ConcurrentDictionary<int, CancellationTokenSource> _jobCts = new();
-    private readonly ConcurrentDictionary<int, Task> _activeTasks = new();
-    private readonly ConcurrentDictionary<int, byte> _terminalSeen = new();
-    private readonly ConcurrentQueue<int> _terminalOrder = new();
+    private readonly ConcurrentQueue<JobStateHolder> _terminalOrder = new();
     private int _nextId;
 
     private readonly CancellationTokenSource _shutdownCts;
@@ -89,7 +86,7 @@ internal sealed class JobManager : IJobManager
         }
 
         var holder = CreateJobState(descriptor);
-        var id = holder.Read().Id;
+        var id = holder.Id;
 
         _jobs.TryAdd(id, holder);
 
@@ -110,15 +107,14 @@ internal sealed class JobManager : IJobManager
             return;
         }
 
-        _jobCts.TryGetValue(jobId, out var cts);
-        SafeCancel(cts);
+        SafeCancel(holder.Cts);
 
         await DrainActiveTaskAsync(jobId, holder, ct).ConfigureAwait(false);
     }
 
     private async Task DrainActiveTaskAsync(int jobId, JobStateHolder holder, CancellationToken ct)
     {
-        _activeTasks.TryGetValue(jobId, out var activeTask);
+        var activeTask = holder.ActiveTask;
         if (activeTask is null)
         {
             return;
@@ -133,9 +129,8 @@ internal sealed class JobManager : IJobManager
             _logger.Log(ViceLogLevel.Warn,
                 $"job {jobId} pause drain timed out after {_shutdownTimeout}; transitioning to Failed");
             var transitioned = TryTransitionToFailed(holder, "pause drain timed out");
-            _activeTasks.TryRemove(jobId, out _);
-            _jobCts.TryRemove(jobId, out var stuckCts);
-            SafeDispose(stuckCts);
+            holder.ClearActiveTask(activeTask);
+            SafeDispose(holder.TakeCts());
             if (transitioned)
             {
                 FailJob(holder, "pause drain timed out");
@@ -155,7 +150,7 @@ internal sealed class JobManager : IJobManager
             return;
         }
 
-        _activeTasks.TryGetValue(jobId, out var prior);
+        var prior = holder.ActiveTask;
         if (prior is not null && !prior.IsCompleted)
         {
             _logger.Log(ViceLogLevel.Warn,
@@ -210,9 +205,7 @@ internal sealed class JobManager : IJobManager
             return Task.CompletedTask;
         }
 
-        _jobCts.TryGetValue(jobId, out var cts);
-
-        SafeCancel(cts);
+        SafeCancel(holder.Cts);
         FailJob(holder, "Cancelled");
         return Task.CompletedTask;
     }
@@ -233,18 +226,23 @@ internal sealed class JobManager : IJobManager
     {
         SafeCancel(_shutdownCts);
 
-        foreach (var cts in _jobCts.Values)
+        var holders = _jobs.Values.ToArray();
+        foreach (var holder in holders)
         {
-            SafeCancel(cts);
+            SafeCancel(holder.Cts);
         }
 
         await _workerPool.DrainAsync().ConfigureAwait(false);
 
-        var taskPairs = _activeTasks.ToArray();
-        foreach (var pair in taskPairs)
+        foreach (var holder in holders)
         {
-            var task = pair.Value;
-            var id = pair.Key;
+            var task = holder.ActiveTask;
+            if (task is null)
+            {
+                continue;
+            }
+
+            var id = holder.Id;
             try
             {
                 await task.WaitAsync(_shutdownTimeout).ConfigureAwait(false);
@@ -264,12 +262,9 @@ internal sealed class JobManager : IJobManager
             }
         }
 
-        var leftoverCts = _jobCts.Values.ToArray();
-        _jobCts.Clear();
-
-        foreach (var cts in leftoverCts)
+        foreach (var holder in holders)
         {
-            SafeDispose(cts);
+            SafeDispose(holder.TakeCts());
         }
 
         _shutdownCts.Dispose();
@@ -298,11 +293,11 @@ internal sealed class JobManager : IJobManager
     private JobStateHolder? FindHolder(int id)
         => _jobs.TryGetValue(id, out var holder) ? holder : null;
 
-    private void RecordTerminal(int jobId)
+    private void RecordTerminal(JobStateHolder holder)
     {
-        if (_terminalSeen.TryAdd(jobId, 0))
+        if (holder.MarkTerminalRecorded())
         {
-            _terminalOrder.Enqueue(jobId);
+            _terminalOrder.Enqueue(holder);
         }
     }
 
@@ -310,13 +305,12 @@ internal sealed class JobManager : IJobManager
     {
         while (_terminalOrder.Count > MAX_RETAINED_JOBS)
         {
-            if (!_terminalOrder.TryDequeue(out var staleId))
+            if (!_terminalOrder.TryDequeue(out var stale))
             {
                 return;
             }
 
-            _terminalSeen.TryRemove(staleId, out _);
-            if (_jobs.TryRemove(staleId, out var evicted))
+            if (_jobs.TryRemove(stale.Id, out var evicted))
             {
                 SweepAbandonedPartial(evicted.Read());
             }
@@ -347,16 +341,15 @@ internal sealed class JobManager : IJobManager
 
     private async Task ExecuteJobAsync(JobStateHolder holder)
     {
-        var jobId = holder.Read().Id;
         var execTask = ExecuteJobCoreAsync(holder);
-        _activeTasks[jobId] = execTask;
+        holder.SetActiveTask(execTask);
         try
         {
             await execTask.ConfigureAwait(false);
         }
         finally
         {
-            _activeTasks.TryRemove(new KeyValuePair<int, Task>(jobId, execTask));
+            holder.ClearActiveTask(execTask);
         }
     }
 
@@ -372,7 +365,7 @@ internal sealed class JobManager : IJobManager
 
         var jobId = snapshot.Id;
         var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(_shutdownCts.Token);
-        if (!_jobCts.TryAdd(jobId, linkedCts))
+        if (!holder.TryRegisterCts(linkedCts))
         {
             linkedCts.Dispose();
             return;
@@ -394,7 +387,7 @@ internal sealed class JobManager : IJobManager
         }
         finally
         {
-            CleanupJobCts(jobId, linkedCts);
+            CleanupJobCts(holder, linkedCts);
         }
 
         if (retry)
@@ -430,7 +423,7 @@ internal sealed class JobManager : IJobManager
         if (transitioned)
         {
             var completed = holder.Read();
-            RecordTerminal(completed.Id);
+            RecordTerminal(holder);
             EmitCompletedTelemetry(completed);
             JobCompleted?.Invoke(completed);
         }
@@ -554,7 +547,7 @@ internal sealed class JobManager : IJobManager
         var failed = holder.Read();
         if (failed.Status is JobStatus.Failed or JobStatus.Completed)
         {
-            RecordTerminal(failed.Id);
+            RecordTerminal(holder);
         }
 
         EmitFailedTelemetry(failed, reason);
@@ -595,18 +588,9 @@ internal sealed class JobManager : IJobManager
         }
     }
 
-    private void CleanupJobCts(int jobId, CancellationTokenSource linkedCts)
+    private void CleanupJobCts(JobStateHolder holder, CancellationTokenSource linkedCts)
     {
-        CancellationTokenSource? toDispose = null;
-        if (_jobCts.TryGetValue(jobId, out var existing) && ReferenceEquals(existing, linkedCts))
-        {
-            if (_jobCts.TryRemove(new KeyValuePair<int, CancellationTokenSource>(jobId, existing)))
-            {
-                toDispose = existing;
-            }
-        }
-
-        SafeDispose(toDispose);
+        SafeDispose(holder.TakeCts(linkedCts));
     }
 
     private IJobRunner? FindRunner(JobKind kind)

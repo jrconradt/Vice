@@ -15,8 +15,12 @@ public sealed class PoliteHandler : DelegatingHandler
     private static readonly TimeSpan MaxRetryAfter = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan MaxBackoff = TimeSpan.FromMinutes(2);
 
+    private const int DefaultMaxConcurrency = 1;
+
     private readonly TimeSpan _minInterval;
     private readonly IReadOnlyDictionary<string, TimeSpan> _hostMinIntervals;
+    private readonly int _maxConcurrency;
+    private readonly IReadOnlyDictionary<string, int> _hostMaxConcurrency;
     private readonly int _maxRetries;
     private readonly IViceLogger _logger;
     private readonly ConcurrentDictionary<string, Lazy<HostGate>> _hostGates = new(StringComparer.OrdinalIgnoreCase);
@@ -26,11 +30,15 @@ public sealed class PoliteHandler : DelegatingHandler
     public PoliteHandler(TimeSpan? minInterval = null,
                          int maxRetries = 3,
                          IViceLogger? logger = null,
-                         IReadOnlyDictionary<string, TimeSpan>? hostMinIntervals = null)
+                         IReadOnlyDictionary<string, TimeSpan>? hostMinIntervals = null,
+                         int maxConcurrencyPerHost = DefaultMaxConcurrency,
+                         IReadOnlyDictionary<string, int>? hostMaxConcurrency = null)
         : base(new HttpClientHandler())
     {
         _minInterval = minInterval ?? DefaultMinInterval;
         _hostMinIntervals = BuildHostIntervals(hostMinIntervals);
+        _maxConcurrency = NormalizeConcurrency(maxConcurrencyPerHost);
+        _hostMaxConcurrency = BuildHostConcurrency(hostMaxConcurrency);
         _maxRetries = maxRetries;
         _logger = logger ?? NullViceLogger.Instance;
         _evictionLoop = Task.Run(() => EvictionLoopAsync(_evictionCts.Token));
@@ -40,11 +48,15 @@ public sealed class PoliteHandler : DelegatingHandler
                          TimeSpan? minInterval = null,
                          int maxRetries = 3,
                          IViceLogger? logger = null,
-                         IReadOnlyDictionary<string, TimeSpan>? hostMinIntervals = null)
+                         IReadOnlyDictionary<string, TimeSpan>? hostMinIntervals = null,
+                         int maxConcurrencyPerHost = DefaultMaxConcurrency,
+                         IReadOnlyDictionary<string, int>? hostMaxConcurrency = null)
         : base(innerHandler)
     {
         _minInterval = minInterval ?? DefaultMinInterval;
         _hostMinIntervals = BuildHostIntervals(hostMinIntervals);
+        _maxConcurrency = NormalizeConcurrency(maxConcurrencyPerHost);
+        _hostMaxConcurrency = BuildHostConcurrency(hostMaxConcurrency);
         _maxRetries = maxRetries;
         _logger = logger ?? NullViceLogger.Instance;
         _evictionLoop = Task.Run(() => EvictionLoopAsync(_evictionCts.Token));
@@ -61,8 +73,32 @@ public sealed class PoliteHandler : DelegatingHandler
         return new Dictionary<string, TimeSpan>(overrides, StringComparer.OrdinalIgnoreCase);
     }
 
+    private static IReadOnlyDictionary<string, int> BuildHostConcurrency(IReadOnlyDictionary<string, int>? overrides)
+    {
+        if (overrides is null
+            || overrides.Count == 0)
+        {
+            return EmptyHostConcurrency;
+        }
+
+        var normalized = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (host, value) in overrides)
+        {
+            normalized[host] = NormalizeConcurrency(value);
+        }
+        return normalized;
+    }
+
+    private static int NormalizeConcurrency(int value)
+    {
+        return value < 1 ? 1 : value;
+    }
+
     private static readonly IReadOnlyDictionary<string, TimeSpan> EmptyHostIntervals =
         new Dictionary<string, TimeSpan>(StringComparer.OrdinalIgnoreCase);
+
+    private static readonly IReadOnlyDictionary<string, int> EmptyHostConcurrency =
+        new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
     private TimeSpan IntervalForHost(string host)
     {
@@ -72,6 +108,16 @@ public sealed class PoliteHandler : DelegatingHandler
         }
 
         return _minInterval;
+    }
+
+    private int ConcurrencyForHost(string host)
+    {
+        if (_hostMaxConcurrency.TryGetValue(host, out var concurrency))
+        {
+            return concurrency;
+        }
+
+        return _maxConcurrency;
     }
 
     private async Task EvictionLoopAsync(CancellationToken ct)
@@ -108,13 +154,16 @@ public sealed class PoliteHandler : DelegatingHandler
                         continue;
                     }
 
-                    try
+                    foreach (var lane in removed.Value.Lanes)
                     {
-                        await removed.Value.Queue.DisposeAsync().ConfigureAwait(false);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.Log(ViceLogLevel.Trace, $"polite handler idle eviction dispose failed for '{kvp.Key}'", ex);
+                        try
+                        {
+                            await lane.Queue.DisposeAsync().ConfigureAwait(false);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.Log(ViceLogLevel.Trace, $"polite handler idle eviction dispose failed for '{kvp.Key}'", ex);
+                        }
                     }
                 }
             }
@@ -170,13 +219,16 @@ public sealed class PoliteHandler : DelegatingHandler
                     continue;
                 }
 
-                try
+                foreach (var lane in lazy.Value.Lanes)
                 {
-                    lazy.Value.Queue.DisposeAsync().AsTask().GetAwaiter().GetResult();
-                }
-                catch (Exception ex)
-                {
-                    _logger.Log(ViceLogLevel.Trace, "polite handler host gate dispose observed exception", ex);
+                    try
+                    {
+                        lane.Queue.DisposeAsync().AsTask().GetAwaiter().GetResult();
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.Log(ViceLogLevel.Trace, "polite handler host gate dispose observed exception", ex);
+                    }
                 }
             }
             _hostGates.Clear();
@@ -188,23 +240,25 @@ public sealed class PoliteHandler : DelegatingHandler
         HttpRequestMessage request, CancellationToken ct)
     {
         var host = request.RequestUri?.Host ?? string.Empty;
+        var laneCount = ConcurrencyForHost(host);
         while (true)
         {
             var gate = _hostGates.GetOrAdd(host,
-                _ => new Lazy<HostGate>(() => new HostGate(), LazyThreadSafetyMode.ExecutionAndPublication)).Value;
+                _ => new Lazy<HostGate>(() => new HostGate(laneCount), LazyThreadSafetyMode.ExecutionAndPublication)).Value;
             Interlocked.Exchange(ref gate.LastUsedTicks, DateTime.UtcNow.Ticks);
+            var lane = gate.SelectLane();
 
             try
             {
-                return await gate.Queue.EnqueueAsync(async token =>
+                return await lane.Queue.EnqueueAsync(async token =>
                 {
                     try
                     {
-                        return await SendWithThrottleAndRetryAsync(gate, request, token).ConfigureAwait(false);
+                        return await SendWithThrottleAndRetryAsync(lane, request, token).ConfigureAwait(false);
                     }
                     finally
                     {
-                        Interlocked.Exchange(ref gate.LastRequestTicks, Stopwatch.GetTimestamp());
+                        Interlocked.Exchange(ref lane.LastRequestTicks, Stopwatch.GetTimestamp());
                     }
                 }, ct).ConfigureAwait(false);
             }
@@ -216,10 +270,10 @@ public sealed class PoliteHandler : DelegatingHandler
     }
 
     private async Task<HttpResponseMessage> SendWithThrottleAndRetryAsync(
-        HostGate gate, HttpRequestMessage request, CancellationToken ct)
+        Lane lane, HttpRequestMessage request, CancellationToken ct)
     {
         var minInterval = IntervalForHost(request.RequestUri?.Host ?? string.Empty);
-        var lastTicks = Interlocked.Read(ref gate.LastRequestTicks);
+        var lastTicks = Interlocked.Read(ref lane.LastRequestTicks);
         if (lastTicks != 0)
         {
             var elapsed = Stopwatch.GetElapsedTime(lastTicks);
@@ -411,10 +465,36 @@ public sealed class PoliteHandler : DelegatingHandler
             && a.Port == b.Port;
     }
 
-    private sealed class HostGate
+    private sealed class Lane
     {
         public readonly SerialQueue Queue = new();
         public long LastRequestTicks;
+    }
+
+    private sealed class HostGate
+    {
+        public readonly Lane[] Lanes;
+        public long NextLane;
         public long LastUsedTicks;
+
+        public HostGate(int laneCount)
+        {
+            Lanes = new Lane[laneCount];
+            for (var i = 0; i < laneCount; i++)
+            {
+                Lanes[i] = new Lane();
+            }
+        }
+
+        public Lane SelectLane()
+        {
+            if (Lanes.Length == 1)
+            {
+                return Lanes[0];
+            }
+
+            var index = (Interlocked.Increment(ref NextLane) - 1) % Lanes.Length;
+            return Lanes[index];
+        }
     }
 }

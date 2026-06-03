@@ -1,3 +1,4 @@
+using Vice.Core;
 using Vice.Display.Rendering;
 using Vice.Logging;
 using Vice.Options;

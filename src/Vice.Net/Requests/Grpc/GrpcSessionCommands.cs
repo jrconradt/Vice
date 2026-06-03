@@ -1,7 +1,8 @@
 using Vice.Composition;
+using Vice.Core;
 using Vice.Lexicon;
 using Vice.Net.Requests.Grpc;
-using static Vice.Dsl;
+using static Vice.Core.Dsl;
 
 namespace Vice.Net.Requests.Grpc;
 

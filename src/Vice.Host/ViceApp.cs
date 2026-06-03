@@ -1,9 +1,11 @@
 using Vice.Commands;
 using Vice.Contracts;
+using Vice.Core;
 using Vice.Display;
 using Vice.Display.Rendering;
 using Vice.Foundation.Execution;
 using Vice.Host.Commands;
+using Vice.Host.Core;
 using Vice.Ipc;
 using Vice.Jobs;
 using Vice.Logging;
@@ -13,7 +15,7 @@ using Vice.Plugins;
 using Vice.Session;
 using Vice.Streaming;
 
-namespace Vice;
+namespace Vice.Host;
 
 public sealed class ViceApp : IViceApp, IAsyncDisposable
 {
@@ -32,9 +34,6 @@ public sealed class ViceApp : IViceApp, IAsyncDisposable
     private readonly TimeSpan _shutdownTimeout;
     private readonly Dictionary<string, GlobalOption> _options
         = new(StringComparer.OrdinalIgnoreCase);
-    private readonly IOutputSink _priorOutputSink;
-    private readonly IStatusSink _priorStatusSink;
-    private readonly IViceLogger _priorLogSink;
     private readonly IDisposable? _ownedOutputSink;
     private bool _disposed;
 
@@ -97,28 +96,22 @@ public sealed class ViceApp : IViceApp, IAsyncDisposable
             }
         }
 
-        _priorOutputSink = Vice.Output.Current;
-        _priorStatusSink = Vice.Status.Current;
-        _priorLogSink = Vice.Log.Current;
-
         try
         {
             IOutputSink resolvedSink;
             if (outputSink is not null)
             {
                 resolvedSink = outputSink;
-                Vice.Output.Configure(outputSink);
             }
             else if (console is null)
             {
                 var ownedSink = new ConsoleOutputSink();
                 _ownedOutputSink = ownedSink;
                 resolvedSink = ownedSink;
-                Vice.Output.Configure(ownedSink);
             }
             else
             {
-                resolvedSink = Vice.Output.Current;
+                resolvedSink = NullOutputSink.Instance;
             }
             _outputSink = resolvedSink;
             _console = console ?? new ConsoleWriter(resolvedSink);
@@ -126,7 +119,6 @@ public sealed class ViceApp : IViceApp, IAsyncDisposable
             if (status is null && _console is ConsoleWriter
                 && !System.Console.IsErrorRedirected)
             {
-                Vice.Status.Configure(new UnifiedStatusSink(_capabilities, _console));
                 _status = new UnifiedStatusDisplay(_capabilities);
             }
             else
@@ -134,19 +126,11 @@ public sealed class ViceApp : IViceApp, IAsyncDisposable
                 _status = status ?? NullStatusDisplay.Instance;
             }
 
-            if (_logger is not NullViceLogger)
-            {
-                Vice.Log.Configure(_logger);
-            }
-
             BuiltinCommands.Register(_registry, this);
             SessionBuiltins.RegisterChains(_registry);
         }
         catch
         {
-            Vice.Output.Configure(_priorOutputSink);
-            Vice.Status.Configure(_priorStatusSink);
-            Vice.Log.Configure(_priorLogSink);
             _ownedOutputSink?.Dispose();
             throw;
         }
@@ -428,9 +412,6 @@ public sealed class ViceApp : IViceApp, IAsyncDisposable
             }
         }
 
-        Vice.Output.Configure(_priorOutputSink);
-        Vice.Status.Configure(_priorStatusSink);
-        Vice.Log.Configure(_priorLogSink);
         _ownedOutputSink?.Dispose();
     }
 

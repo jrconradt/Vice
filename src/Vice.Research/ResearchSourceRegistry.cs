@@ -2,21 +2,26 @@ using Vice.Logging;
 
 namespace Vice.Research;
 
-internal sealed class ResearchSourceRegistry
+public sealed class ResearchSourceRegistry
 {
     private readonly Dictionary<string, IResearchSource> _byKey = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<IResearchSource> _sources = new();
 
     public ResearchSourceRegistry()
-        : this(new IResearchSource[]
-               {
-                   new ArxivSource(),
-                   new GutenbergSource(),
-                   new PubMedSource(),
-                   new UniProtSource(),
-                   new AlphaFoldSource(),
-               })
+        : this(DefaultSources())
     {
+    }
+
+    public static IReadOnlyList<IResearchSource> DefaultSources()
+    {
+        return new IResearchSource[]
+        {
+            new ArxivSource(),
+            new GutenbergSource(),
+            new PubMedSource(),
+            new UniProtSource(),
+            new AlphaFoldSource(),
+        };
     }
 
     public ResearchSourceRegistry(IEnumerable<IResearchSource> sources)

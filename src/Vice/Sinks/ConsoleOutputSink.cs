@@ -1,7 +1,7 @@
 using System.Text;
 using Vice.Display.Rendering;
 
-namespace Vice;
+namespace Vice.Core;
 
 internal sealed class ConsoleOutputSink : IOutputSink, IDisposable
 {

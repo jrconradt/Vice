@@ -287,7 +287,7 @@ internal static class MultiProcessPipeline
             }
             catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException or System.ComponentModel.Win32Exception)
             {
-                Vice.Quietly.Swallow(ex, logger);
+                Vice.Logging.Quietly.Swallow(ex, logger);
             }
         }
     }
@@ -337,7 +337,7 @@ internal static class MultiProcessPipeline
         }
         catch (OperationCanceledException ex)
         {
-            Vice.Quietly.Swallow(ex, logger);
+            Vice.Logging.Quietly.Swallow(ex, logger);
         }
         finally
         {
@@ -353,7 +353,7 @@ internal static class MultiProcessPipeline
         }
         catch (Exception ex) when (ex is IOException or ObjectDisposedException)
         {
-            Vice.Quietly.Swallow(ex);
+            Vice.Logging.Quietly.Swallow(ex);
         }
 
         try
@@ -362,7 +362,7 @@ internal static class MultiProcessPipeline
         }
         catch (Exception ex) when (ex is IOException or ObjectDisposedException)
         {
-            Vice.Quietly.Swallow(ex);
+            Vice.Logging.Quietly.Swallow(ex);
         }
     }
 
@@ -412,7 +412,7 @@ internal static class MultiProcessPipeline
                 }
                 catch (OperationCanceledException ex)
                 {
-                    Vice.Quietly.Swallow(ex, logger);
+                    Vice.Logging.Quietly.Swallow(ex, logger);
                 }
                 finally
                 {
@@ -448,7 +448,7 @@ internal static class MultiProcessPipeline
         }
         catch (OperationCanceledException ex)
         {
-            Vice.Quietly.Swallow(ex, logger);
+            Vice.Logging.Quietly.Swallow(ex, logger);
         }
         finally
         {

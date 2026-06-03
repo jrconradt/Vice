@@ -24,7 +24,7 @@ internal sealed class ProcessSink : StreamBackedSink
         }
         catch (Exception ex) when (ex is OperationCanceledException or InvalidOperationException)
         {
-            Vice.Quietly.Swallow(ex, Logger);
+            Vice.Logging.Quietly.Swallow(ex, Logger);
         }
 
         if (!gracefulExited)
@@ -35,7 +35,7 @@ internal sealed class ProcessSink : StreamBackedSink
             }
             catch (Exception killEx) when (killEx is InvalidOperationException or NotSupportedException or System.ComponentModel.Win32Exception)
             {
-                Vice.Quietly.Swallow(killEx, Logger);
+                Vice.Logging.Quietly.Swallow(killEx, Logger);
             }
 
             try
@@ -44,7 +44,7 @@ internal sealed class ProcessSink : StreamBackedSink
             }
             catch (Exception waitEx) when (waitEx is TimeoutException or InvalidOperationException or OperationCanceledException)
             {
-                Vice.Quietly.Swallow(waitEx, Logger);
+                Vice.Logging.Quietly.Swallow(waitEx, Logger);
             }
         }
 
@@ -68,7 +68,7 @@ internal sealed class ProcessSink : StreamBackedSink
         }
         catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException)
         {
-            Vice.Quietly.Swallow(ex, Logger);
+            Vice.Logging.Quietly.Swallow(ex, Logger);
             return;
         }
 

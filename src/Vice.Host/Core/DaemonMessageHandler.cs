@@ -9,7 +9,7 @@ using Vice.Logging;
 using Vice.Parser;
 using Vice.Session;
 
-namespace Vice;
+namespace Vice.Host.Core;
 
 internal sealed class DaemonMessageHandler
 {

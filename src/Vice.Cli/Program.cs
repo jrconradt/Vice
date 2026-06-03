@@ -1,8 +1,9 @@
 using System.Reflection;
-using Vice;
 using Vice.Build.Dotnet;
 using Vice.Cli;
+using Vice.Core;
 using Vice.Foundation.Execution;
+using Vice.Host;
 using Vice.Logging;
 using Vice.Net.Requests.Grpc;
 
@@ -14,7 +15,7 @@ await using var logger = new ConsoleViceLogger(logLevel, logSink);
 var connections = new GrpcConnectionManager(logger);
 var buildQueue = new DotnetBuildQueue(logger);
 
-using var cts = Vice.Signals.HookGracefulShutdown();
+using var cts = Vice.Core.Signals.HookGracefulShutdown();
 
 var host = new ViceHostServices
 {
@@ -54,7 +55,7 @@ catch (OperationCanceledException)
 {
     return ViceExitCode.INTERRUPTED;
 }
-catch (IOException ex) when (Vice.Signals.IsBrokenPipe(ex))
+catch (IOException ex) when (Vice.Core.Signals.IsBrokenPipe(ex))
 {
     return ViceExitCode.SUCCESS;
 }

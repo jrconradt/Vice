@@ -7,7 +7,7 @@ using Vice.Ipc;
 using Vice.Lexicon;
 using Vice.Manpages;
 using Vice.Options;
-using static Vice.Dsl;
+using static Vice.Core.Dsl;
 
 namespace Vice.Host.Commands;
 

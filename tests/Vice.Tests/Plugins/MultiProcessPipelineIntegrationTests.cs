@@ -12,6 +12,13 @@ public class MultiProcessPipelineIntegrationTests
 {
     private const string Payload = "the quick brown fox jumps over the lazy dog 0123456789";
 
+    private readonly EnvVarSerialFixture _serial;
+
+    public MultiProcessPipelineIntegrationTests(EnvVarSerialFixture serial)
+    {
+        _serial = serial;
+    }
+
     private static void RestrictDir(string dir)
     {
         UnixPerms.Set(
@@ -43,6 +50,7 @@ public class MultiProcessPipelineIntegrationTests
         var outPath = Path.Combine(pluginDir.Path, "out.txt");
 
         using var env = new EnvScope(
+            _serial,
             ("VICE_PLUGIN_DIR", pluginDir.Path),
             ("XDG_DATA_HOME", null));
 
@@ -75,6 +83,7 @@ public class MultiProcessPipelineIntegrationTests
             $"#!/bin/sh\nprintf '%s ' \"$@\" > '{argsPath}'\ncat > /dev/null\n");
 
         using var env = new EnvScope(
+            _serial,
             ("VICE_PLUGIN_DIR", pluginDir.Path),
             ("XDG_DATA_HOME", null));
 
@@ -111,6 +120,7 @@ public class MultiProcessPipelineIntegrationTests
         var outB = Path.Combine(pluginDir.Path, "out-b.txt");
 
         using var env = new EnvScope(
+            _serial,
             ("VICE_PLUGIN_DIR", pluginDir.Path),
             ("XDG_DATA_HOME", null));
 

@@ -10,10 +10,9 @@ using Microsoft.CodeAnalysis.Text;
 
 namespace Vice.Generators;
 
-public sealed partial class ViceCompositionGenerator
+[Generator]
+public sealed class ViceCommandTargetsGenerator : IIncrementalGenerator
 {
-    const string COMMAND_ATTR = "Vice.Composition.ViceCommandAttribute";
-
     static readonly DiagnosticDescriptor TargetsInferenceFailed = new(
         "VICE010", "Cannot infer targets from chain expression",
         "[ViceCommand] handler '{0}' was registered with a chain expression the generator could not statically analyze: {1}. Provide explicit targets via [ViceCommand(\"id\", \"source\", ...)] or simplify the chain.",
@@ -29,7 +28,7 @@ public sealed partial class ViceCompositionGenerator
         "[ViceCommand] class '{0}' does not implement global::Vice.Composition.IViceCommand and does not declare 'Task<int> Handle(CommandContext, CancellationToken)'. Implement IViceCommand (or declare the Handle method) so the generated partial can satisfy the interface.",
         "Vice.Composition", DiagnosticSeverity.Error, isEnabledByDefault: true);
 
-    void InitializeTargetsPipeline(IncrementalGeneratorInitializationContext context)
+    public void Initialize(IncrementalGeneratorInitializationContext context)
     {
         var registrations = context.SyntaxProvider
             .CreateSyntaxProvider(
@@ -41,7 +40,7 @@ public sealed partial class ViceCompositionGenerator
 
         var commandMethods = context.SyntaxProvider
             .ForAttributeWithMetadataName(
-                COMMAND_ATTR,
+                ViceGeneratorHelpers.COMMAND_ATTR,
                 predicate: static (node, _) => node is MethodDeclarationSyntax or ClassDeclarationSyntax,
                 transform: static (ctx, _) => (ISymbol)ctx.TargetSymbol)
             .Collect();
@@ -218,14 +217,14 @@ public sealed partial class ViceCompositionGenerator
         }
 
         var fq = type.ToDisplayString();
-        if (fq == "Vice.IViceApp")
+        if (fq == "Vice.Core.IViceApp")
         {
             return true;
         }
 
         foreach (var i in type.AllInterfaces)
         {
-            if (i.ToDisplayString() == "Vice.IViceApp")
+            if (i.ToDisplayString() == "Vice.Core.IViceApp")
             {
                 return true;
             }
@@ -349,8 +348,8 @@ public sealed partial class ViceCompositionGenerator
             return;
         }
 
-        var attr = method.GetAttributes().FirstOrDefault(a => a.AttributeClass?.ToDisplayString() == COMMAND_ATTR);
-        var explicitNames = ReadExplicitTargets(attr);
+        var attr = method.GetAttributes().FirstOrDefault(a => a.AttributeClass?.ToDisplayString() == ViceGeneratorHelpers.COMMAND_ATTR);
+        var explicitNames = ViceGeneratorHelpers.ReadExplicitTargets(attr);
 
         var displayName = method.ToDisplayString();
         var resolved = ResolveTargetsForKey(key, explicitNames, byHandler, displayName, spc);
@@ -384,8 +383,8 @@ public sealed partial class ViceCompositionGenerator
             return;
         }
 
-        var attr = type.GetAttributes().FirstOrDefault(a => a.AttributeClass?.ToDisplayString() == COMMAND_ATTR);
-        var explicitNames = ReadExplicitTargets(attr);
+        var attr = type.GetAttributes().FirstOrDefault(a => a.AttributeClass?.ToDisplayString() == ViceGeneratorHelpers.COMMAND_ATTR);
+        var explicitNames = ViceGeneratorHelpers.ReadExplicitTargets(attr);
 
         var displayName = type.ToDisplayString();
         var resolved = ResolveTargetsForKey(key, explicitNames, byHandler, displayName, spc);
@@ -399,7 +398,7 @@ public sealed partial class ViceCompositionGenerator
             : type.ContainingNamespace.ToDisplayString();
         var visibility = type.DeclaredAccessibility == Accessibility.Public ? "public" : "internal";
 
-        var satisfiesCommand = ImplementsIViceCommand(type) || DeclaresHandle(type);
+        var satisfiesCommand = ViceGeneratorHelpers.ImplementsIViceCommand(type) || DeclaresHandle(type);
         if (!satisfiesCommand)
         {
             spc.ReportDiagnostic(Diagnostic.Create(CommandTypeMissingHandle,
@@ -439,36 +438,6 @@ public sealed partial class ViceCompositionGenerator
         }
 
         return false;
-    }
-
-    static IReadOnlyList<string>? ReadExplicitTargets(AttributeData? attr)
-    {
-        if (attr is null)
-        {
-            return null;
-        }
-
-        if (attr.ConstructorArguments.Length == 0)
-        {
-            return null;
-        }
-
-        var arg = attr.ConstructorArguments[0];
-        if (arg.Kind != TypedConstantKind.Array)
-        {
-            return null;
-        }
-
-        var list = new List<string>(arg.Values.Length);
-        foreach (var v in arg.Values)
-        {
-            if (v.Value is string s && !string.IsNullOrEmpty(s))
-            {
-                list.Add(s);
-            }
-        }
-
-        return list;
     }
 
     static string BuildTargetPropertyLines(IReadOnlyList<string> names, string ownerDisplay)
@@ -834,7 +803,7 @@ internal static class ChainTargetScanner
     }
 
     static bool IsTargetDefField(IFieldSymbol f)
-        => f.IsStatic && f.Type.ToDisplayString() == "Vice.TargetDef";
+        => f.IsStatic && f.Type.ToDisplayString() == "Vice.Core.TargetDef";
 
     static string? ExtractTargetName(IFieldSymbol field)
     {

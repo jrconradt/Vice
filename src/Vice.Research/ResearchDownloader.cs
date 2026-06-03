@@ -1,3 +1,4 @@
+using Vice.Logging;
 using Vice.Net.Requests.Http;
 using Vice.Persistence;
 
@@ -9,6 +10,7 @@ internal static class ResearchDownloader
                                                        Uri uri,
                                                        string destinationPath,
                                                        IProgress<DownloadProgress>? progress,
+                                                       IViceLogger logger,
                                                        CancellationToken ct)
     {
         var fullPath = AtomicDownload.ResolveDestination(destinationPath);
@@ -23,6 +25,7 @@ internal static class ResearchDownloader
                                                  FileMode.CreateNew,
                                                  startOffset: 0,
                                                  progress,
+                                                 logger,
                                                  ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException)

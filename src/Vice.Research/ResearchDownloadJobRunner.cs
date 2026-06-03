@@ -14,14 +14,9 @@ public sealed class ResearchDownloadJobRunner : IJobRunner
     private readonly Func<HttpClient> _httpFactory;
     private readonly IViceLogger _logger;
 
-    public ResearchDownloadJobRunner()
-        : this(new ResearchSourceRegistry(), ResearchHttp.Create)
-    {
-    }
-
-    internal ResearchDownloadJobRunner(ResearchSourceRegistry registry,
-                                       Func<HttpClient> httpFactory,
-                                       IViceLogger? logger = null)
+    public ResearchDownloadJobRunner(ResearchSourceRegistry registry,
+                                     Func<HttpClient> httpFactory,
+                                     IViceLogger? logger = null)
     {
         _registry = registry ?? throw new ArgumentNullException(nameof(registry));
         _httpFactory = httpFactory ?? throw new ArgumentNullException(nameof(httpFactory));
@@ -121,6 +116,7 @@ public sealed class ResearchDownloadJobRunner : IJobRunner
                                                      FileMode.OpenOrCreate,
                                                      startOffset,
                                                      progress,
+                                                     logger,
                                                      ct).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -204,6 +200,15 @@ public sealed class ResearchDownloadJobRunner : IJobRunner
 
 public static class ResearchJobFactory
 {
+    private static readonly ResearchSourceRegistry DefaultRegistry = new();
+
+    [Vice.Composition.ViceSessionService]
+    public static ResearchSourceRegistry Sources() => DefaultRegistry;
+
     [Vice.Composition.ViceJobRunner]
-    public static ResearchDownloadJobRunner ResearchDownload() => new ResearchDownloadJobRunner();
+    public static ResearchDownloadJobRunner ResearchDownload()
+    {
+        return new ResearchDownloadJobRunner(DefaultRegistry,
+                                             () => ResearchHttp.Create(NullViceLogger.Instance));
+    }
 }

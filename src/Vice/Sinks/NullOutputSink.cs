@@ -1,4 +1,4 @@
-namespace Vice;
+namespace Vice.Core;
 
 internal sealed class NullOutputSink : IOutputSink
 {

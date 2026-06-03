@@ -1,4 +1,4 @@
-using Vice;
+using Vice.Core;
 using Vice.Display.Rendering;
 
 namespace Vice.Tests;
@@ -11,8 +11,8 @@ internal sealed class RecordingConsole : IConsoleWriter, IOutputSink, IDisposabl
 
     public RecordingConsole()
     {
-        _previousSink = Vice.Output.Current;
-        Vice.Output.Configure(this);
+        _previousSink = Vice.Core.Output.Current;
+        Vice.Core.Output.Configure(this);
     }
 
     public string Output => _out;
@@ -20,7 +20,7 @@ internal sealed class RecordingConsole : IConsoleWriter, IOutputSink, IDisposabl
 
     public void Dispose()
     {
-        Vice.Output.Configure(_previousSink);
+        Vice.Core.Output.Configure(_previousSink);
     }
 
     public void Reset() { _out = ""; _err = ""; }

@@ -1,9 +1,10 @@
 using Vice.Composition;
 using Vice.Contracts;
+using Vice.Core;
 using Vice.Execution;
 using Vice.Lexicon;
 using Vice.Mux.Routing;
-using static Vice.Dsl;
+using static Vice.Core.Dsl;
 
 namespace Vice.Mux.Commands;
 

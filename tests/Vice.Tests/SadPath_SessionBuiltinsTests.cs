@@ -1,6 +1,6 @@
 using System.Threading.Tasks;
-using Vice;
 using Vice.Commands;
+using Vice.Core;
 using Vice.Display;
 using Vice.Display.Rendering;
 using Vice.Foundation.Execution;

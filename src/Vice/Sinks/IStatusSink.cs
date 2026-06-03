@@ -1,6 +1,6 @@
 using Vice.Display;
 
-namespace Vice;
+namespace Vice.Core;
 
 public interface IStatusSink
 {

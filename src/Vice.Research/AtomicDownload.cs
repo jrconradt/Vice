@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using Vice.Logging;
 using Vice.Net.Requests.Http;
 using Vice.Persistence;
@@ -13,6 +14,7 @@ internal static class AtomicDownload
                                             FileMode mode,
                                             long startOffset,
                                             IProgress<DownloadProgress>? progress,
+                                            IViceLogger logger,
                                             CancellationToken ct)
     {
         try
@@ -45,12 +47,17 @@ internal static class AtomicDownload
                     $"Download of '{uri}' is incomplete: wrote {written} bytes but the server advertised {expected}; refusing to promote a truncated file.");
             }
 
+            var digest = await ComputeSha256Async(partial, ct).ConfigureAwait(false);
+
             File.Move(partial, fullPath, overwrite: true);
             var promotedDir = Path.GetDirectoryName(fullPath);
             if (!string.IsNullOrEmpty(promotedDir))
             {
                 SafeFile.FlushDirectory(promotedDir);
             }
+
+            logger.Log(ViceLogLevel.Info,
+                       $"research download integrity sha256={digest} bytes={written} for '{uri}' -> {fullPath}");
 
             return written;
         }
@@ -63,6 +70,17 @@ internal static class AtomicDownload
             SafeFile.TryDelete(partial);
             throw;
         }
+    }
+
+    private static async Task<string> ComputeSha256Async(string path,
+                                                         CancellationToken ct)
+    {
+        await using var stream = new FileStream(path,
+                                                FileMode.Open,
+                                                FileAccess.Read,
+                                                FileShare.Read);
+        var hash = await SHA256.HashDataAsync(stream, ct).ConfigureAwait(false);
+        return Convert.ToHexStringLower(hash);
     }
 
     public static string ResolveDestination(string destinationPath)

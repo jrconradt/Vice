@@ -1,7 +1,7 @@
 using System.Runtime.CompilerServices;
 using Vice.Logging;
 
-namespace Vice;
+namespace Vice.Core;
 
 public static class Log
 {

@@ -106,6 +106,7 @@ public sealed class ResearchHttpIntegrationTests : IAsyncLifetime, IDisposable
                                                                   target.Uri,
                                                                   destination,
                                                                   progress: null,
+                                                                  logger: NullViceLogger.Instance,
                                                                   ct: CancellationToken.None);
 
         Assert.Equal(_payload.Length, written);

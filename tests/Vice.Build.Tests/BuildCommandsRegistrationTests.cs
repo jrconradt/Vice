@@ -1,6 +1,7 @@
-using Vice;
 using Vice.Build;
 using Vice.Build.Dotnet;
+using Vice.Core;
+using Vice.Host;
 using Xunit;
 
 namespace Vice.Build.Tests;

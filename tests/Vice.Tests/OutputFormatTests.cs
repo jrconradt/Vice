@@ -1,13 +1,14 @@
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
-using Vice;
 using Vice.Contracts;
+using Vice.Core;
 using Vice.Display;
 using Vice.Execution;
+using Vice.Host;
 using Vice.TestSupport;
 using Xunit;
-using static Vice.Dsl;
+using static Vice.Core.Dsl;
 
 namespace Vice.Tests;
 

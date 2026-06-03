@@ -6,10 +6,18 @@ namespace Vice.Tests;
 [Collection("EnvVarSerial")]
 public class TerminalCapabilitiesColorTests
 {
+    private readonly EnvVarSerialFixture _serial;
+
+    public TerminalCapabilitiesColorTests(EnvVarSerialFixture serial)
+    {
+        _serial = serial;
+    }
+
     [Fact]
     public void NoColor_DisablesEvenWhenForceColorSet()
     {
         using var env = new EnvScope(
+            _serial,
             ("NO_COLOR", "1"),
             ("FORCE_COLOR", "1"),
             ("CLICOLOR_FORCE", "1"));
@@ -24,6 +32,7 @@ public class TerminalCapabilitiesColorTests
     public void ForceColor_EnablesEvenWhenStdoutRedirected()
     {
         using var env = new EnvScope(
+            _serial,
             ("NO_COLOR", null),
             ("FORCE_COLOR", "1"),
             ("CLICOLOR_FORCE", null));
@@ -39,6 +48,7 @@ public class TerminalCapabilitiesColorTests
     public void CliColorForce_NonZero_Enables()
     {
         using var env = new EnvScope(
+            _serial,
             ("NO_COLOR", null),
             ("FORCE_COLOR", null),
             ("CLICOLOR_FORCE", "1"));
@@ -52,6 +62,7 @@ public class TerminalCapabilitiesColorTests
     public void CliColorForce_Zero_DoesNotEnable()
     {
         using var env = new EnvScope(
+            _serial,
             ("NO_COLOR", null),
             ("FORCE_COLOR", null),
             ("CLICOLOR_FORCE", "0"));

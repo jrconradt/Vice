@@ -2,11 +2,12 @@ using System.IO.Enumeration;
 using System.Text.RegularExpressions;
 using Vice.Composition;
 using Vice.Contracts;
+using Vice.Core;
 using Vice.Foundation.Execution;
 using Vice.Lexicon;
 using Vice.Logging;
 using Vice.Streaming;
-using static Vice.Dsl;
+using static Vice.Core.Dsl;
 
 namespace Vice.Files;
 

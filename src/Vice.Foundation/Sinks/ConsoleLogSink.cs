@@ -2,7 +2,7 @@ using System.Runtime.CompilerServices;
 using Vice.Concurrency;
 using Vice.Logging;
 
-namespace Vice;
+namespace Vice.Logging;
 
 internal sealed class ConsoleLogSink : IViceLogger, IAsyncDisposable
 {

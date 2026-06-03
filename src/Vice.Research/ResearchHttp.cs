@@ -1,5 +1,4 @@
 using System.Net.Http.Headers;
-using Vice;
 using Vice.Logging;
 using Vice.Net.Requests.Grpc;
 using Vice.Net.Requests.Http;
@@ -32,19 +31,20 @@ internal static class ResearchHttp
         };
     }
 
-    public static HttpClient Create()
+    public static HttpClient Create(IViceLogger logger)
     {
-        var connectLogger = new StaticLogForwarder();
+        ArgumentNullException.ThrowIfNull(logger);
+
         var inner = new SocketsHttpHandler
         {
-            ConnectCallback = (context, ct) => SafeOutboundConnection.ConnectAsync(context, ct, connectLogger),
+            ConnectCallback = (context, ct) => SafeOutboundConnection.ConnectAsync(context, ct, logger),
             AutomaticDecompression = System.Net.DecompressionMethods.All,
         };
 
         var polite = new PoliteHandler(inner,
                                        minInterval: TimeSpan.FromSeconds(1),
                                        maxRetries: 3,
-                                       logger: new StaticLogForwarder(),
+                                       logger: logger,
                                        hostMinIntervals: BuildHostMinIntervals());
 
         var client = new HttpClient(polite, disposeHandler: true)
@@ -124,33 +124,5 @@ internal static class ResearchHttp
         }
 
         return true;
-    }
-
-    private sealed class StaticLogForwarder : IViceLogger
-    {
-        public bool IsEnabled(ViceLogLevel level)
-        {
-            return Vice.Log.IsEnabled(level);
-        }
-
-        public void Log(ViceError error)
-        {
-            Vice.Log.Emit(error);
-        }
-
-        public void Log(ViceLogLevel level,
-                        string message,
-                        Exception? exception = null,
-                        string? caller = null,
-                        string? file = null,
-                        int line = 0)
-        {
-            Vice.Log.Emit(level,
-                          message,
-                          exception,
-                          caller,
-                          file,
-                          line);
-        }
     }
 }

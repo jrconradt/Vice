@@ -2,11 +2,12 @@ using Vice.Commands;
 using Vice.Completions;
 using Vice.Contracts;
 using Vice.Display;
+using Vice.Host;
 using Vice.Nodes;
 using Vice.Options;
 using Vice.TestSupport;
 using Xunit;
-using static Vice.Dsl;
+using static Vice.Core.Dsl;
 
 namespace Vice.Tests;
 
