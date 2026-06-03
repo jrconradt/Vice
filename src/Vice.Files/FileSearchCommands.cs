@@ -2,7 +2,7 @@ using System.IO.Enumeration;
 using System.Text.RegularExpressions;
 using Vice.Composition;
 using Vice.Contracts;
-using Vice.Execution;
+using Vice.Foundation.Execution;
 using Vice.Lexicon;
 using Vice.Logging;
 using Vice.Streaming;
@@ -229,22 +229,12 @@ public static class FileSearchCommands
             var (dir, depth) = stack.Pop();
 
             var entries = EnumerateEntries(dir);
-            entries.Sort(StringComparer.Ordinal);
+            entries.Sort(static (a, b) => StringComparer.Ordinal.Compare(a.FullName, b.FullName));
 
             var children = new List<(string Dir, int Depth)>();
-            foreach (var entry in entries)
+            foreach (var info in entries)
             {
                 ct.ThrowIfCancellationRequested();
-
-                FileSystemInfo info;
-                try
-                {
-                    info = Directory.Exists(entry) ? new DirectoryInfo(entry) : new FileInfo(entry);
-                }
-                catch (IOException)
-                {
-                    continue;
-                }
 
                 var isHidden = (info.Attributes & FileAttributes.Hidden) != 0
                     || info.Name.StartsWith('.');
@@ -262,17 +252,17 @@ public static class FileSearchCommands
                         && (!isSymlink || options.FollowSymlinks);
                     if (descend)
                     {
-                        children.Add((entry, depth + 1));
+                        children.Add((info.FullName, depth + 1));
                     }
 
                     if (kind == WalkKind.Folders && Matches(predicates, info))
                     {
-                        yield return entry;
+                        yield return info.FullName;
                     }
                 }
                 else if (kind == WalkKind.Files && Matches(predicates, info))
                 {
-                    yield return entry;
+                    yield return info.FullName;
                 }
             }
 
@@ -283,13 +273,13 @@ public static class FileSearchCommands
         }
     }
 
-    private static List<string> EnumerateEntries(string dir)
+    private static List<FileSystemInfo> EnumerateEntries(string dir)
     {
-        var entries = new List<string>();
-        IEnumerator<string> enumerator;
+        var entries = new List<FileSystemInfo>();
+        IEnumerator<FileSystemInfo> enumerator;
         try
         {
-            enumerator = Directory.EnumerateFileSystemEntries(dir).GetEnumerator();
+            enumerator = new DirectoryInfo(dir).EnumerateFileSystemInfos().GetEnumerator();
         }
         catch (UnauthorizedAccessException)
         {

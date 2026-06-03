@@ -282,45 +282,17 @@ internal sealed class PipelineExecutor
         {
             var producerLabel = context.TotalStages > 1 ? $"Stage {stageNumber}/{context.TotalStages}" : "Producing";
             await using var producerHandle = context.Status.Start(producerLabel, context.Console);
-            var producerCapturing = new CapturingConsoleWriter(producerHandle.Writer);
-            var producerRender = new RenderContext(producerCapturing, context.Capabilities);
-            var producerStatus = new Progress<string>(l => producerHandle.UpdateLabel(l));
-            var producerProgress = producerHandle.SupportsProgress
-                ? new Progress<double>(frac => producerHandle.UpdateProgress(frac))
-                : null;
-            var producerCtx = new CommandContext(
-                producer.Targets,
-                context.GlobalOptions,
-                producerCapturing,
-                pipelineInput,
-                producerStatus,
-                producerRender,
-                producerProgress,
-                _session,
-                _logger,
-                producer.ResolvedNodes)
-            { CancellationToken = context.Ct };
+            var (producerCtx, producerCapturing) = BuildStageContext(producer,
+                                                                     producerHandle,
+                                                                     pipelineInput,
+                                                                     context);
 
             var consumerLabel = context.TotalStages > 1 ? $"Stage {stageNumber + 1}/{context.TotalStages}" : "Consuming";
             await using var consumerHandle = context.Status.Start(consumerLabel, context.Console);
-            var consumerCapturing = new CapturingConsoleWriter(consumerHandle.Writer);
-            var consumerRender = new RenderContext(consumerCapturing, context.Capabilities);
-            var consumerStatus = new Progress<string>(l => consumerHandle.UpdateLabel(l));
-            var consumerProgress = consumerHandle.SupportsProgress
-                ? new Progress<double>(frac => consumerHandle.UpdateProgress(frac))
-                : null;
-            var consumerCtx = new CommandContext(
-                consumer.Targets,
-                context.GlobalOptions,
-                consumerCapturing,
-                null,
-                consumerStatus,
-                consumerRender,
-                consumerProgress,
-                _session,
-                _logger,
-                consumer.ResolvedNodes)
-            { CancellationToken = context.Ct };
+            var (consumerCtx, consumerCapturing) = BuildStageContext(consumer,
+                                                                     consumerHandle,
+                                                                     null,
+                                                                     context);
 
             var producerName = ResolveStageName(producer, producerLabel);
             var consumerName = ResolveStageName(consumer, consumerLabel);
@@ -369,6 +341,33 @@ internal sealed class PipelineExecutor
             var exitCode = producerExit != 0 ? producerExit : consumerExit;
             return new PipelineResult(exitCode, consumerCapturing.CapturedOutput);
         }
+    }
+
+    private (CommandContext Context, CapturingConsoleWriter Capturing) BuildStageContext(
+        PipelineStage stage,
+        IStatusHandle handle,
+        string? input,
+        PipelineRunContext context)
+    {
+        var capturing = new CapturingConsoleWriter(handle.Writer);
+        var render = new RenderContext(capturing, context.Capabilities);
+        var status = new Progress<string>(l => handle.UpdateLabel(l));
+        var progress = handle.SupportsProgress
+            ? new Progress<double>(frac => handle.UpdateProgress(frac))
+            : null;
+        var ctx = new CommandContext(
+            stage.Targets,
+            context.GlobalOptions,
+            capturing,
+            input,
+            status,
+            render,
+            progress,
+            _session,
+            _logger,
+            stage.ResolvedNodes)
+        { CancellationToken = context.Ct };
+        return (ctx, capturing);
     }
 
     private static async Task<(int Exit, Exception? Error)> AwaitCollectingAsync(Task<int> task)

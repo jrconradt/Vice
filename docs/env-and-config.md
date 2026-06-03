@@ -5,6 +5,9 @@
 | Variable | Default | Effect |
 |---|---|---|
 | `VICE_LOG_LEVEL` | `warn` | Logger threshold. Accepted values: `trace`, `debug`, `info`, `warn` (or `warning`), `error`. Anything else falls back to `warn`. Set to `debug` to see stack traces on REPL handler exceptions. |
+| `VICE_LOG_FILE` | unset | Path to a file the logger appends to instead of stderr. The parent directory is created (user-only mode on Unix) and the file is restricted to the current user. Rotated when it exceeds 64 MiB, retaining 3 generations. If the file cannot be opened, a notice is written to stderr and logging falls back to stderr. In daemon mode a default path is used when unset. |
+| `VICE_NCBI_API_KEY` | unset | NCBI E-utilities API key appended to PubMed requests. When set, raises the NCBI rate limit from 3 to 10 requests/second. |
+| `VICE_UNIPROT_BASE_URL` | `https://rest.uniprot.org/uniprotkb` | Overrides the UniProt REST API base URL. Must be an absolute `https` URL; any other value raises an error. |
 | `VICE_ALLOWED_ROOTS` | (empty) | `:`-separated list of additional directories outside the current working directory where `download` and `archive` may write files. The cwd is always allowed. |
 | `NO_COLOR` | unset | Any value (even empty) disables all ANSI color output. Wins over `FORCE_COLOR` and `CLICOLOR_FORCE`. See [no-color.org](https://no-color.org/). |
 | `FORCE_COLOR` | unset | Any non-empty value enables color even when stdout is redirected. Overridden by `NO_COLOR`. |
@@ -12,7 +15,6 @@
 | `VICE_NO_STATUS` | unset | Any truthy value (anything other than empty / `0` / `false` / `no` / `off`) suppresses the animated status spinner and reports progress as discrete plain text. The persistent equivalent of the `--no-status` flag. |
 | `VICE_REDUCED_MOTION` | unset | Same truthy convention as `VICE_NO_STATUS`; suppresses spinner animation and switches to discrete textual progress. |
 | `ACCESSIBLE` | unset | The cross-tool reduced-motion convention. Any truthy value suppresses spinner animation, matching `VICE_REDUCED_MOTION`. Recognized so Vice honors a single accessibility signal shared across CLI tools. |
-| `VICE_GRPC_PINNED_CERT_SHA256` | unset | SHA-256 of the expected server certificate, as 64 hex characters (`:` and space separators allowed). Pairs with the gRPC `--insecure` flag: instead of accepting any certificate, `--insecure` then accepts only the certificate whose SHA-256 matches this pin and refuses every other. A malformed value refuses the connection rather than silently accepting any certificate. |
 | `VICE_USER_AGENT` | unset | Overrides the entire outbound research `User-Agent` header with the provided string. When set, no default value is computed. See [HTTP user agent](#http-user-agent). |
 | `VICE_CONTACT_EMAIL` | unset | Appends a `mailto:` contact to the default research `User-Agent` header, matching the polite-pool / contact-header etiquette scholarly APIs request. The address is disclosed to every research host. See [HTTP user agent](#http-user-agent). |
 
@@ -22,7 +24,6 @@ Abstractions for consumer-specific concerns. Each has a `Null` default that does
 
 | Abstraction | Default | When to plug your own |
 |---|---|---|
-| `IKeyring` (`Vice.Configuration`) | `NullKeyring` | Secret storage backed by a platform keychain (libsecret, Keychain, Credential Manager) — Vice ships no implementation that touches disk |
 | `IViceLogger` (`Vice.Logging`) | `NullViceLogger` | A custom logging sink |
 
 Wiring these into the host is consumer-side. The framework doesn't auto-instantiate them.
@@ -130,7 +131,7 @@ Handlers can return any int. Command-pack authors who construct a `ViceError` ge
 
 ## HTTP user agent
 
-Every outbound research request carries a `User-Agent` header, set on the research `HttpClient` in `src/Vice.Net/Requests/Research/ResearchHttp.cs` and applied to every research source (arXiv, Gutenberg, PubMed, UniProt, AlphaFold). Two environment variables control its value:
+Every outbound research request carries a `User-Agent` header, set on the research `HttpClient` in `src/Vice.Research/ResearchHttp.cs` and applied to every research source (arXiv, Gutenberg, PubMed, UniProt, AlphaFold). Two environment variables control its value:
 
 | Variable | Effect |
 |---|---|
@@ -163,8 +164,8 @@ The HTTP handler wrapping every research-source request enforces:
 
 | Knob | Default |
 |---|---|
-| Per-host minimum interval | 1 second between successive requests to the same hostname. |
+| Per-host minimum interval | 1 second between successive requests to the same hostname, except `export.arxiv.org`, which is held to 3 seconds to honor the arXiv API Terms of Use. |
 | Retry count on `429 Too Many Requests` or `503 Service Unavailable` | 3 retries (so 4 total attempts). |
 | Retry delay | Honors the upstream `Retry-After` header if present (capped at 5 minutes); otherwise full-jitter backoff — a uniformly random delay in `[0, min(120, 2^(attempt+1)))` seconds, capped at 2 minutes. |
 
-These are wired in `src/Vice.Net/Requests/Research/ResearchHttp.cs` with no environment override; tightening or loosening them requires a code change.
+These are wired in `src/Vice.Research/ResearchHttp.cs` with no environment override; tightening or loosening them requires a code change.

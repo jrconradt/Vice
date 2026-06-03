@@ -1,4 +1,4 @@
-using Vice.Net.Http;
+using Vice.Net.Requests.Http;
 using Xunit;
 
 namespace Vice.Net.Tests;

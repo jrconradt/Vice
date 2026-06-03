@@ -20,4 +20,7 @@
                       OutputItemType="Analyzer"
                       ReferenceOutputAssembly="true" />
   </ItemGroup>
+  <ItemGroup>
+    <Compile Include="..\Shared\GoldenFile.cs" Link="GoldenFile.cs" />
+  </ItemGroup>
 </Project>

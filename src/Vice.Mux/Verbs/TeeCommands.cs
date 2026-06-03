@@ -3,6 +3,7 @@ using Vice.Composition;
 using Vice.Contracts;
 using Vice.Execution;
 using Vice.Lexicon;
+using Vice.Logging;
 using Vice.Mux;
 using Vice.Mux.Sinks;
 
@@ -63,17 +64,22 @@ public static class TeeCommands
                 {
                     Buffer.BlockCopy(buffer, 0, copy, 0, read);
                     var mem = new ReadOnlyMemory<byte>(copy, 0, read);
-                    var writes = new Task[sinks.Count];
-                    for (int i = 0; i < sinks.Count; i++)
+                    for (int i = sinks.Count - 1; i >= 0; i--)
                     {
-                        writes[i] = sinks[i].WriteAsync(mem, ct).AsTask();
+                        if (!await WriteOneAsync(sinks[i], mem, ct, ctx.Logger))
+                        {
+                            sinks.RemoveAt(i);
+                        }
                     }
-
-                    await Task.WhenAll(writes);
                 }
                 finally
                 {
                     pool.Return(copy);
+                }
+
+                if (sinks.Count == 0)
+                {
+                    break;
                 }
             }
             foreach (var s in sinks)
@@ -90,5 +96,30 @@ public static class TeeCommands
             }
         }
         return 0;
+    }
+
+    private static async Task<bool> WriteOneAsync(
+        ISink sink,
+        ReadOnlyMemory<byte> chunk,
+        CancellationToken ct,
+        IViceLogger logger)
+    {
+        try
+        {
+            await sink.WriteAsync(chunk, ct);
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.Log(ViceLogLevel.Warn,
+                       $"Sink '{sink.Label}' failed during write; dropping it and continuing with remaining sinks.",
+                       ex);
+            await sink.DisposeAsync();
+            return false;
+        }
     }
 }

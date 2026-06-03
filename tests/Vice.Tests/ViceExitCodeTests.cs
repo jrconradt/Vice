@@ -2,6 +2,7 @@ using System.Threading.Tasks;
 using Vice;
 using Vice.Display;
 using Vice.Execution;
+using Vice.Foundation.Execution;
 using Vice.Logging;
 using Xunit;
 using static Vice.Dsl;

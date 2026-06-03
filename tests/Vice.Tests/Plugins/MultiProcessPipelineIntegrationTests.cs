@@ -60,6 +60,41 @@ public class MultiProcessPipelineIntegrationTests
     }
 
     [UnixOnlyFact]
+    public async Task GlobalLocale_IsPropagatedToDownstreamSegments()
+    {
+        using var pluginDir = new TempDir();
+        RestrictDir(pluginDir.Path);
+
+        var argsPath = Path.Combine(pluginDir.Path, "downstream-args.txt");
+
+        WriteScript(
+            Path.Combine(pluginDir.Path, "vice-prod"),
+            $"#!/bin/sh\nprintf '%s' '{Payload}'\n");
+        WriteScript(
+            Path.Combine(pluginDir.Path, "vice-sink"),
+            $"#!/bin/sh\nprintf '%s ' \"$@\" > '{argsPath}'\ncat > /dev/null\n");
+
+        using var env = new EnvScope(
+            ("VICE_PLUGIN_DIR", pluginDir.Path),
+            ("XDG_DATA_HOME", null));
+
+        var segments = RawArgsSplitter.Split(
+            new[] { "--locale", "de-DE", "prod", "then", "sink" });
+
+        var exit = await MultiProcessPipeline.RunAsync(
+            "vice",
+            segments,
+            new CommandRegistry(),
+            NullViceLogger.Instance,
+            CancellationToken.None);
+
+        Assert.Equal(0, exit);
+
+        var recorded = await File.ReadAllTextAsync(argsPath, Encoding.UTF8);
+        Assert.Contains("--locale de-DE", recorded);
+    }
+
+    [UnixOnlyFact]
     public async Task PumpFan_DeliversIdenticalBytesToEveryDownstream()
     {
         using var pluginDir = new TempDir();

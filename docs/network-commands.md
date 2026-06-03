@@ -82,7 +82,7 @@ vice grpc call helloworld.Greeter/SayHello on endpoint localhost:50051 with data
 
 For client-streaming methods, pass a JSON array; each element becomes one message.
 
-By default, port `443` uses TLS (`https://`) and any other port uses cleartext (`http://`). Use `--plaintext` to force cleartext over `:443`, `--insecure` to skip TLS verification.
+TLS (`https://`) is used for every endpoint regardless of port. Use `--plaintext` to force cleartext (`http://`).
 
 ## Global options
 
@@ -94,6 +94,5 @@ Network verbs honor the following global options (set as `--name value` or `--fl
 | `--format <text\|hex\|json>` | `text` | tcp, udp, grpc | Output rendering for response bytes. |
 | `--encoding <utf8\|ascii>` | `utf8` | tcp, udp, grpc | Encoding used to decode request text and render `text` output. |
 | `--no-reply` | off | udp | Don't wait for a UDP reply; send and return. |
-| `--plaintext` | off | grpc | Force `http://` (otherwise TLS is used iff port is 443). |
-| `--insecure` | off | grpc | Skip TLS certificate validation; logs a one-time warning. |
+| `--plaintext` | off | grpc | Force `http://` (otherwise TLS is used for every endpoint). |
 | `--metadata '<json>'` | (none) | grpc call | Headers as a JSON object of string→string. |

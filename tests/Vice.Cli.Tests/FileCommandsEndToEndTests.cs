@@ -1,6 +1,6 @@
 using System.IO.Compression;
 using System.Text;
-using Vice.Execution;
+using Vice.Foundation.Execution;
 using Xunit;
 
 namespace Vice.Cli.Tests;

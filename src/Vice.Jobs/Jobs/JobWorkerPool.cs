@@ -64,7 +64,15 @@ internal sealed class JobWorkerPool
     }
 
     public ValueTask EnqueueAsync(JobStateHolder holder, CancellationToken ct)
-        => _workChannel.Writer.WriteAsync(holder, ct);
+    {
+        if (_liveWorkers.IsEmpty)
+        {
+            _logger.Log(ViceLogLevel.Error,
+                          $"POOL_DEGRADED enqueue to job worker pool with 0 of {_configuredConcurrency} workers live; job will not drain");
+        }
+
+        return _workChannel.Writer.WriteAsync(holder, ct);
+    }
 
     public async Task DrainAsync()
     {

@@ -50,5 +50,6 @@ public class PagerSessionTests
         var ctx = FakeContext(noPager: true);
         var session = PagerSession.Open(ctx);
         await session.DisposeAsync();
+        Assert.False(session.IsActive);
     }
 }

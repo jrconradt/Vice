@@ -3,7 +3,7 @@ using System.Text;
 using System.Text.Json;
 using Vice.Jobs;
 using Vice.Logging;
-using Vice.Net.Research;
+using Vice.Research;
 using Xunit;
 
 namespace Vice.Net.Tests;
@@ -196,8 +196,9 @@ public sealed class ResearchHttpIntegrationTests : IAsyncLifetime, IDisposable
             DestinationPath = destination,
         };
 
-        await Assert.ThrowsAnyAsync<HttpRequestException>(() =>
+        var exhausted = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             runner.RunAsync(job, new Progress<JobProgress>(_ => { }), CancellationToken.None));
+        Assert.IsType<HttpRequestException>(exhausted.InnerException);
 
         Assert.False(File.Exists(destination));
         Assert.False(File.Exists($"{destination}.partial"));

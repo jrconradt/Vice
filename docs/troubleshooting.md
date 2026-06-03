@@ -4,11 +4,11 @@
 
 Research-source verbs route through `PoliteHandler`, which:
 
-- Forces a 1 s minimum gap between requests to the same hostname.
+- Forces a 1 s minimum gap between requests to the same hostname, or 3 s for `export.arxiv.org` to honor the arXiv API Terms of Use.
 - Retries on `429 Too Many Requests` and `503 Service Unavailable` up to 3 times.
 - Waits the upstream `Retry-After` if it's present, otherwise a full-jitter backoff: a random delay in `[0, min(120, 2^(attempt+1)))` seconds, capped at 2 minutes.
 
-There is **no user-visible signal** when this throttle engages. A `search` or `archive` against a saturated source can appear to hang for tens of seconds while the handler waits between retries. Set `VICE_LOG_LEVEL=debug` to see the underlying timing; otherwise the only sign is a long pause before the response.
+When an upstream host returns `429`/`503` and the handler backs off before retrying, it emits a `Warn`-level line to stderr (`polite: <host> returned <code>; backing off <n>s then retrying ...`), so an upstream rate limit is visible at the default log level. The proactive minimum-gap spacing between successive requests is not announced; a `search` or `archive` against a saturated source can still appear to pause for a few seconds between requests. Set `VICE_LOG_LEVEL=debug` to see the per-request timing.
 
 If the response is still `429`/`503` after the third retry, the original response is returned and you'll see an `HTTP error: ...` in stderr.
 
@@ -36,9 +36,13 @@ In session mode, an `OperationCanceledException` raised during a REPL command is
 | Triggered by | `vice` with no args | `vice <args>` |
 | Job runners | Active. Long-running operations (downloads, server-streaming gRPC calls) are submitted as background jobs and reported via `jobs`. | Not started. Operations run synchronously to completion. |
 | `jobs` / `pause` / `resume` / `cancel` / `history` / `clear` | Built-in, handled by the session loop. | Not available. |
-| Daemon detach | If you exit the REPL while jobs are active, the process detaches and the jobs continue in a background daemon. Reconnect by running `vice` again. You can also start a daemon explicitly with `vice daemon` or `vice --daemon <command>` (useful under systemd/supervisord), and inspect a running daemon with `vice status`. | `vice daemon`, `vice --daemon`, and `vice status` all apply. |
+| Daemon detach | If you exit the REPL while jobs are active, the process detaches and the jobs continue in a background daemon. Reconnect by running `vice` again. You can also start a daemon explicitly with `vice daemon` or `vice --daemon <command>` (useful under systemd/supervisord), and inspect a running daemon with `vice status`. Jobs live only in that single daemon process and are not persisted: if it dies, all in-flight background work is lost with no recovery, and REPL-detach handoff has no redundancy. For work that must survive, start under systemd (`vice --daemon`) from the outset rather than relying on REPL detach. | `vice daemon`, `vice --daemon`, and `vice status` all apply. |
 
 A side-effect to be aware of: a `download` issued from a one-shot invocation runs to completion in-line and blocks the caller; the same command in session mode returns immediately with `Queued download as job #N`.
+
+## "Command output exceeds the 16 MiB daemon IPC frame limit"
+
+A command run over the daemon control channel returns its output in a single length-prefixed IPC frame, hard-capped at 16 MiB. The full textual output is buffered and serialized whole; there is no chunked or streaming response over the control channel. When a command's output exceeds that ceiling, the daemon fails the command with `Command output of <N> bytes exceeds the <limit>-byte daemon IPC frame limit. Re-run the command in a non-daemon session or redirect its output to a file.` For known large-output verbs (`read`, `search`, gRPC reflection), run them in a non-daemon session or redirect their output to a file.
 
 ## "Destination is outside the allowed roots"
 

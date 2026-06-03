@@ -417,7 +417,7 @@ internal static class PluginDispatcher
         }
         catch (OperationCanceledException)
         {
-            return Vice.Execution.ViceExitCode.INTERRUPTED;
+            return Vice.Foundation.Execution.ViceExitCode.INTERRUPTED;
         }
         return process.ExitCode;
     }

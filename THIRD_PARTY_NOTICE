@@ -22,7 +22,6 @@ Redistributed under the BSD 3-Clause License:
 Redistributed under the MIT License:
 
 - Microsoft.CodeAnalysis.CSharp 4.14.0 (Copyright Microsoft Corporation) — compiled into the bundled Vice.Generators analyzer DLL packed by the `Vice` package
-- Microsoft.Extensions.Logging.Abstractions 6.0.0 (Copyright Microsoft Corporation)
 
 Development and test-only dependencies (NOT redistributed in any shipped artifact):
 
@@ -66,7 +65,7 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ================================================================================
-MIT License (Microsoft.CodeAnalysis.CSharp, Microsoft.Extensions.Logging.Abstractions)
+MIT License (Microsoft.CodeAnalysis.CSharp)
 ================================================================================
 
 Copyright (c) Microsoft Corporation. All rights reserved.

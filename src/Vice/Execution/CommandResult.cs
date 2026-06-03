@@ -1,3 +1,5 @@
+using Vice.Foundation.Execution;
+
 namespace Vice.Execution;
 
 public readonly record struct CommandResult(int ExitCode)

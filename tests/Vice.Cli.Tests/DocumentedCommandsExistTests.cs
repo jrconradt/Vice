@@ -1,6 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
-using Vice.Execution;
+using Vice.Foundation.Execution;
 using Xunit;
 
 namespace Vice.Cli.Tests;

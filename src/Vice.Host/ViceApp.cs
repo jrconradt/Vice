@@ -2,7 +2,8 @@ using Vice.Commands;
 using Vice.Contracts;
 using Vice.Display;
 using Vice.Display.Rendering;
-using Vice.Execution;
+using Vice.Foundation.Execution;
+using Vice.Host.Commands;
 using Vice.Ipc;
 using Vice.Jobs;
 using Vice.Logging;
@@ -33,7 +34,7 @@ public sealed class ViceApp : IViceApp, IAsyncDisposable
         = new(StringComparer.OrdinalIgnoreCase);
     private readonly IOutputSink _priorOutputSink;
     private readonly IStatusSink _priorStatusSink;
-    private readonly ILogSink _priorLogSink;
+    private readonly IViceLogger _priorLogSink;
     private readonly IDisposable? _ownedOutputSink;
     private bool _disposed;
 
@@ -135,7 +136,7 @@ public sealed class ViceApp : IViceApp, IAsyncDisposable
 
             if (_logger is not NullViceLogger)
             {
-                Vice.Log.Configure(new ViceLoggerLogSink(_logger));
+                Vice.Log.Configure(_logger);
             }
 
             BuiltinCommands.Register(_registry, this);
@@ -320,7 +321,7 @@ public sealed class ViceApp : IViceApp, IAsyncDisposable
         }
         catch (UnauthorizedAccessException ex)
         {
-            Vice.Log.Emit(ViceLogLevel.Error, $"permission denied probing daemon pipe '{state.PipeName}'; refusing to start", ex);
+            _logger.Log(ViceLogLevel.Error, $"permission denied probing daemon pipe '{state.PipeName}'; refusing to start", ex);
             return ViceExitCode.FAILURE;
         }
 
@@ -328,7 +329,7 @@ public sealed class ViceApp : IViceApp, IAsyncDisposable
         {
             await using (existing)
             {
-                Vice.Log.Emit(ViceLogLevel.Info, $"{_name} daemon already running on '{state.PipeName}'; not starting a second instance");
+                _logger.Log(ViceLogLevel.Info, $"{_name} daemon already running on '{state.PipeName}'; not starting a second instance");
             }
 
             return ViceExitCode.SUCCESS;
@@ -346,17 +347,26 @@ public sealed class ViceApp : IViceApp, IAsyncDisposable
         handler.BindLiveness(() => new DaemonLiveness(
             server.IsListening,
             server.AcceptLoopCrashed,
-            server.Faulted?.Message));
+            server.Faulted is { } fault ? $"{fault.GetType().Name}: {fault.Message}" : null));
 
         await server.StartAsync(ct);
 
-        Vice.Log.Emit(ViceLogLevel.Info, $"{_name} daemon listening on '{state.PipeName}'");
+        if (server.BindConflicted)
+        {
+            _logger.Log(ViceLogLevel.Info, $"{_name} daemon pipe '{state.PipeName}' already owned by a peer; not starting a second instance");
+            return ViceExitCode.SUCCESS;
+        }
 
-        return await SuperviseAcceptLoopAsync(server, ct).ConfigureAwait(false);
+        _logger.Log(ViceLogLevel.Info, $"{_name} daemon listening on '{state.PipeName}'");
+
+        Host.Core.SystemdNotify.Ready();
+
+        return await SuperviseAcceptLoopAsync(server, jobManager, _logger, ct).ConfigureAwait(false);
     }
 
-    private static async Task<int> SuperviseAcceptLoopAsync(PipeServer server, CancellationToken ct)
+    private static async Task<int> SuperviseAcceptLoopAsync(PipeServer server, JobManager jobManager, IViceLogger logger, CancellationToken ct)
     {
+        var poolWasDegraded = false;
         var tcs = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
         await using (ct.Register(() => tcs.TrySetResult(ViceExitCode.SUCCESS)))
         {
@@ -365,9 +375,18 @@ public sealed class ViceApp : IViceApp, IAsyncDisposable
                 if (server.AcceptLoopCrashed
                     || (!server.IsListening && !ct.IsCancellationRequested))
                 {
-                    Vice.Log.Emit(ViceLogLevel.Error, "daemon pipe accept loop terminated; exiting so a supervisor can restart", server.Faulted);
+                    logger.Log(ViceLogLevel.Error, "daemon pipe accept loop terminated; exiting so a supervisor can restart", server.Faulted);
                     return ViceExitCode.FAILURE;
                 }
+
+                var poolHealth = jobManager.GetWorkerPoolHealth();
+                if (poolHealth.IsDegraded
+                    && !poolWasDegraded)
+                {
+                    logger.Log(ViceLogLevel.Error, $"daemon worker pool degraded: {poolHealth.LiveWorkerCount}/{poolHealth.ConfiguredConcurrency} workers live");
+                }
+
+                poolWasDegraded = poolHealth.IsDegraded;
 
                 var poll = Task.Delay(TimeSpan.FromMilliseconds(250), CancellationToken.None);
                 var completed = await Task.WhenAny(tcs.Task, poll).ConfigureAwait(false);
@@ -405,7 +424,7 @@ public sealed class ViceApp : IViceApp, IAsyncDisposable
             }
             catch (Exception ex)
             {
-                Vice.Log.Emit(ViceLogLevel.Warn, $"session service {svc?.GetType().FullName} dispose threw", ex);
+                _logger.Log(ViceLogLevel.Warn, $"session service {svc?.GetType().FullName} dispose threw", ex);
             }
         }
 

@@ -1,7 +1,7 @@
 using System.Text;
 using Vice.Contracts;
-using Vice.Execution;
-using Vice.Net.Commands.Network;
+using Vice.Foundation.Execution;
+using Vice.Net.Requests.Network;
 using Xunit;
 
 namespace Vice.Net.Tests;

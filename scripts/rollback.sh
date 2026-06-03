@@ -12,15 +12,24 @@ fi
 
 VERSION="$1"
 TOOL="${2:-vice}"
-FEED_ARGS=()
-if [[ -n "${VICE_NUGET_FEED:-}" ]]; then
-  FEED_ARGS=(--add-source "$VICE_NUGET_FEED")
-fi
+FEED="${VICE_NUGET_FEED:-https://api.nuget.org/v3/index.json}"
+
+NUGET_CONFIG_DIR="$(mktemp -d)"
+trap 'rm -rf "$NUGET_CONFIG_DIR"' EXIT
+NUGET_CONFIG="$NUGET_CONFIG_DIR/nuget.config"
+printf '%s\n' \
+  '<?xml version="1.0" encoding="utf-8"?>' \
+  '<configuration>' \
+  '  <packageSources>' \
+  '    <clear />' \
+  "    <add key=\"vice-feed\" value=\"$FEED\" />" \
+  '  </packageSources>' \
+  '</configuration>' > "$NUGET_CONFIG"
 
 rollback_one() {
   local pkg="$1"
   echo "==> rolling $pkg back to $VERSION"
-  dotnet tool update --global "$pkg" --version "$VERSION" "${FEED_ARGS[@]}"
+  dotnet tool update --global "$pkg" --version "$VERSION" --configfile "$NUGET_CONFIG"
 }
 
 case "$TOOL" in

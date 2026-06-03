@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Vice.Display;
 using Vice.Display.Rendering;
 
@@ -22,6 +23,19 @@ public static class Signals
         };
         cts.Handler = handler;
         Console.CancelKeyPress += handler;
+
+        Action<PosixSignalContext> terminate = ctx =>
+        {
+            var n = Interlocked.Increment(ref count);
+            if (n == 1)
+            {
+                ctx.Cancel = true;
+                cts.Cancel();
+                writer.WriteError("Shutting down.");
+            }
+        };
+        cts.SigTerm = PosixSignalRegistration.Create(PosixSignal.SIGTERM, terminate);
+        cts.SigQuit = PosixSignalRegistration.Create(PosixSignal.SIGQUIT, terminate);
         return cts;
     }
 
@@ -29,12 +43,24 @@ public static class Signals
     {
         public ConsoleCancelEventHandler? Handler { get; set; }
 
+        public PosixSignalRegistration? SigTerm { get; set; }
+
+        public PosixSignalRegistration? SigQuit { get; set; }
+
         protected override void Dispose(bool disposing)
         {
             if (disposing && Handler is not null)
             {
                 Console.CancelKeyPress -= Handler;
                 Handler = null;
+            }
+
+            if (disposing)
+            {
+                SigTerm?.Dispose();
+                SigTerm = null;
+                SigQuit?.Dispose();
+                SigQuit = null;
             }
 
             base.Dispose(disposing);

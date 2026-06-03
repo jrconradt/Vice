@@ -3,7 +3,8 @@ Description=Vice background daemon (IPC control channel and job manager)
 After=network.target
 
 [Service]
-Type=simple
+Type=notify
+NotifyAccess=main
 ExecStart=@VICE_BIN@ --daemon
 Restart=on-failure
 RestartSec=2

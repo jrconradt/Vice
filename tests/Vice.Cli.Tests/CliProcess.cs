@@ -29,6 +29,7 @@ public static class CliProcess
         string[] args,
         string stdin = "",
         IReadOnlyDictionary<string, string>? environment = null,
+        string? workingDirectory = null,
         CancellationToken ct = default)
     {
         var psi = new ProcessStartInfo("dotnet")
@@ -37,7 +38,7 @@ public static class CliProcess
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
-            WorkingDirectory = Path.GetDirectoryName(dll) ?? Environment.CurrentDirectory,
+            WorkingDirectory = workingDirectory ?? Path.GetDirectoryName(dll) ?? Environment.CurrentDirectory,
         };
         psi.ArgumentList.Add(dll);
         foreach (var arg in args)

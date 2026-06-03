@@ -18,7 +18,7 @@ Requires .NET 10.
 - `[ViceCommandPack]` attribute for in-process command extensions with full host-service access
 - Git-style external plugin discovery: an executable named `<app>-<verb>` in the trusted plugin directory (`$VICE_PLUGIN_DIR`) dispatches as a verb (the host's executable name supplies `<app>`); `$PATH` is intentionally not consulted
 - Hookable framework services: `IViceLogger`
-- Global options for pager, clipboard, and locale
+- Global options for pager and locale
 
 ## What ships in this package
 

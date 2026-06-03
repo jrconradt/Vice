@@ -56,6 +56,11 @@ public static class InspectCommands
 
         await stdout.FlushAsync(ct);
 
+        if (chunks == 0)
+        {
+            format = FormatGuess.Empty;
+        }
+
         var elapsed = DateTime.UtcNow - start;
         var summary = $"[mux:inspect] done chunks={chunks} bytes={bytes} format={format} elapsed={elapsed.TotalMilliseconds:F1}ms\n";
         await stderr.WriteAsync(System.Text.Encoding.UTF8.GetBytes(summary), ct);

@@ -6,6 +6,7 @@ using Vice.Display;
 using Vice.Display.Rendering;
 using Vice.Execution;
 using Vice.Help;
+using Vice.Host.Commands;
 using Vice.Logging;
 using Vice.Options;
 using Vice.Parser;

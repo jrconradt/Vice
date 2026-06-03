@@ -25,6 +25,7 @@ internal sealed class PipeServer : IPipeServer
     private CancellationTokenSource? _linkedCts;
     private volatile bool _isListening;
     private volatile bool _acceptLoopCrashed;
+    private volatile bool _bindConflicted;
     private Exception? _faulted;
 
     public PipeServer(
@@ -41,6 +42,8 @@ internal sealed class PipeServer : IPipeServer
 
     public bool AcceptLoopCrashed => _acceptLoopCrashed;
 
+    public bool BindConflicted => _bindConflicted;
+
     public Exception? Faulted => _faulted;
 
     public Task StartAsync(CancellationToken ct)
@@ -54,133 +57,32 @@ internal sealed class PipeServer : IPipeServer
         return ready.Task;
     }
 
+    private enum AcceptOutcome
+    {
+        Continue,
+        Stop,
+    }
+
+    private sealed class AcceptLoopState
+    {
+        public bool ReadyCompleted;
+        public bool EverBound;
+        public int ConsecutiveFailures;
+    }
+
     private async Task AcceptLoopAsync(CancellationToken ct, TaskCompletionSource ready)
     {
         _isListening = true;
-        var readyCompleted = false;
-        var everBound = false;
-        var consecutiveFailures = 0;
+        var state = new AcceptLoopState();
 
         try
         {
             while (!ct.IsCancellationRequested)
             {
-                NamedPipeServerStream? serverStream = null;
-
-                try
+                var outcome = await AcceptOneAsync(ct, ready, state).ConfigureAwait(false);
+                if (outcome == AcceptOutcome.Stop)
                 {
-                    serverStream = CreateServerStream();
-                    everBound = true;
-                    consecutiveFailures = 0;
-
-                    if (!readyCompleted)
-                    {
-                        ready.TrySetResult();
-                        readyCompleted = true;
-                    }
-
-                    try
-                    {
-                        await WaitForConnectionWithRestrictiveUmaskAsync(serverStream, ct).ConfigureAwait(false);
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        await serverStream.DisposeAsync().ConfigureAwait(false);
-                        serverStream = null;
-                        break;
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.Log(ViceLogLevel.Warn, $"pipe wait-for-connection failed on '{_pipeName}'", ex);
-                        await serverStream.DisposeAsync().ConfigureAwait(false);
-                        serverStream = null;
-                        continue;
-                    }
-
-                    var peerCheck = VerifyPeer(serverStream);
-                    if (!peerCheck.Authorized)
-                    {
-                        EmitAudit(
-                            $"pipe connection rejected on '{_pipeName}': unauthorized peer peer-uid={peerCheck.PeerUid} peer-pid={peerCheck.PeerPid}");
-                        await serverStream.DisposeAsync().ConfigureAwait(false);
-                        serverStream = null;
-                        continue;
-                    }
-
-                    if (_clientTasks.Count >= MaxConcurrentClients)
-                    {
-                        EmitAudit(
-                            $"pipe server '{_pipeName}' at concurrent-client cap ({MaxConcurrentClients}); rejecting connection peer-uid={peerCheck.PeerUid} peer-pid={peerCheck.PeerPid}");
-                        await serverStream.DisposeAsync().ConfigureAwait(false);
-                        serverStream = null;
-                        continue;
-                    }
-
-                    var attached = serverStream;
-                    serverStream = null;
-                    var clientId = Interlocked.Increment(ref _nextClientId);
-                    EmitAudit(
-                        $"pipe connection accepted on '{_pipeName}': client={clientId} peer-uid={peerCheck.PeerUid} peer-pid={peerCheck.PeerPid}");
-                    var clientGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-                    var clientTask = HandleClientAsync(attached, clientId, clientGate.Task, ct);
-
-                    _clientTasks[clientId] = clientTask;
-                    clientGate.SetResult();
-                }
-                catch (Exception ex)
-                {
-                    if (serverStream is not null)
-                    {
-                        try
-                        {
-                            await serverStream.DisposeAsync().ConfigureAwait(false);
-                        }
-                        catch (Exception disposeEx)
-                        {
-                            _logger.Log(ViceLogLevel.Warn, "pipe server stream dispose failed", disposeEx);
-                        }
-                    }
-
-                    if (!everBound)
-                    {
-                        _logger.Log(ViceLogLevel.Error,
-                            $"pipe server '{_pipeName}' could not bind (another daemon may already own this pipe); not starting a second listener",
-                            ex);
-                        _acceptLoopCrashed = true;
-                        _faulted = ex;
-
-                        if (!readyCompleted)
-                        {
-                            ready.TrySetException(ex);
-                            readyCompleted = true;
-                        }
-
-                        break;
-                    }
-
-                    consecutiveFailures++;
-
-                    if (consecutiveFailures >= MAX_CONSECUTIVE_ACCEPT_FAILURES)
-                    {
-                        _logger.Log(ViceLogLevel.Error,
-                            $"pipe accept loop on '{_pipeName}' failed {consecutiveFailures} consecutive times; faulting so a supervisor can restart",
-                            ex);
-                        _acceptLoopCrashed = true;
-                        _faulted = ex;
-                        break;
-                    }
-
-                    _logger.Log(ViceLogLevel.Error,
-                        $"pipe accept loop iteration failed on '{_pipeName}'; backing off and retrying", ex);
-
-                    try
-                    {
-                        await Task.Delay(AcceptIterationBackoff, ct).ConfigureAwait(false);
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        break;
-                    }
+                    break;
                 }
             }
         }
@@ -194,21 +96,187 @@ internal sealed class PipeServer : IPipeServer
             _faulted = ex;
             _logger.Log(ViceLogLevel.Error, $"pipe accept loop crashed on '{_pipeName}'", ex);
 
-            if (!readyCompleted)
+            if (!state.ReadyCompleted)
             {
                 ready.TrySetException(ex);
-                readyCompleted = true;
+                state.ReadyCompleted = true;
             }
         }
         finally
         {
             _isListening = false;
 
-            if (!readyCompleted)
+            if (!state.ReadyCompleted)
             {
                 ready.TrySetResult();
             }
         }
+    }
+
+    private async Task<AcceptOutcome> AcceptOneAsync(
+        CancellationToken ct,
+        TaskCompletionSource ready,
+        AcceptLoopState state)
+    {
+        NamedPipeServerStream? serverStream = null;
+
+        try
+        {
+            serverStream = CreateServerStream();
+            state.EverBound = true;
+            state.ConsecutiveFailures = 0;
+
+            if (!state.ReadyCompleted)
+            {
+                ready.TrySetResult();
+                state.ReadyCompleted = true;
+            }
+
+            try
+            {
+                await WaitForConnectionWithRestrictiveUmaskAsync(serverStream, ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                await serverStream.DisposeAsync().ConfigureAwait(false);
+                return AcceptOutcome.Stop;
+            }
+            catch (Exception ex)
+            {
+                _logger.Log(ViceLogLevel.Warn, $"pipe wait-for-connection failed on '{_pipeName}'", ex);
+                await serverStream.DisposeAsync().ConfigureAwait(false);
+                return AcceptOutcome.Continue;
+            }
+
+            var peerCheck = VerifyPeer(serverStream);
+            if (!peerCheck.Authorized)
+            {
+                EmitAuditRejection(
+                    $"pipe connection rejected on '{_pipeName}': unauthorized peer peer-uid={peerCheck.PeerUid} peer-pid={peerCheck.PeerPid}");
+                await serverStream.DisposeAsync().ConfigureAwait(false);
+                return AcceptOutcome.Continue;
+            }
+
+            if (_clientTasks.Count >= MaxConcurrentClients)
+            {
+                EmitAuditRejection(
+                    $"pipe server '{_pipeName}' at concurrent-client cap ({MaxConcurrentClients}); rejecting connection peer-uid={peerCheck.PeerUid} peer-pid={peerCheck.PeerPid}");
+                await serverStream.DisposeAsync().ConfigureAwait(false);
+                return AcceptOutcome.Continue;
+            }
+
+            var attached = serverStream;
+            serverStream = null;
+            var clientId = Interlocked.Increment(ref _nextClientId);
+            EmitAudit(
+                $"pipe connection accepted on '{_pipeName}': client={clientId} peer-uid={peerCheck.PeerUid} peer-pid={peerCheck.PeerPid}");
+            var clientGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var clientTask = HandleClientAsync(attached, clientId, clientGate.Task, ct);
+
+            _clientTasks[clientId] = clientTask;
+            clientGate.SetResult();
+            return AcceptOutcome.Continue;
+        }
+        catch (Exception ex)
+        {
+            return await HandleAcceptFailureAsync(ex, serverStream, ct, ready, state).ConfigureAwait(false);
+        }
+    }
+
+    private async Task<AcceptOutcome> HandleAcceptFailureAsync(
+        Exception ex,
+        NamedPipeServerStream? serverStream,
+        CancellationToken ct,
+        TaskCompletionSource ready,
+        AcceptLoopState state)
+    {
+        if (serverStream is not null)
+        {
+            try
+            {
+                await serverStream.DisposeAsync().ConfigureAwait(false);
+            }
+            catch (Exception disposeEx)
+            {
+                _logger.Log(ViceLogLevel.Warn, "pipe server stream dispose failed", disposeEx);
+            }
+        }
+
+        if (!state.EverBound)
+        {
+            if (IsAddressInUse(ex))
+            {
+                _logger.Log(ViceLogLevel.Info,
+                    $"pipe server '{_pipeName}' already owned by another daemon (address in use); deferring to the existing listener",
+                    ex);
+                _bindConflicted = true;
+
+                if (!state.ReadyCompleted)
+                {
+                    ready.TrySetResult();
+                    state.ReadyCompleted = true;
+                }
+
+                return AcceptOutcome.Stop;
+            }
+
+            _logger.Log(ViceLogLevel.Error,
+                $"pipe server '{_pipeName}' could not bind (another daemon may already own this pipe); not starting a second listener",
+                ex);
+            _acceptLoopCrashed = true;
+            _faulted = ex;
+
+            if (!state.ReadyCompleted)
+            {
+                ready.TrySetException(ex);
+                state.ReadyCompleted = true;
+            }
+
+            return AcceptOutcome.Stop;
+        }
+
+        state.ConsecutiveFailures++;
+
+        if (state.ConsecutiveFailures >= MAX_CONSECUTIVE_ACCEPT_FAILURES)
+        {
+            _logger.Log(ViceLogLevel.Error,
+                $"pipe accept loop on '{_pipeName}' failed {state.ConsecutiveFailures} consecutive times; faulting so a supervisor can restart",
+                ex);
+            _acceptLoopCrashed = true;
+            _faulted = ex;
+            return AcceptOutcome.Stop;
+        }
+
+        _logger.Log(ViceLogLevel.Error,
+            $"pipe accept loop iteration failed on '{_pipeName}'; backing off and retrying", ex);
+
+        try
+        {
+            await Task.Delay(AcceptIterationBackoff, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            return AcceptOutcome.Stop;
+        }
+
+        return AcceptOutcome.Continue;
+    }
+
+    private static bool IsAddressInUse(Exception ex)
+    {
+        Exception? current = ex;
+        while (current is not null)
+        {
+            if (current is System.Net.Sockets.SocketException socketEx
+                && socketEx.SocketErrorCode == System.Net.Sockets.SocketError.AddressAlreadyInUse)
+            {
+                return true;
+            }
+
+            current = current.InnerException;
+        }
+
+        return false;
     }
 
     private NamedPipeServerStream CreateServerStream()
@@ -271,7 +339,17 @@ internal sealed class PipeServer : IPipeServer
     private async Task WaitForConnectionWithRestrictiveUmaskAsync(
         NamedPipeServerStream stream, CancellationToken ct)
     {
-        await stream.WaitForConnectionAsync(ct).ConfigureAwait(false);
+        using (ct.Register(() => stream.Dispose()))
+        {
+            try
+            {
+                await stream.WaitForConnectionAsync(ct).ConfigureAwait(false);
+            }
+            catch (ObjectDisposedException) when (ct.IsCancellationRequested)
+            {
+                throw new OperationCanceledException(ct);
+            }
+        }
     }
 
     [UnsupportedOSPlatform("windows")]
@@ -311,20 +389,20 @@ internal sealed class PipeServer : IPipeServer
         var gotEuid = PeerCredentials.TryGetEuid(out var euid);
         if (!gotEuid)
         {
-            EmitAudit($"pipe peer-uid check: geteuid failed on '{_pipeName}'; rejecting connection");
+            EmitAuditRejection($"pipe peer-uid check: geteuid failed on '{_pipeName}'; rejecting connection");
         }
 
         var gotPeer = PeerCredentials.TryGetPeerCredentials(stream.SafePipeHandle, out var peerUid, out var peerPid);
         if (gotEuid && !gotPeer)
         {
-            EmitAudit($"pipe peer-uid check: unable to determine peer uid on '{_pipeName}'; rejecting");
+            EmitAuditRejection($"pipe peer-uid check: unable to determine peer uid on '{_pipeName}'; rejecting");
         }
 
         if (gotEuid
             && gotPeer
             && peerUid != euid)
         {
-            EmitAudit(
+            EmitAuditRejection(
                 $"pipe peer-uid mismatch on '{_pipeName}': peer-uid={peerUid} peer-pid={peerPid} euid={euid}; rejecting");
         }
 
@@ -335,6 +413,11 @@ internal sealed class PipeServer : IPipeServer
     private void EmitAudit(string message)
     {
         _logger.Log(ViceLogLevel.Info, message);
+    }
+
+    private void EmitAuditRejection(string message)
+    {
+        _logger.Log(ViceLogLevel.Error, message);
     }
 
     internal static bool AuthorizePeer(int peerUid, int euid, bool gotEuid, bool gotPeer)

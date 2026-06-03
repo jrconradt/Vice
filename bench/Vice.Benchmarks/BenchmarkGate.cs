@@ -7,7 +7,8 @@ internal static class BenchmarkGate
 {
     private const string GATE_FLAG = "--gate";
     private const string UPDATE_FLAG = "--update-baseline";
-    private const double DEFAULT_TOLERANCE = 0.10;
+    private const double DEFAULT_TOLERANCE = 0.05;
+    private const double MAX_TOLERANCE = 0.50;
     private const string TOLERANCE_VAR = "VICE_BENCH_TOLERANCE";
 
     public static bool WantsGate(string[] args)
@@ -123,7 +124,8 @@ internal static class BenchmarkGate
         }
 
         if (double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed)
-            && parsed > 0)
+            && parsed > 0
+            && parsed <= MAX_TOLERANCE)
         {
             return parsed;
         }

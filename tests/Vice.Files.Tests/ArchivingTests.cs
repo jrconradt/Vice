@@ -1,3 +1,4 @@
+using System.Formats.Tar;
 using System.IO.Compression;
 using System.Text;
 using Vice.Files;
@@ -267,10 +268,7 @@ public class ArchivingTests
                 roundTrippedAttr = (uint)roundTripped.ExternalAttributes;
             }
             var roundTrippedMode = (roundTrippedAttr >> 16) & 0xF000;
-            if (roundTrippedMode != 0xA000)
-            {
-                return;
-            }
+            Assert.Equal(0xA000u, roundTrippedMode);
 
             var dest = Path.Combine(scratch, "out");
 
@@ -313,6 +311,129 @@ public class ArchivingTests
     }
 
     [Fact]
+    public async Task ExtractAsync_Tar_PerEntryCapExceeded_Throws()
+    {
+        var scratch = MakeScratchDir();
+        try
+        {
+            var oversized = Archiving.MAX_PER_ENTRY_BYTES + 1;
+
+            var tarPath = Path.Combine(scratch, "big.tar");
+            using (var fs = File.Create(tarPath))
+            using (var writer = new TarWriter(fs, TarEntryFormat.Pax, leaveOpen: false))
+            {
+                var entry = new PaxTarEntry(TarEntryType.RegularFile, "huge.bin");
+                entry.DataStream = new ZeroStream(oversized);
+                writer.WriteEntry(entry);
+            }
+
+            var dest = Path.Combine(scratch, "out");
+
+            var ex = await Assert.ThrowsAsync<InvalidDataException>(
+                () => Archiving.ExtractAsync(tarPath, dest, CancellationToken.None));
+
+            Assert.Contains("per-entry cap", ex.Message);
+        }
+        finally
+        {
+            Cleanup(scratch);
+        }
+    }
+
+    [Fact]
+    public async Task ExtractAsync_Tar_TotalArchiveCapExceeded_Throws()
+    {
+        var scratch = MakeScratchDir();
+        try
+        {
+            var perEntry = Archiving.MAX_PER_ENTRY_BYTES;
+            var entriesNeeded = (int)(Archiving.MAX_TOTAL_EXPANDED_BYTES / perEntry) + 2;
+
+            var tarPath = Path.Combine(scratch, "many.tar");
+            using (var fs = File.Create(tarPath))
+            using (var writer = new TarWriter(fs, TarEntryFormat.Pax, leaveOpen: false))
+            {
+                for (var i = 0; i < entriesNeeded; i++)
+                {
+                    var entry = new PaxTarEntry(TarEntryType.RegularFile, $"f{i}.bin");
+                    entry.DataStream = new ZeroStream(perEntry);
+                    writer.WriteEntry(entry);
+                }
+            }
+
+            var dest = Path.Combine(scratch, "out");
+
+            var ex = await Assert.ThrowsAsync<InvalidDataException>(
+                () => Archiving.ExtractAsync(tarPath, dest, CancellationToken.None));
+
+            Assert.Contains("total", ex.Message, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Cleanup(scratch);
+        }
+    }
+
+    [Fact]
+    public async Task ExtractAsync_Tar_RejectsTooManyEntries()
+    {
+        var scratch = MakeScratchDir();
+        try
+        {
+            var tarPath = Path.Combine(scratch, "many.tar");
+            using (var fs = File.Create(tarPath))
+            using (var writer = new TarWriter(fs, TarEntryFormat.Pax, leaveOpen: false))
+            {
+                for (var i = 0; i <= Archiving.MAX_ENTRIES; i++)
+                {
+                    writer.WriteEntry(new PaxTarEntry(TarEntryType.RegularFile, $"f{i}.txt"));
+                }
+            }
+
+            var dest = Path.Combine(scratch, "out");
+
+            var ex = await Assert.ThrowsAsync<InvalidDataException>(
+                () => Archiving.ExtractAsync(tarPath, dest, CancellationToken.None));
+
+            Assert.Contains("entry cap", ex.Message, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Cleanup(scratch);
+        }
+    }
+
+    [Fact]
+    public async Task ExtractAsync_Tar_SymbolicLinkEntry_NotMaterialized()
+    {
+        var scratch = MakeScratchDir();
+        try
+        {
+            var tarPath = Path.Combine(scratch, "symlink.tar");
+            using (var fs = File.Create(tarPath))
+            using (var writer = new TarWriter(fs, TarEntryFormat.Pax, leaveOpen: false))
+            {
+                var link = new PaxTarEntry(TarEntryType.SymbolicLink, "link")
+                {
+                    LinkName = "/etc/passwd",
+                };
+                writer.WriteEntry(link);
+            }
+
+            var dest = Path.Combine(scratch, "out");
+
+            var resolved = await Archiving.ExtractAsync(tarPath, dest, CancellationToken.None);
+
+            Assert.False(File.Exists(Path.Combine(resolved, "link")));
+            Assert.False(Directory.Exists(Path.Combine(resolved, "link")));
+        }
+        finally
+        {
+            Cleanup(scratch);
+        }
+    }
+
+    [Fact]
     public void IsArchive_DetectsSupportedSuffixes()
     {
         Assert.True(Archiving.IsArchive("a.zip"));
@@ -321,5 +442,70 @@ public class ArchivingTests
         Assert.True(Archiving.IsArchive("a.tgz"));
         Assert.False(Archiving.IsArchive("a.gz"));
         Assert.False(Archiving.IsArchive("a.txt"));
+    }
+
+    private sealed class ZeroStream : Stream
+    {
+        private readonly long _length;
+        private long _position;
+
+        public ZeroStream(long length)
+        {
+            _length = length;
+        }
+
+        public override bool CanRead => true;
+
+        public override bool CanSeek => true;
+
+        public override bool CanWrite => false;
+
+        public override long Length => _length;
+
+        public override long Position
+        {
+            get => _position;
+            set => _position = value;
+        }
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            var remaining = _length - _position;
+            if (remaining <= 0)
+            {
+                return 0;
+            }
+
+            var toRead = (int)Math.Min(count, remaining);
+            Array.Clear(buffer, offset, toRead);
+            _position += toRead;
+            return toRead;
+        }
+
+        public override long Seek(long offset, SeekOrigin origin)
+        {
+            _position = origin switch
+            {
+                SeekOrigin.Begin => offset,
+                SeekOrigin.Current => _position + offset,
+                SeekOrigin.End => _length + offset,
+                _ => _position,
+            };
+            return _position;
+        }
+
+        public override void Flush()
+        {
+        }
+
+        public override void SetLength(long value)
+        {
+            throw new NotSupportedException();
+        }
+
+        public override void Write(byte[] buffer, int offset, int count)
+        {
+            throw new NotSupportedException();
+        }
     }
 }

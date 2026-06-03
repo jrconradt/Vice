@@ -224,16 +224,18 @@ public class ProtobufJsonTranscoderPropertyTests
         return JsonSerializer.Serialize(value);
     }
 
+    private static readonly Gen<string> OverDepthText =
+        Gen.Int[1, 9].Select(extra =>
+        {
+            var depth = ProtobufJsonTranscoder.MAX_NESTING_DEPTH + extra;
+            return string.Concat(Enumerable.Repeat("{\"inner\":", depth))
+                + "{\"label\":\"x\"}"
+                + new string('}', depth);
+        });
+
     private static readonly Gen<string> ArbitraryText =
         Gen.Frequency(
             (3, KitchenGen.Select(Render)),
-            (2, Gen.Int[1, 9].Select(extra =>
-            {
-                var depth = ProtobufJsonTranscoder.MAX_NESTING_DEPTH + extra;
-                return string.Concat(Enumerable.Repeat("{\"inner\":", depth))
-                    + "{\"label\":\"x\"}"
-                    + new string('}', depth);
-            })),
             (1, Gen.Const("{ this is not json")),
             (1, Gen.String[Gen.Char[(char)32, (char)126], 0, 64]),
             (1, Gen.Const("{\"count\":\"not-a-number\"}")),
@@ -302,6 +304,18 @@ public class ProtobufJsonTranscoderPropertyTests
             },
             iter: Iterations,
             seed: "0000TranscoderValue");
+    }
+
+    [Fact]
+    public void Over_depth_json_always_throws_bad_argument()
+    {
+        var desc = KitchenMessage();
+        OverDepthText.Sample(payload =>
+            {
+                Assert.Throws<BadArgument>(() => ProtobufJsonTranscoder.JsonToProtobuf(payload, desc));
+            },
+            iter: Iterations,
+            seed: "0000TranscoderDepth");
     }
 
     [Fact]

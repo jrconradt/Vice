@@ -4,6 +4,7 @@ using Vice.Contracts;
 using Vice.Display;
 using Vice.Nodes;
 using Vice.Options;
+using Vice.TestSupport;
 using Xunit;
 using static Vice.Dsl;
 

@@ -89,7 +89,9 @@ public static class GlobalOptionExtractor
                 continue;
             }
 
-            bool hasValue = i + 1 < tokens.Count && tokens[i + 1].Kind != TokenKind.GlobalOption;
+            bool hasValue = i + 1 < tokens.Count
+                && (tokens[i + 1].Kind == TokenKind.Word
+                    || tokens[i + 1].Kind == TokenKind.Quoted);
             if (hasValue)
             {
                 var raw = tokens[i + 1].Value;

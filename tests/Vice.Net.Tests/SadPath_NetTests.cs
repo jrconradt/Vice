@@ -1,7 +1,7 @@
 using System.Net;
 using System.Text;
 using System.Threading.Tasks;
-using Vice.Net.Http;
+using Vice.Net.Requests.Http;
 using Xunit;
 
 namespace Vice.Net.Tests;

@@ -4,7 +4,7 @@ using Vice.Logging;
 
 namespace Vice;
 
-internal sealed class ConsoleLogSink : ILogSink, IAsyncDisposable
+internal sealed class ConsoleLogSink : IViceLogger, IAsyncDisposable
 {
     private static readonly string[] LEVEL_LABELS =
     {
@@ -18,6 +18,7 @@ internal sealed class ConsoleLogSink : ILogSink, IAsyncDisposable
     private readonly ViceLogLevel _minLevel;
     private readonly TextWriter _sink;
     private readonly SerialQueue _queue;
+    private bool _failureReported;
 
     public ConsoleLogSink(ViceLogLevel minLevel, TextWriter? sink = null)
     {
@@ -69,8 +70,20 @@ internal sealed class ConsoleLogSink : ILogSink, IAsyncDisposable
     {
         _ = _queue.EnqueueAsync(async ct =>
         {
-            await _sink.WriteAsync(text.AsMemory(), ct).ConfigureAwait(false);
-            await _sink.FlushAsync(ct).ConfigureAwait(false);
+            try
+            {
+                await _sink.WriteAsync(text.AsMemory(), ct).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                if (!_failureReported)
+                {
+                    _failureReported = true;
+                    System.Console.Error.WriteLine($"[ERROR] ConsoleLogSink write failed ({ex.GetType().Name}: {ex.Message}); subsequent log-sink failures suppressed.");
+                }
+
+                System.Console.Error.Write(text);
+            }
         });
     }
 

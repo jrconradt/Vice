@@ -15,6 +15,7 @@
     <ProjectReference Include="../Vice/Vice.csproj" />
     <ProjectReference Include="../Vice.Host/Vice.Host.csproj" />
     <ProjectReference Include="../Vice.Net/Vice.Net.csproj" />
+    <ProjectReference Include="../Vice.Research/Vice.Research.csproj" />
     <ProjectReference Include="../Vice.Files/Vice.Files.csproj" />
     <ProjectReference Include="../Vice.Build/Vice.Build.csproj" />
     <ProjectReference Include="../Vice.Mux/Vice.Mux.csproj" />

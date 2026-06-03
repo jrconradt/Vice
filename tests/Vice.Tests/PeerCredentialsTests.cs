@@ -26,11 +26,37 @@ public class PeerCredentialsTests
     }
 
     [UnixOnlyFact]
-    public void TryGetEuid_ReturnsNonNegativeValueOnUnix()
+    public void TryGetEuid_MatchesPeerUidOverSocketPair()
     {
-        var ok = PeerCredentials.TryGetEuid(out var euid);
-        Assert.True(ok);
-        Assert.True(euid >= 0);
+        using var listener = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+        var path = Path.Combine(Path.GetTempPath(), $"vice-peercred-{Guid.NewGuid():N}.sock");
+        try
+        {
+            listener.Bind(new UnixDomainSocketEndPoint(path));
+            listener.Listen(1);
+
+            using var client = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+            client.Connect(new UnixDomainSocketEndPoint(path));
+            using var accepted = listener.Accept();
+
+            var fd = (int)accepted.Handle;
+            using var handle = new SocketSafeHandle(fd);
+
+            var ok = PeerCredentials.TryGetEuid(out var euid);
+            var gotPeer = PeerCredentials.TryGetPeerUid(handle, out var peerUid);
+
+            Assert.True(ok);
+            Assert.True(gotPeer);
+            Assert.Equal(peerUid, euid);
+        }
+        finally
+        {
+            try { File.Delete(path); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                System.Diagnostics.Trace.WriteLine(ex);
+            }
+        }
     }
 
     [UnixOnlyFact]

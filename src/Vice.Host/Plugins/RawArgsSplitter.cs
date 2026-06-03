@@ -39,16 +39,16 @@ internal static class RawArgsSplitter
 
         for (int i = 0; i < args.Length; i++)
         {
-            var a = args[i];
-            if (PipingWords.Contains(a))
+            var arg = args[i];
+            if (PipingWords.Contains(arg))
             {
                 segments.Add(new Segment(current.ToArray(), pendingOp));
                 current = new List<string>();
-                pendingOp = a;
+                pendingOp = arg;
             }
             else
             {
-                current.Add(a);
+                current.Add(arg);
             }
         }
         segments.Add(new Segment(current.ToArray(), pendingOp));

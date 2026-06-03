@@ -34,7 +34,7 @@ public static class Router
             opens[i] = SinkFactory.OpenAsync(matched[i].SinkSpec, ct, logger).AsTask();
         }
 
-        var sinks = await Task.WhenAll(opens);
+        var live = new List<ISink>(await Task.WhenAll(opens));
 
         var pool = ArrayPool<byte>.Shared;
         var buffer = pool.Rent(chunkSize);
@@ -43,9 +43,12 @@ public static class Router
             int read;
             while ((read = await input.ReadAsync(buffer.AsMemory(0, chunkSize), ct)) > 0)
             {
-                if (sinks.Length == 1)
+                if (live.Count == 1)
                 {
-                    await sinks[0].WriteAsync(buffer.AsMemory(0, read), ct);
+                    if (!await WriteOneAsync(live[0], buffer.AsMemory(0, read), ct, logger))
+                    {
+                        live.RemoveAt(0);
+                    }
                 }
                 else
                 {
@@ -54,22 +57,27 @@ public static class Router
                     {
                         Buffer.BlockCopy(buffer, 0, copy, 0, read);
                         var shared = new ReadOnlyMemory<byte>(copy, 0, read);
-                        var writes = new Task[sinks.Length];
-                        for (int i = 0; i < sinks.Length; i++)
+                        for (int i = live.Count - 1; i >= 0; i--)
                         {
-                            writes[i] = sinks[i].WriteAsync(shared, ct).AsTask();
+                            if (!await WriteOneAsync(live[i], shared, ct, logger))
+                            {
+                                live.RemoveAt(i);
+                            }
                         }
-
-                        await Task.WhenAll(writes);
                     }
                     finally
                     {
                         pool.Return(copy);
                     }
                 }
+
+                if (live.Count == 0)
+                {
+                    break;
+                }
             }
 
-            foreach (var sink in sinks)
+            foreach (var sink in live)
             {
                 await sink.FlushAsync(ct);
             }
@@ -77,12 +85,37 @@ public static class Router
         finally
         {
             pool.Return(buffer);
-            foreach (var sink in sinks)
+            foreach (var sink in live)
             {
                 await sink.DisposeAsync();
             }
         }
 
         return 0;
+    }
+
+    private static async Task<bool> WriteOneAsync(
+        ISink sink,
+        ReadOnlyMemory<byte> chunk,
+        CancellationToken ct,
+        IViceLogger logger)
+    {
+        try
+        {
+            await sink.WriteAsync(chunk, ct);
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.Log(ViceLogLevel.Warn,
+                       $"Sink '{sink.Label}' failed during write; dropping it and continuing with remaining sinks.",
+                       ex);
+            await sink.DisposeAsync();
+            return false;
+        }
     }
 }

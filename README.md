@@ -169,7 +169,7 @@ What you inherit by building on Vice:
 - Typed, backpressured streaming channels between piped stages
 - A session REPL with job management, history, and a `daemon` mode for terminal-independent runs
 - Git-style external plugins: any executable named `<app>-<verb>` on the trusted plugin path dispatches as a verb
-- Pluggable, opt-in framework services (`IViceLogger`, `IKeyring`) with safe `Null` defaults
+- Pluggable, opt-in framework services (`IViceLogger`) with safe `Null` defaults
 - POSIX exit codes, pager wrapping, `--json`/`--format` conventions, and an SSRF-guarded `HttpClient`
 
 The framework API is summarized in [src/Vice/README.md](src/Vice/README.md); the knobs are in [docs/env-and-config.md](docs/env-and-config.md).
@@ -244,7 +244,7 @@ Requires the .NET 10 SDK.
 
 `scripts/bench.sh` runs every benchmark by default and writes BenchmarkDotNet JSON, Markdown, and log artifacts under `BenchmarkDotNet.Artifacts/` in the repository root (override the location with `VICE_BENCH_ARTIFACTS`). Pass BenchmarkDotNet arguments through, e.g. `./scripts/bench.sh --filter '*RouteStrategy*'`.
 
-To compare throughput run-over-run automatically, pass `--gate`: the harness diffs each benchmark's mean against the committed `bench/Vice.Benchmarks/baseline.json` and exits non-zero when any benchmark slows past the tolerance (`VICE_BENCH_TOLERANCE`, default `0.10` for 10%); a missing baseline is seeded from the current run. Pass `--update-baseline` to rewrite the baseline from the current run when an intended change shifts the numbers.
+To compare throughput run-over-run automatically, pass `--gate`: the harness diffs each benchmark's mean against the committed `bench/Vice.Benchmarks/baseline.json` and exits non-zero when any benchmark slows past the tolerance (`VICE_BENCH_TOLERANCE`, default `0.05` for 5%, capped at `0.50`); a missing baseline is seeded from the current run. Pass `--update-baseline` to rewrite the baseline from the current run when an intended change shifts the numbers.
 
 ---
 

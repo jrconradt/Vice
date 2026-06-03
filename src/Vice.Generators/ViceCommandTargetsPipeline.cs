@@ -112,7 +112,7 @@ public sealed partial class ViceCompositionGenerator
         if (targetMethod.IsGenericMethod && isExtensionRegistration)
         {
             genericCommandType = targetMethod.TypeArguments.FirstOrDefault();
-            chainArg = args[0];
+            chainArg = FindChainArgument(targetMethod, args);
         }
         else
         {
@@ -126,11 +126,11 @@ public sealed partial class ViceCompositionGenerator
 
                 var argExpr = args[i].Expression;
                 var info = ctx.SemanticModel.GetSymbolInfo(argExpr);
-                var m = info.Symbol as IMethodSymbol
+                var methodSymbol = info.Symbol as IMethodSymbol
                         ?? info.CandidateSymbols.OfType<IMethodSymbol>().FirstOrDefault();
-                if (m is not null && ReturnsTaskOfInt(m))
+                if (methodSymbol is not null && ReturnsTaskOfInt(methodSymbol))
                 {
-                    handlerMethods.Add(m);
+                    handlerMethods.Add(methodSymbol);
                 }
             }
         }
@@ -254,19 +254,38 @@ public sealed partial class ViceCompositionGenerator
         }
 
         var emittedKeys = new HashSet<string>(StringComparer.Ordinal);
+        var emittedHints = new HashSet<string>(StringComparer.Ordinal);
 
         foreach (var sym in commandSymbols)
         {
             switch (sym)
             {
                 case IMethodSymbol method:
-                    EmitForMethod(spc, method, byHandler, comp, emittedKeys);
+                    EmitForMethod(spc, method, byHandler, comp, emittedKeys, emittedHints);
                     break;
                 case INamedTypeSymbol type:
                     EmitForType(spc, type, byHandler, comp, emittedKeys);
                     break;
             }
         }
+    }
+
+    static string UniqueDisambiguator(string scope, string baseDisambiguator, HashSet<string> used)
+    {
+        if (used.Add($"{scope}_{baseDisambiguator}"))
+        {
+            return baseDisambiguator;
+        }
+
+        var suffix = 2;
+        var next = $"{baseDisambiguator}_{suffix}";
+        while (!used.Add($"{scope}_{next}"))
+        {
+            suffix++;
+            next = $"{baseDisambiguator}_{suffix}";
+        }
+
+        return next;
     }
 
     static IReadOnlyList<string>? ResolveTargetsForKey(
@@ -321,7 +340,8 @@ public sealed partial class ViceCompositionGenerator
         IMethodSymbol method,
         Dictionary<string, List<RegistrationCandidate>> byHandler,
         Compilation comp,
-        HashSet<string> emittedKeys)
+        HashSet<string> emittedKeys,
+        HashSet<string> emittedHints)
     {
         var key = HandlerKey.ForMethod(method).Value;
         if (!emittedKeys.Add(key))
@@ -345,7 +365,7 @@ public sealed partial class ViceCompositionGenerator
             : owner.ContainingNamespace.ToDisplayString();
         var visibility = method.DeclaredAccessibility == Accessibility.Public ? "public" : "internal";
 
-        var disambiguator = MethodSignatureDisambiguator(method);
+        var disambiguator = UniqueDisambiguator(method.Name, MethodSignatureDisambiguator(method), emittedHints);
         var sourceText = BuildFreeFunctionTargets(ns, visibility, owner, method, resolved, disambiguator);
         var hint = SanitizeHint($"{owner.ToDisplayString()}.{method.Name}_{disambiguator}_Targets.g.cs");
         spc.AddSource(hint, SourceText.From(sourceText, Encoding.UTF8));

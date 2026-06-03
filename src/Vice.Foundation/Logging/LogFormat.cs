@@ -23,12 +23,12 @@ public static class LogFormat
         return text;
     }
 
-    private static string FormatParams(object?[] params_)
-        => string.Join(", ", params_.Select(Repr));
+    private static string FormatParams(object?[] arguments)
+        => string.Join(", ", arguments.Select(Repr));
 
     private static string Repr(object? p)
     {
-        var s = p?.ToString() ?? "null";
-        return s.Length <= MAX_PARAM_REPR ? s : s[..(MAX_PARAM_REPR - 1)] + "…";
+        var repr = p?.ToString() ?? "null";
+        return repr.Length <= MAX_PARAM_REPR ? repr : repr[..(MAX_PARAM_REPR - 1)] + "…";
     }
 }

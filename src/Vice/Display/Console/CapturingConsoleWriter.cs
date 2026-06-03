@@ -38,7 +38,8 @@ internal sealed class CapturingConsoleWriter : IConsoleWriter
 
     public void WriteLine(string text)
     {
-        Capture(AnsiStripper.Strip(text) + Environment.NewLine);
+        Capture(AnsiStripper.Strip(text));
+        Capture(Environment.NewLine);
         _inner.WriteLine(text);
     }
 

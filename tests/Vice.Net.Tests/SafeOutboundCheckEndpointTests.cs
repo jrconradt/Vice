@@ -10,8 +10,15 @@ public sealed class SafeOutboundPolicyCollection { }
 [Collection("SafeOutboundPolicy")]
 public class SafeOutboundCheckEndpointTests : IDisposable
 {
-    public SafeOutboundCheckEndpointTests() => SafeOutboundConnection.Policy = SafeNetPolicy.Empty;
-    public void Dispose() => SafeOutboundConnection.ResetPolicy();
+    private readonly SafeNetPolicy _priorPolicy;
+
+    public SafeOutboundCheckEndpointTests()
+    {
+        _priorPolicy = SafeOutboundConnection.Policy;
+        SafeOutboundConnection.Policy = SafeNetPolicy.Empty;
+    }
+
+    public void Dispose() => SafeOutboundConnection.Policy = _priorPolicy;
 
     [Fact]
     public async Task LoopbackLiteral_IsBlocked_Default()

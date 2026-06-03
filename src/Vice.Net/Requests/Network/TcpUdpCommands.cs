@@ -3,12 +3,14 @@ using Vice.Composition;
 using Vice.Contracts;
 using Vice.Display;
 using Vice.Execution;
+using Vice.Foundation.Execution;
 using Vice.Lexicon;
 using Vice.Logging;
+using Vice.Net.Commands.Network;
 using Vice.Net.Requests.Grpc;
 using static Vice.Dsl;
 
-namespace Vice.Net.Commands.Network;
+namespace Vice.Net.Requests.Network;
 
 [ViceCommandPack]
 public static class TcpUdpCommands
@@ -117,45 +119,30 @@ public static class TcpUdpCommands
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeoutCts.CancelAfter(timeoutMs);
 
-        try
-        {
-            var addresses = await SafeOutboundConnection.CheckEndpointAsync(host, timeoutCts.Token, ctx.Logger);
+        return await SendGuarded(ctx,
+                                 "TCP",
+                                 host,
+                                 port,
+                                 timeoutMs,
+                                 ct,
+                                 async () =>
+                                 {
+                                     var addresses = await SafeOutboundConnection.CheckEndpointAsync(host, timeoutCts.Token, ctx.Logger);
 
-            using var client = new TcpClient();
-            await client.ConnectAsync(addresses, port, timeoutCts.Token);
+                                     using var client = new TcpClient();
+                                     await client.ConnectAsync(addresses, port, timeoutCts.Token);
+                                     ctx.Logger.Log(ViceLogLevel.Debug, $"TCP connected to {client.Client.RemoteEndPoint} (from {host}:{port}), sending {payload.Length} bytes");
 
-            var stream = client.GetStream();
-            await stream.WriteAsync(payload, timeoutCts.Token);
-            await stream.FlushAsync(timeoutCts.Token);
-            client.Client.Shutdown(SocketShutdown.Send);
+                                     var stream = client.GetStream();
+                                     await stream.WriteAsync(payload, timeoutCts.Token);
+                                     await stream.FlushAsync(timeoutCts.Token);
+                                     client.Client.Shutdown(SocketShutdown.Send);
 
-            var response = await ReadAllAsync(stream, timeoutCts.Token);
-            OutputFormatter.WriteResponse(response, format, NetworkOptions.GetEncoding(ctx), ctx.Console);
-            return ViceExitCode.SUCCESS;
-        }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
-        {
-            ctx.Console.WriteError($"TCP timeout after {timeoutMs} ms connecting to {host}:{port}.");
-            return ViceExitCode.FAILURE;
-        }
-        catch (OperationCanceledException)
-        {
-            return ViceExitCode.INTERRUPTED;
-        }
-        catch (SafeNetBlockedException ex)
-        {
-            ctx.Console.WriteError(ex.Message);
-            return ViceExitCode.FAILURE;
-        }
-        catch (SocketException ex)
-        {
-            return CommandErrorHandler.Handle(ctx, new SocketFailure("tcp", ex));
-        }
-        catch (IOException ex)
-        {
-            ctx.Console.WriteError($"TCP error talking to {host}:{port}: {ex.Message}");
-            return ViceExitCode.FAILURE;
-        }
+                                     var response = await ReadAllAsync(stream, timeoutCts.Token);
+                                     ctx.Logger.Log(ViceLogLevel.Debug, $"TCP received {response.Length} bytes from {host}:{port}");
+                                     OutputFormatter.WriteResponse(response, format, NetworkOptions.GetEncoding(ctx), ctx.Console);
+                                     return ViceExitCode.SUCCESS;
+                                 });
     }
 
     internal static async Task<int> RunUdpAsync(CommandContext ctx,
@@ -180,26 +167,49 @@ public static class TcpUdpCommands
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeoutCts.CancelAfter(timeoutMs);
 
+        return await SendGuarded(ctx,
+                                 "UDP",
+                                 host,
+                                 port,
+                                 timeoutMs,
+                                 ct,
+                                 async () =>
+                                 {
+                                     var addresses = await SafeOutboundConnection.CheckEndpointAsync(host, timeoutCts.Token, ctx.Logger);
+
+                                     using var client = new UdpClient();
+                                     await client.Client.ConnectAsync(addresses, port, timeoutCts.Token);
+                                     await client.Client.SendAsync(payload, SocketFlags.None, timeoutCts.Token);
+                                     ctx.Logger.Log(ViceLogLevel.Debug, $"UDP sent {payload.Length} bytes to {client.Client.RemoteEndPoint} (from {host}:{port})");
+
+                                     if (noReply)
+                                     {
+                                         return ViceExitCode.SUCCESS;
+                                     }
+
+                                     var result = await client.ReceiveAsync(timeoutCts.Token);
+                                     ctx.Logger.Log(ViceLogLevel.Debug, $"UDP received {result.Buffer.Length} bytes from {result.RemoteEndPoint}");
+                                     OutputFormatter.WriteResponse(result.Buffer, format, NetworkOptions.GetEncoding(ctx), ctx.Console);
+                                     return ViceExitCode.SUCCESS;
+                                 });
+    }
+
+    private static async Task<int> SendGuarded(CommandContext ctx,
+                                               string proto,
+                                               string host,
+                                               int port,
+                                               int timeoutMs,
+                                               CancellationToken ct,
+                                               Func<Task<int>> send)
+    {
         try
         {
-            var addresses = await SafeOutboundConnection.CheckEndpointAsync(host, timeoutCts.Token, ctx.Logger);
-
-            using var client = new UdpClient();
-            await client.Client.ConnectAsync(addresses, port, timeoutCts.Token);
-            await client.Client.SendAsync(payload, SocketFlags.None, timeoutCts.Token);
-
-            if (noReply)
-            {
-                return ViceExitCode.SUCCESS;
-            }
-
-            var result = await client.ReceiveAsync(timeoutCts.Token);
-            OutputFormatter.WriteResponse(result.Buffer, format, NetworkOptions.GetEncoding(ctx), ctx.Console);
-            return ViceExitCode.SUCCESS;
+            return await send();
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            ctx.Console.WriteError($"UDP timeout after {timeoutMs} ms waiting for {host}:{port}.");
+            ctx.Logger.Log(ViceLogLevel.Warn, $"{proto} timeout after {timeoutMs} ms talking to {host}:{port}");
+            ctx.Console.WriteError($"{proto} timeout after {timeoutMs} ms connecting to {host}:{port}.");
             return ViceExitCode.FAILURE;
         }
         catch (OperationCanceledException)
@@ -208,12 +218,20 @@ public static class TcpUdpCommands
         }
         catch (SafeNetBlockedException ex)
         {
+            ctx.Logger.Log(ViceLogLevel.Warn, $"{proto} endpoint {host}:{port} blocked: {ex.Message}");
             ctx.Console.WriteError(ex.Message);
             return ViceExitCode.FAILURE;
         }
         catch (SocketException ex)
         {
-            return CommandErrorHandler.Handle(ctx, new SocketFailure("udp", ex));
+            ctx.Logger.Log(ViceLogLevel.Warn, $"{proto} socket failure talking to {host}:{port}", ex);
+            return CommandErrorHandler.Handle(ctx, new SocketFailure(proto.ToLowerInvariant(), ex));
+        }
+        catch (IOException ex)
+        {
+            ctx.Logger.Log(ViceLogLevel.Warn, $"{proto} I/O error talking to {host}:{port}", ex);
+            ctx.Console.WriteError($"{proto} error talking to {host}:{port}: {ex.Message}");
+            return ViceExitCode.FAILURE;
         }
     }
 

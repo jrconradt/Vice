@@ -4,12 +4,6 @@ namespace Vice.Persistence;
 
 public static class SafeWriteRoots
 {
-    private const int CACHE_TTL_SECONDS = 30;
-
-    private sealed record RootsCache(IReadOnlyList<string> Roots, string Key, DateTime ExpiresAtUtc);
-
-    private static RootsCache? _rootsCache;
-
     public static bool IsAllowed(string fullPath, out string reason, IViceLogger? logger = null)
         => IsAllowed(fullPath, out _, out reason, logger);
 
@@ -34,7 +28,7 @@ public static class SafeWriteRoots
             return false;
         }
 
-        var roots = GetCachedRoots(sink);
+        var roots = CollectRoots(sink);
         foreach (var root in roots.Where(r => !string.IsNullOrEmpty(r)))
         {
             var rooted = root.EndsWith(Path.DirectorySeparatorChar) ? root : root + Path.DirectorySeparatorChar;
@@ -51,25 +45,6 @@ public static class SafeWriteRoots
         return false;
     }
 
-    private static IReadOnlyList<string> GetCachedRoots(IViceLogger logger)
-    {
-        var key = ComputeRootsCacheKey();
-        var nowUtc = DateTime.UtcNow;
-        var cached = Volatile.Read(ref _rootsCache);
-        if (cached is not null
-            && string.Equals(cached.Key, key, StringComparison.Ordinal)
-            && nowUtc < cached.ExpiresAtUtc)
-        {
-            return cached.Roots;
-        }
-
-        var fresh = new RootsCache(CollectRoots(logger),
-                                   key,
-                                   DateTime.UtcNow.AddSeconds(CACHE_TTL_SECONDS));
-        Volatile.Write(ref _rootsCache, fresh);
-        return fresh.Roots;
-    }
-
     private static IEnumerable<string?> RootSources()
     {
         yield return Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
@@ -78,7 +53,6 @@ public static class SafeWriteRoots
         yield return Environment.GetEnvironmentVariable("XDG_STATE_HOME");
         yield return Environment.GetEnvironmentVariable("TMPDIR");
         yield return Path.GetTempPath();
-        yield return Environment.CurrentDirectory;
         var allowed = Environment.GetEnvironmentVariable("VICE_ALLOWED_ROOTS");
         if (!string.IsNullOrEmpty(allowed))
         {
@@ -88,9 +62,6 @@ public static class SafeWriteRoots
             }
         }
     }
-
-    private static string ComputeRootsCacheKey()
-        => string.Join("|", RootSources().Select(s => s ?? ""));
 
     private static List<string> CollectRoots(IViceLogger logger)
     {

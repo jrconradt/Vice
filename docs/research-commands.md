@@ -91,6 +91,15 @@ Requires the source to support both `search` and `download`. AlphaFold therefore
 | `--format <fmt>` | source-specific | fetch, download, archive | Per-source format override (e.g. `epub` for Gutenberg, `cif` for AlphaFold). |
 | `--timeout <ms>` | 30000 | all | Per-call timeout. |
 
+## Environment variables
+
+| Variable | Default | Effect |
+|---|---|---|
+| `VICE_NCBI_API_KEY` | unset | NCBI E-utilities API key appended to PubMed requests, raising the NCBI rate limit from 3 to 10 requests/second. |
+| `VICE_UNIPROT_BASE_URL` | `https://rest.uniprot.org/uniprotkb` | Overrides the UniProt REST API base URL. Must be an absolute `https` URL. |
+
+See [environment and configuration](env-and-config.md) for the full environment-variable reference.
+
 ## Data licensing and attribution
 
 Content retrieved by `fetch`, `download`, and `archive` is owned by the upstream source, not by Vice. Apache-2.0 covers the Vice tool only; it grants you no rights over downloaded data. Each source sets its own terms, and reuse or redistribution carries obligations that travel with the bytes you write to disk.

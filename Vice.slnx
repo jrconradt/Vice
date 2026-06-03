@@ -12,6 +12,7 @@
     <Project Path="src/Vice.Mux.Cli/Vice.Mux.Cli.csproj" />
     <Project Path="src/Vice.Net/Vice.Net.csproj" />
     <Project Path="src/Vice.Parser/Vice.Parser.csproj" />
+    <Project Path="src/Vice.Research/Vice.Research.csproj" />
   </Folder>
   <Folder Name="/bench/">
     <Project Path="bench/Vice.Benchmarks/Vice.Benchmarks.csproj" />

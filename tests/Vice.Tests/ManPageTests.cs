@@ -1,4 +1,5 @@
 using Vice.Display;
+using Vice.TestSupport;
 using Xunit;
 using static Vice.Dsl;
 

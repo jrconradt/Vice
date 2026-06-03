@@ -20,6 +20,9 @@
     <ProjectReference Include="..\..\src\Vice.Foundation\Vice.Foundation.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="..\Shared\GoldenFile.cs" Link="Helpers\GoldenFile.cs" />
+  </ItemGroup>
+  <ItemGroup>
     <None Update="xunit.runner.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>

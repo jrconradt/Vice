@@ -5,6 +5,7 @@ using Vice;
 using Vice.Contracts;
 using Vice.Display;
 using Vice.Execution;
+using Vice.TestSupport;
 using Xunit;
 using static Vice.Dsl;
 

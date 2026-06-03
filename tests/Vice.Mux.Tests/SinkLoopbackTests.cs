@@ -19,7 +19,7 @@ public class SinkLoopbackTests
         try
         {
             var acceptTask = listener.AcceptTcpClientAsync();
-            await using (var sink = SinkFactory.Open($"tcp:127.0.0.1:{port}", NullViceLogger.Instance))
+            await using (var sink = await SinkFactory.OpenAsync($"tcp:127.0.0.1:{port}", CancellationToken.None, NullViceLogger.Instance))
             {
                 using var server = await acceptTask;
                 await sink.WriteAsync(payload, CancellationToken.None);

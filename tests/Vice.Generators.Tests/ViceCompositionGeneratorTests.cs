@@ -1,5 +1,6 @@
 using Microsoft.CodeAnalysis;
 using Vice.Contracts;
+using Vice.TestSupport;
 using Xunit;
 
 namespace Vice.Generators.Tests;

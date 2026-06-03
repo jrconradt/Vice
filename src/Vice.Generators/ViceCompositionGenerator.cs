@@ -262,9 +262,10 @@ public sealed partial class ViceCompositionGenerator : IIncrementalGenerator
         var frameworkAssembly = comp.GetTypeByMetadataName("Vice.Options.GlobalOption")?.ContainingAssembly;
         foreach (var r in comp.References)
         {
-            if (comp.GetAssemblyOrModuleSymbol(r) is IAssemblySymbol asm)
+            if (comp.GetAssemblyOrModuleSymbol(r) is IAssemblySymbol asm
+                && ReferencesFramework(asm, frameworkAssembly))
             {
-                Scan(asm.GlobalNamespace, sink, comp.Assembly, frameworkAssembly);
+                Scan(asm.GlobalNamespace, sink, comp.Assembly, frameworkAssembly, spc);
             }
         }
 
@@ -379,8 +380,11 @@ public sealed partial class ViceCompositionGenerator : IIncrementalGenerator
     static string RenderHostSessionServices(INamedTypeSymbol host)
     {
         var lines = new List<string>();
-        foreach (var hostMember in host.GetMembers()
-                     .Where(m => !m.IsStatic && HasAttr(m, SESSION_SERVICE_ATTR)))
+        var members = host.GetMembers()
+            .Where(m => !m.IsStatic && HasAttr(m, SESSION_SERVICE_ATTR))
+            .ToList();
+        members.Sort(static (a, b) => string.CompareOrdinal(a.Name, b.Name));
+        foreach (var hostMember in members)
         {
             ITypeSymbol? memberType = hostMember switch
             {
@@ -559,11 +563,39 @@ public sealed partial class ViceCompositionGenerator : IIncrementalGenerator
         return list;
     }
 
+    static bool ReferencesFramework(IAssemblySymbol asm, IAssemblySymbol? frameworkAssembly)
+    {
+        if (frameworkAssembly is null)
+        {
+            return false;
+        }
+
+        if (SymbolEqualityComparer.Default.Equals(asm, frameworkAssembly))
+        {
+            return true;
+        }
+
+        var frameworkName = frameworkAssembly.Identity.Name;
+        foreach (var module in asm.Modules)
+        {
+            foreach (var referenced in module.ReferencedAssemblies)
+            {
+                if (string.Equals(referenced.Name, frameworkName, StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
     static void Scan(
         INamespaceSymbol ns,
         DiscoverySink sink,
         IAssemblySymbol consumer,
-        IAssemblySymbol? frameworkAssembly)
+        IAssemblySymbol? frameworkAssembly,
+        SourceProductionContext spc)
     {
         var pending = new Stack<INamespaceOrTypeSymbol>();
         pending.Push(ns);
@@ -581,7 +613,7 @@ public sealed partial class ViceCompositionGenerator : IIncrementalGenerator
 
                     break;
                 case INamedTypeSymbol t:
-                    ScanType(t, sink, consumer, frameworkAssembly);
+                    ScanType(t, sink, consumer, frameworkAssembly, spc);
                     foreach (var nested in t.GetTypeMembers())
                     {
                         pending.Push(nested);
@@ -596,7 +628,8 @@ public sealed partial class ViceCompositionGenerator : IIncrementalGenerator
         INamedTypeSymbol t,
         DiscoverySink sink,
         IAssemblySymbol consumer,
-        IAssemblySymbol? frameworkAssembly)
+        IAssemblySymbol? frameworkAssembly,
+        SourceProductionContext spc)
     {
         if (!IsAccessibleFrom(t, consumer))
         {
@@ -626,15 +659,35 @@ public sealed partial class ViceCompositionGenerator : IIncrementalGenerator
         {
             switch (m)
             {
-                case IMethodSymbol method when method.IsStatic && IsAccessibleFrom(method, consumer):
+                case IMethodSymbol method when IsAccessibleFrom(method, consumer):
                     if (HasAttr(method, JOB_RUNNER_ATTR))
                     {
-                        sink.JobRunners.Add(new FactoryEntry(method));
+                        if (IsUsableFactory(method))
+                        {
+                            sink.JobRunners.Add(new FactoryEntry(method));
+                        }
+                        else
+                        {
+                            spc.ReportDiagnostic(Diagnostic.Create(BadFactoryMethod,
+                                                                   method.Locations.FirstOrDefault(),
+                                                                   "ViceJobRunner",
+                                                                   method.ToDisplayString()));
+                        }
                     }
 
                     if (HasAttr(method, SESSION_SERVICE_ATTR))
                     {
-                        sink.SessionServices.Add(new FactoryEntry(method));
+                        if (IsUsableFactory(method))
+                        {
+                            sink.SessionServices.Add(new FactoryEntry(method));
+                        }
+                        else
+                        {
+                            spc.ReportDiagnostic(Diagnostic.Create(BadFactoryMethod,
+                                                                   method.Locations.FirstOrDefault(),
+                                                                   "ViceSessionService",
+                                                                   method.ToDisplayString()));
+                        }
                     }
 
                     break;

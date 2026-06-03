@@ -9,6 +9,7 @@ internal sealed class JobManager : IJobManager
     public const int MAX_LIVE_JOBS = 4096;
     public const int MAX_JOB_ATTEMPTS = 3;
     public const int RETRY_BASE_BACKOFF_MS = 500;
+    public const int MAX_RETRY_BACKOFF_MS = 30000;
 
     private readonly IReadOnlyList<IJobRunner> _runners;
     private readonly IViceLogger _logger;
@@ -242,14 +243,14 @@ internal sealed class JobManager : IJobManager
         var taskPairs = _activeTasks.ToArray();
         foreach (var pair in taskPairs)
         {
-            var t = pair.Value;
+            var task = pair.Value;
             var id = pair.Key;
             try
             {
-                await t.WaitAsync(_shutdownTimeout).ConfigureAwait(false);
-                if (t.IsFaulted)
+                await task.WaitAsync(_shutdownTimeout).ConfigureAwait(false);
+                if (task.IsFaulted)
                 {
-                    _logger.Log(ViceLogLevel.Warn, $"job {id} faulted during shutdown drain", t.Exception);
+                    _logger.Log(ViceLogLevel.Warn, $"job {id} faulted during shutdown drain", task.Exception);
                 }
             }
             catch (TimeoutException)
@@ -497,7 +498,10 @@ internal sealed class JobManager : IJobManager
     private async Task RetryAfterTransientAsync(JobStateHolder holder, int jobId)
     {
         var attempt = holder.Read().Attempt;
-        var backoff = TimeSpan.FromMilliseconds(RETRY_BASE_BACKOFF_MS * Math.Pow(2, attempt - 1));
+        var scaled = RETRY_BASE_BACKOFF_MS * Math.Pow(2, attempt - 1);
+        var capped = Math.Min(scaled, MAX_RETRY_BACKOFF_MS);
+        var jittered = capped * (0.5 + Random.Shared.NextDouble() * 0.5);
+        var backoff = TimeSpan.FromMilliseconds(jittered);
 
         try
         {

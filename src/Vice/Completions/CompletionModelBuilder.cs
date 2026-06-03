@@ -80,26 +80,20 @@ internal static class CompletionModelBuilder
     {
         public required ChainNode? Chain { get; init; }
         public bool Expanded { get; set; }
-        public List<int> ChildSlots { get; } = new();
+        public List<ExpandFrame> Children { get; } = new();
         public ChainNode? PrependHead { get; set; }
+        public List<ChainNode?>? Result { get; set; }
     }
 
     private static IEnumerable<ChainNode?> ExpandToLinear(ChainNode? chain, int repetitionUnrollDepth = 3)
     {
-        var results = new Dictionary<int, List<ChainNode?>>();
         var rootFrame = new ExpandFrame { Chain = chain };
-        var frames = new Dictionary<int, ExpandFrame>();
-        var nextSlot = 0;
-        var rootSlot = nextSlot++;
-        frames[rootSlot] = rootFrame;
-
-        var stack = new Stack<int>();
-        stack.Push(rootSlot);
+        var stack = new Stack<ExpandFrame>();
+        stack.Push(rootFrame);
 
         while (stack.Count > 0)
         {
-            var slot = stack.Peek();
-            var frame = frames[slot];
+            var frame = stack.Peek();
 
             if (!frame.Expanded)
             {
@@ -108,7 +102,7 @@ internal static class CompletionModelBuilder
 
                 if (current is null)
                 {
-                    results[slot] = new List<ChainNode?> { null };
+                    frame.Result = new List<ChainNode?> { null };
                     stack.Pop();
                     continue;
                 }
@@ -118,54 +112,27 @@ internal static class CompletionModelBuilder
                     case WordNode or ConjunctiveNode:
                         {
                             frame.PrependHead = current;
-                            var childSlot = nextSlot++;
-                            frames[childSlot] = new ExpandFrame { Chain = current.NextNode };
-                            frame.ChildSlots.Add(childSlot);
-                            stack.Push(childSlot);
+                            PushChildren(stack, frame, ExpandConjunctive(current));
                             continue;
                         }
                     case OptionalNode opt:
                         {
-                            var firstSlot = nextSlot++;
-                            frames[firstSlot] = new ExpandFrame { Chain = SpliceBefore(opt.Inner, opt.NextNode) };
-                            frame.ChildSlots.Add(firstSlot);
-
-                            var secondSlot = nextSlot++;
-                            frames[secondSlot] = new ExpandFrame { Chain = opt.NextNode };
-                            frame.ChildSlots.Add(secondSlot);
-
-                            stack.Push(secondSlot);
-                            stack.Push(firstSlot);
+                            PushChildren(stack, frame, ExpandOptional(opt));
                             continue;
                         }
                     case AlternationNode alt:
                         {
-                            for (var i = alt.Alternatives.Count - 1; i >= 0; i--)
-                            {
-                                var altSlot = nextSlot++;
-                                frames[altSlot] = new ExpandFrame { Chain = SpliceBefore(alt.Alternatives[i], alt.NextNode) };
-                                frame.ChildSlots.Insert(0, altSlot);
-                                stack.Push(altSlot);
-                            }
+                            PushChildren(stack, frame, ExpandAlternation(alt));
                             continue;
                         }
                     case RepetitionNode rep:
                         {
-                            var upper = rep.Max < repetitionUnrollDepth ? rep.Max : repetitionUnrollDepth;
-                            for (var count = upper; count >= rep.Min; count--)
-                            {
-                                var unrolled = BuildRepetition(rep.Inner, rep.Separator, count);
-                                var spliced = unrolled is null ? rep.NextNode?.Clone() : SpliceBefore(unrolled, rep.NextNode);
-                                var repSlot = nextSlot++;
-                                frames[repSlot] = new ExpandFrame { Chain = spliced };
-                                frame.ChildSlots.Insert(0, repSlot);
-                                stack.Push(repSlot);
-                            }
+                            PushChildren(stack, frame, ExpandRepetition(rep, repetitionUnrollDepth));
                             continue;
                         }
                     default:
                         {
-                            results[slot] = new List<ChainNode?>();
+                            frame.Result = new List<ChainNode?>();
                             stack.Pop();
                             continue;
                         }
@@ -175,9 +142,9 @@ internal static class CompletionModelBuilder
             var combined = new List<ChainNode?>();
             if (frame.PrependHead is not null)
             {
-                foreach (var childSlot in frame.ChildSlots)
+                foreach (var child in frame.Children)
                 {
-                    foreach (var tail in results[childSlot])
+                    foreach (var tail in child.Result!)
                     {
                         var head = CloneHeadOnly(frame.PrependHead);
                         head.NextNode = tail;
@@ -187,17 +154,68 @@ internal static class CompletionModelBuilder
             }
             else
             {
-                foreach (var childSlot in frame.ChildSlots)
+                foreach (var child in frame.Children)
                 {
-                    combined.AddRange(results[childSlot]);
+                    combined.AddRange(child.Result!);
                 }
             }
 
-            results[slot] = combined;
+            frame.Result = combined;
             stack.Pop();
         }
 
-        return results[rootSlot];
+        return rootFrame.Result!;
+    }
+
+    private static void PushChildren(
+        Stack<ExpandFrame> stack,
+        ExpandFrame frame,
+        List<ExpandFrame> children)
+    {
+        foreach (var child in children)
+        {
+            frame.Children.Add(child);
+        }
+
+        for (var i = children.Count - 1; i >= 0; i--)
+        {
+            stack.Push(children[i]);
+        }
+    }
+
+    private static List<ExpandFrame> ExpandConjunctive(ChainNode node)
+        => new() { new ExpandFrame { Chain = node.NextNode } };
+
+    private static List<ExpandFrame> ExpandOptional(OptionalNode opt)
+        => new()
+        {
+            new ExpandFrame { Chain = SpliceBefore(opt.Inner, opt.NextNode) },
+            new ExpandFrame { Chain = opt.NextNode },
+        };
+
+    private static List<ExpandFrame> ExpandAlternation(AlternationNode alt)
+    {
+        var children = new List<ExpandFrame>();
+        foreach (var alternative in alt.Alternatives)
+        {
+            children.Add(new ExpandFrame { Chain = SpliceBefore(alternative, alt.NextNode) });
+        }
+
+        return children;
+    }
+
+    private static List<ExpandFrame> ExpandRepetition(RepetitionNode rep, int repetitionUnrollDepth)
+    {
+        var upper = rep.Max < repetitionUnrollDepth ? rep.Max : repetitionUnrollDepth;
+        var children = new List<ExpandFrame>();
+        for (var count = rep.Min; count <= upper; count++)
+        {
+            var unrolled = BuildRepetition(rep.Inner, rep.Separator, count);
+            var spliced = unrolled is null ? rep.NextNode?.Clone() : SpliceBefore(unrolled, rep.NextNode);
+            children.Add(new ExpandFrame { Chain = spliced });
+        }
+
+        return children;
     }
 
     private static ChainNode CloneHeadOnly(ChainNode node)

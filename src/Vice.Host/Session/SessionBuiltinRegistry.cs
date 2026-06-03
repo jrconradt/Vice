@@ -22,9 +22,9 @@ internal sealed class SessionBuiltinRegistry
             ["exit"] = (_, _) => Task.FromResult(SessionLoop.EXIT_SENTINEL),
             ["quit"] = (_, _) => Task.FromResult(SessionLoop.EXIT_SENTINEL),
             ["jobs"] = HandleJobs,
-            ["pause"] = HandlePauseAsync,
-            ["resume"] = HandleResumeAsync,
-            ["cancel"] = HandleCancelAsync,
+            ["pause"] = HandlePause,
+            ["resume"] = HandleResume,
+            ["cancel"] = HandleCancel,
             ["history"] = HandleHistory,
             ["clear"] = HandleClear,
         };
@@ -63,7 +63,7 @@ internal sealed class SessionBuiltinRegistry
         return Task.FromResult(0);
     }
 
-    private async Task<int> HandlePauseAsync(CommandContext ctx, CancellationToken ct)
+    private async Task<int> HandlePause(CommandContext ctx, CancellationToken ct)
     {
         if (!int.TryParse(ctx["id"], out var id))
         {
@@ -74,7 +74,7 @@ internal sealed class SessionBuiltinRegistry
         return 0;
     }
 
-    private async Task<int> HandleResumeAsync(CommandContext ctx, CancellationToken ct)
+    private async Task<int> HandleResume(CommandContext ctx, CancellationToken ct)
     {
         if (!int.TryParse(ctx["id"], out var id))
         {
@@ -85,7 +85,7 @@ internal sealed class SessionBuiltinRegistry
         return 0;
     }
 
-    private async Task<int> HandleCancelAsync(CommandContext ctx, CancellationToken ct)
+    private async Task<int> HandleCancel(CommandContext ctx, CancellationToken ct)
     {
         if (!int.TryParse(ctx["id"], out var id))
         {

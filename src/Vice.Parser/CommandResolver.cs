@@ -217,7 +217,7 @@ public static class CommandResolver
             {
                 result.Add((current, pendingOp));
                 current = new List<Token>();
-                pendingOp = token.Value;
+                pendingOp = token.Value.ToLowerInvariant();
             }
             else
             {
@@ -386,7 +386,7 @@ public static class CommandResolver
             {
                 return (PipelineContinuation.Stop, null, pos);
             }
-            return (PipelineContinuation.Explicit, next, afterOp);
+            return (PipelineContinuation.Explicit, next.ToLowerInvariant(), afterOp);
         }
 
         if (verbHeads.Contains(next))
@@ -1081,7 +1081,9 @@ public static class CommandResolver
                 continue;
             }
 
-            if (node.Next is not null && IsChainNodeMatch(tokens[pos].Value, node.Next))
+            if ((node.Next is not null && IsChainNodeMatch(tokens[pos].Value, node.Next))
+                || PipingWords.Contains(tokens[pos].Value)
+                || tokens[pos].Kind == TokenKind.ArgReference)
             {
                 if (target.Required)
                 {
@@ -1127,7 +1129,9 @@ public static class CommandResolver
                     pos++;
                 }
             }
-            else if (node.Next is not null && IsChainNodeMatch(tokens[pos].Value, node.Next))
+            else if ((node.Next is not null && IsChainNodeMatch(tokens[pos].Value, node.Next))
+                     || PipingWords.Contains(tokens[pos].Value)
+                     || tokens[pos].Kind == TokenKind.ArgReference)
             {
                 break;
             }
