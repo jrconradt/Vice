@@ -1,4 +1,5 @@
 using Grpc.Core;
+using Grpc.Net.Client;
 using Vice.Display.Rendering;
 using Vice.Logging;
 using Vice.Net.Requests.Grpc;
@@ -44,10 +45,10 @@ internal sealed class GrpcBidiSession
 
         while (true)
         {
-            GrpcConnectionManager.ConnectionLease lease;
+            GrpcChannel channel;
             try
             {
-                lease = _connections.LeaseChannel(endpoint);
+                channel = _connections.GetChannel(endpoint);
             }
             catch (InvalidOperationException ex)
             {
@@ -57,11 +58,7 @@ internal sealed class GrpcBidiSession
                 break;
             }
 
-            LegResult leg;
-            using (lease)
-            {
-                leg = await RunLegAsync(lease, methodDef, ct).ConfigureAwait(false);
-            }
+            var leg = await RunLegAsync(channel, methodDef, ct).ConfigureAwait(false);
 
             totalSent += leg.Sent;
             totalReceived += leg.Received;
@@ -106,11 +103,11 @@ internal sealed class GrpcBidiSession
     }
 
     private async Task<LegResult> RunLegAsync(
-        GrpcConnectionManager.ConnectionLease lease,
+        GrpcChannel channel,
         Method<byte[], byte[]> methodDef,
         CancellationToken ct)
     {
-        var invoker = lease.Channel.CreateCallInvoker();
+        var invoker = channel.CreateCallInvoker();
         var callOptions = new CallOptions(cancellationToken: ct)
             .WithDeadline(DateTime.UtcNow.Add(CallDeadline));
 
@@ -126,7 +123,6 @@ internal sealed class GrpcBidiSession
         {
             await foreach (var response in call.ResponseStream.ReadAllAsync(ct))
             {
-                lease.Renew();
                 var json = System.Text.Encoding.UTF8.GetString(response);
                 _console.WriteLine($"<- {json}");
                 Interlocked.Increment(ref received);
@@ -169,7 +165,6 @@ internal sealed class GrpcBidiSession
                 {
                     var bytes = System.Text.Encoding.UTF8.GetBytes(trimmed);
                     await call.RequestStream.WriteAsync(bytes, ct);
-                    lease.Renew();
                     sent++;
                 }
                 catch (RpcException ex) when (IsTransient(ex))
