@@ -1,4 +1,5 @@
 using Vice.Build.Dotnet;
+using Vice.Core;
 using Vice.Display;
 using Xunit;
 

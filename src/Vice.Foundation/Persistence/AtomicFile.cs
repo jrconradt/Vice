@@ -95,16 +95,6 @@ public static class AtomicFile
         {
             return null;
         }
-        catch (UnauthorizedAccessException ex)
-        {
-            sink.Log(ViceLogLevel.Warn, $"AtomicFile read denied: {path}", ex);
-            return null;
-        }
-        catch (IOException ex)
-        {
-            sink.Log(ViceLogLevel.Warn, $"AtomicFile read failed: {path}", ex);
-            return null;
-        }
     }
 
     public static async Task AppendTextAsync(string path, string line, CancellationToken ct)

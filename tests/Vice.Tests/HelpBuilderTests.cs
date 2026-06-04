@@ -1,6 +1,8 @@
 using Vice.Display;
+using Vice.Host;
+using Vice.TestSupport;
 using Xunit;
-using static Vice.Dsl;
+using static Vice.Core.Dsl;
 
 namespace Vice.Tests;
 

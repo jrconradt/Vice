@@ -1,16 +1,16 @@
 using System.Runtime.CompilerServices;
 using Vice.Logging;
 
-namespace Vice;
+namespace Vice.Core;
 
 public static class Log
 {
-    private static ILogSink _sink = NullLogSink.Instance;
+    private static IViceLogger _sink = NullViceLogger.Instance;
 
-    public static void Configure(ILogSink sink)
-        => Volatile.Write(ref _sink, sink ?? NullLogSink.Instance);
+    public static void Configure(IViceLogger sink)
+        => Volatile.Write(ref _sink, sink ?? NullViceLogger.Instance);
 
-    public static ILogSink Current => Volatile.Read(ref _sink);
+    public static IViceLogger Current => Volatile.Read(ref _sink);
 
     public static bool IsEnabled(ViceLogLevel level)
         => Volatile.Read(ref _sink).IsEnabled(level);

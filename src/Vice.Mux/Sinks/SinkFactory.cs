@@ -1,6 +1,6 @@
 using System.Diagnostics;
-using System.Net.Sockets;
 using Vice.Logging;
+using Vice.Persistence;
 
 namespace Vice.Mux.Sinks;
 
@@ -9,26 +9,42 @@ public static class SinkFactory
     public static ISink Open(string spec, IViceLogger logger)
     {
         var (scheme, rest) = Split(spec);
-        return scheme switch
+        if (scheme == "tcp")
         {
-            "file" => OpenFile(rest, append: false, logger),
-            "append" => OpenFile(rest, append: true, logger),
-            "tcp" => OpenTcp(rest, logger),
-            "exec" => OpenExec(rest, logger),
-            "pipe" => OpenPipe(rest, logger),
-            "null" => new NullSink(),
-            _ => throw new ArgumentException($"unknown sink scheme '{scheme}' in '{spec}'"),
-        };
+            throw new ArgumentException($"tcp sink scheme requires a network connector; call SinkFactory.OpenAsync with a TcpSinkConnector for '{spec}'");
+        }
+
+        return OpenNonTcp(scheme,
+                          rest,
+                          spec,
+                          logger);
     }
 
-    public static async ValueTask<ISink> OpenAsync(string spec, CancellationToken ct, IViceLogger logger)
+    public static async ValueTask<ISink> OpenAsync(string spec, CancellationToken ct, IViceLogger logger, TcpSinkConnector? connectTcp = null)
     {
         var (scheme, rest) = Split(spec);
+        if (scheme == "tcp")
+        {
+            if (connectTcp is null)
+            {
+                throw new ArgumentException($"tcp sink scheme requires a network connector; none was provided for '{spec}'");
+            }
+
+            return await connectTcp(rest, ct, logger);
+        }
+
+        return OpenNonTcp(scheme,
+                          rest,
+                          spec,
+                          logger);
+    }
+
+    private static ISink OpenNonTcp(string scheme, string rest, string spec, IViceLogger logger)
+    {
         return scheme switch
         {
             "file" => OpenFile(rest, append: false, logger),
             "append" => OpenFile(rest, append: true, logger),
-            "tcp" => await OpenTcpAsync(rest, ct, logger),
             "exec" => OpenExec(rest, logger),
             "pipe" => OpenPipe(rest, logger),
             "null" => new NullSink(),
@@ -55,61 +71,18 @@ public static class SinkFactory
     private static ISink OpenFile(string path, bool append, IViceLogger logger)
     {
         var full = Path.GetFullPath(path);
-        Directory.CreateDirectory(Path.GetDirectoryName(full)!);
+        if (!SafeWriteRoots.IsAllowed(full, out var canonical, out var reason, logger))
+        {
+            throw new BadArgument($"Destination '{full}' is outside allowed write roots: {reason}.");
+        }
+
+        Directory.CreateDirectory(Path.GetDirectoryName(canonical)!);
         var mode = append ? FileMode.Append : FileMode.Create;
-        var stream = new FileStream(full, mode, FileAccess.Write, FileShare.Read, 65536, useAsync: true);
-        return new StreamSink(stream, $"file:{full}", logger);
+        var stream = new FileStream(canonical, mode, FileAccess.Write, FileShare.Read, 65536, useAsync: true);
+        return new StreamSink(stream, $"file:{canonical}", logger);
     }
 
-    private static ISink OpenTcp(string hostPort, IViceLogger logger)
-    {
-        var (host, port) = ParseEndpoint(hostPort);
-        var client = new TcpClient();
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        try
-        {
-            client.ConnectAsync(host,
-                                port,
-                                cts.Token).AsTask().GetAwaiter().GetResult();
-        }
-        catch (OperationCanceledException)
-        {
-            client.Dispose();
-            throw new TimeoutException($"tcp sink connect to {host}:{port} timed out");
-        }
-
-        client.NoDelay = true;
-        return new TcpSink(client, $"tcp:{host}:{port}", logger);
-    }
-
-    private static async ValueTask<ISink> OpenTcpAsync(string hostPort, CancellationToken ct, IViceLogger logger)
-    {
-        var (host, port) = ParseEndpoint(hostPort);
-        var client = new TcpClient();
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        cts.CancelAfter(TimeSpan.FromSeconds(5));
-        try
-        {
-            await client.ConnectAsync(host,
-                                      port,
-                                      cts.Token);
-        }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
-        {
-            client.Dispose();
-            throw new TimeoutException($"tcp sink connect to {host}:{port} timed out");
-        }
-        catch
-        {
-            client.Dispose();
-            throw;
-        }
-
-        client.NoDelay = true;
-        return new TcpSink(client, $"tcp:{host}:{port}", logger);
-    }
-
-    private static (string host, int port) ParseEndpoint(string hostPort)
+    public static (string host, int port) ParseTcpEndpoint(string hostPort)
     {
         var bang = hostPort.LastIndexOf(':');
         if (bang < 0)
@@ -147,6 +120,8 @@ public static class SinkFactory
             psi.ArgumentList.Add(parts[i]);
         }
 
+        logger.Log(ViceLogLevel.Info,
+                   $"exec sink spawn: path='{parts[0]}' argc={parts.Count - 1}");
         var proc = Process.Start(psi) ?? throw new InvalidOperationException($"exec sink failed to start '{commandLine}'");
         return new ProcessSink(proc, $"exec:{commandLine}", logger);
     }

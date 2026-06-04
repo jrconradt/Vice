@@ -4,6 +4,6 @@ public sealed class BadArgument(string detail, Exception? inner = null) : ViceEr
 {
     public string Detail { get; } = detail;
     public override ViceLogLevel LogLevel => ViceLogLevel.Debug;
-    public override int ExitCode => Vice.Execution.ViceExitCode.USAGE_ERROR;
+    public override int ExitCode => Vice.Foundation.Execution.ViceExitCode.USAGE_ERROR;
     public override string ToString() => Detail;
 }

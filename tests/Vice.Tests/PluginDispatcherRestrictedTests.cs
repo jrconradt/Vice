@@ -3,13 +3,20 @@ using Vice.Commands;
 using Vice.Logging;
 using Vice.Plugins;
 using Xunit;
-using static Vice.Dsl;
+using static Vice.Core.Dsl;
 
 namespace Vice.Tests;
 
 [Collection("EnvVarSerial")]
 public class PluginDispatcherRestrictedTests
 {
+    private readonly EnvVarSerialFixture _serial;
+
+    public PluginDispatcherRestrictedTests(EnvVarSerialFixture serial)
+    {
+        _serial = serial;
+    }
+
     private static CommandRegistry Registry()
     {
         var r = new CommandRegistry();
@@ -36,6 +43,7 @@ public class PluginDispatcherRestrictedTests
             UnixFileMode.UserRead | UnixFileMode.UserExecute | UnixFileMode.UserWrite);
 
         using var env = new EnvScope(
+            _serial,
             ("PATH", pathDir.Path + Path.PathSeparator + (Environment.GetEnvironmentVariable("PATH") ?? "")),
             ("VICE_PLUGIN_DIR", null),
             ("XDG_DATA_HOME", fakeXdg.Path));
@@ -58,6 +66,7 @@ out _, out _);
             UnixFileMode.UserRead | UnixFileMode.UserExecute | UnixFileMode.UserWrite);
 
         using var env = new EnvScope(
+            _serial,
             ("VICE_PLUGIN_DIR", dir.Path),
             ("XDG_DATA_HOME", null));
 
@@ -83,6 +92,7 @@ out var resolved, out var pluginArgs);
             UnixFileMode.UserRead | UnixFileMode.UserExecute | UnixFileMode.UserWrite);
 
         using var env = new EnvScope(
+            _serial,
             ("VICE_PLUGIN_DIR", null),
             ("XDG_DATA_HOME", xdg.Path));
 
@@ -107,6 +117,7 @@ out var resolved, out _);
             UnixFileMode.OtherRead | UnixFileMode.OtherWrite | UnixFileMode.OtherExecute);
 
         using var env = new EnvScope(
+            _serial,
             ("VICE_PLUGIN_DIR", dir.Path),
             ("XDG_DATA_HOME", null));
 
@@ -129,6 +140,7 @@ out _, out _);
             UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.GroupExecute);
 
         using var env = new EnvScope(
+            _serial,
             ("VICE_PLUGIN_DIR", dir.Path),
             ("XDG_DATA_HOME", null));
 
@@ -154,6 +166,7 @@ out _, out _);
         File.CreateSymbolicLink(link, realTarget);
 
         using var env = new EnvScope(
+            _serial,
             ("VICE_PLUGIN_DIR", pluginsDir.Path),
             ("XDG_DATA_HOME", null));
 

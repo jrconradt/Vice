@@ -28,7 +28,7 @@ public static class JobViewFormatters
     {
         Register(JobKind.Download,
                  new JobViewFormatter(static job => $"{job.Source}/{job.ResourceId}",
-                                      DownloadProgress));
+                                      FormatDownloadProgress));
         Register(JobKind.GrpcStream,
                  new JobViewFormatter(static job => $"{job.Method} on {job.Endpoint}",
                                       static job => $"{job.MessagesReceived} msgs"));
@@ -46,7 +46,7 @@ public static class JobViewFormatters
             : Fallback;
     }
 
-    private static string DownloadProgress(JobState job)
+    private static string FormatDownloadProgress(JobState job)
     {
         return job.TotalBytes > 0
             ? $"{job.BytesDownloaded * 100 / job.TotalBytes.Value}%"

@@ -25,6 +25,17 @@ and none of its rules apply here.
 Quality gates are these local scripts. There is no CI; do not add
 pipeline configs.
 
+When you change help, manpage, completions, or generator output, the
+golden baselines under each test project's `Goldens/` directory must be
+regenerated:
+
+```bash
+UPDATE_GOLDENS=1 ./scripts/test.sh    # rewrite golden baselines
+```
+
+Inspect the resulting diff before committing — the regenerated goldens
+are the new expected output.
+
 ## Project map
 
 Dependency layers, bottom-up — each layer references only layers below
@@ -38,8 +49,9 @@ it; the graph is a DAG with no cycles:
   composition, command registry, options, display, help, manpages,
   completions, streaming, pipeline execution
 - **Feature libraries:** `Vice.Host` (IPC, daemon, session REPL),
-  `Vice.Net` (gRPC, HTTP, research sources), `Vice.Files`, `Vice.Mux`,
-  `Vice.Build`
+  `Vice.Net` (gRPC, HTTP, TCP/UDP transport), `Vice.Research`
+  (research source catalog and commands over `Vice.Net`), `Vice.Files`,
+  `Vice.Mux`, `Vice.Build`
 - **Tools:** `Vice.Cli` (`vice`), `Vice.Mux.Cli` (`vice-mux`) — both
   `PackAsTool` executables
 
@@ -48,12 +60,17 @@ Docs live in `docs/`; keep them in sync with behavior.
 
 ## The programming model
 
-Commands are classes carrying `[ViceCommand]` attributes and
-implementing `IViceCommand` (`Handle(CommandContext, CancellationToken)`).
-The Roslyn generators in `Vice.Generators` discover them and emit the
-composition and registration wiring at compile time.
-`ViceApp.Create(...).ComposeFromAttributes(host).Build()` is the
-composition root — see `src/Vice.Cli/Program.cs` and
+The primary model is `[ViceCommandPack]` static classes with a
+`public static void Register(IViceApp app)` body that calls
+`app.Register*(...)` with DSL chains — for example
+`app.RegisterStreaming<byte[]>(Verbs.Read() * Targets.Path, "...",
+ReadAsStreamAsync)`. Most command sources use this form. The secondary
+single-class form is a class carrying a `[ViceCommand]` attribute and
+implementing `IViceCommand` (`Task<int> Handle(CommandContext,
+CancellationToken)`). The Roslyn generators in `Vice.Generators`
+discover both and emit the composition and registration wiring at
+compile time. `ViceApp.Create(...).ComposeFromAttributes(host).Build()`
+is the composition root — see `src/Vice.Cli/Program.cs` and
 `src/Vice.Mux.Cli/Program.cs` for the two real instances.
 
 Dependencies flow through constructors and `CommandContext`; there are

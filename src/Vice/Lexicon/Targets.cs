@@ -1,3 +1,5 @@
+using Vice.Core;
+
 namespace Vice.Lexicon;
 
 public static class Targets

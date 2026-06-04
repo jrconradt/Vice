@@ -130,6 +130,8 @@ public class DotnetBuildQueueTests
         var queue = new DotnetBuildQueue();
         await queue.DisposeAsync();
         await queue.DisposeAsync();
+
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => queue.GetOrStart("k", () => Task.FromResult(0)));
     }
 
     [Fact]

@@ -19,7 +19,10 @@ public class SinkLoopbackTests
         try
         {
             var acceptTask = listener.AcceptTcpClientAsync();
-            await using (var sink = SinkFactory.Open($"tcp:127.0.0.1:{port}", NullViceLogger.Instance))
+            var client = new TcpClient();
+            await client.ConnectAsync(IPAddress.Loopback, port);
+            client.NoDelay = true;
+            await using (var sink = new StreamSink(client.GetStream(), $"tcp:127.0.0.1:{port}", NullViceLogger.Instance, client))
             {
                 using var server = await acceptTask;
                 await sink.WriteAsync(payload, CancellationToken.None);

@@ -3,6 +3,7 @@ using System.Reflection;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Vice.Generators;
+using Vice.Host;
 
 namespace Vice.Generators.Tests;
 
@@ -22,9 +23,9 @@ internal static class GeneratorHarness
                 references.Add(MetadataReference.CreateFromFile(path));
             }
         }
-        references.Add(MetadataReference.CreateFromFile(typeof(Vice.IViceApp).Assembly.Location));
+        references.Add(MetadataReference.CreateFromFile(typeof(Vice.Core.IViceApp).Assembly.Location));
         references.Add(MetadataReference.CreateFromFile(typeof(Vice.Composition.ViceHostAttribute).Assembly.Location));
-        references.Add(MetadataReference.CreateFromFile(typeof(Vice.ViceAppBuilder).Assembly.Location));
+        references.Add(MetadataReference.CreateFromFile(typeof(Vice.Host.ViceAppBuilder).Assembly.Location));
 
         var compilation = CSharpCompilation.Create(
             assemblyName: "TestAssembly",
@@ -32,8 +33,7 @@ internal static class GeneratorHarness
             references: references,
             options: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary, nullableContextOptions: NullableContextOptions.Enable));
 
-        var generator = new ViceCompositionGenerator();
-        var driver = CSharpGeneratorDriver.Create(generator);
+        var driver = CSharpGeneratorDriver.Create(new ViceCompositionGenerator(), new ViceCommandTargetsGenerator());
         var updated = driver.RunGeneratorsAndUpdateCompilation(compilation, out var outputCompilation, out var inputDiagnostics);
         var result = updated.GetRunResult();
 

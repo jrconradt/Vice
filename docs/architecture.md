@@ -61,9 +61,10 @@ nothing else. `Vice.Parser.Tests` exercises it directly.
 ## Vice.Generators analyzer-diagnostic suppressions
 
 `Vice.Generators` sets `IsPackable=false`; it is consumed in-tree as an analyzer
-reference and never shipped as a NuGet package. Its `NoWarn` set
-(`RS1041;RS2000;RS2001;RS2002;RS2008`) is deliberate and queryable here rather
-than inline:
+reference and never shipped as a NuGet package. Its `NoWarn` set is deliberate
+and queryable here rather than inline. `RS1041` is suppressed unconditionally;
+`RS2000;RS2001;RS2002;RS2008` are suppressed only under the
+`Condition="'$(IsPackable)' != 'true'"` property group:
 
 | Diagnostic | Rule | Why suppressed |
 | --- | --- | --- |
@@ -73,9 +74,12 @@ than inline:
 | RS2002 | Diagnostic missing from the analyzer release tracking file | Same as RS2000: no ledger is maintained. |
 | RS2008 | Enable analyzer release tracking | Release tracking is intentionally off for this non-packaged generator. |
 
-If `Vice.Generators` is ever packaged for external consumption, restore the
-`AnalyzerReleases` ledger files and drop `RS2000;RS2001;RS2002;RS2008` from
-`NoWarn` so the release-tracking analyzers run again.
+If `Vice.Generators` is ever packaged for external consumption by setting
+`IsPackable=true`, the conditional `NoWarn` group drops out automatically and the
+release-tracking analyzers (`RS2000;RS2001;RS2002;RS2008`) fire again — the build
+then requires restoring the `AnalyzerReleases.Shipped.md` /
+`AnalyzerReleases.Unshipped.md` ledger files. The restore obligation is enforced
+by the build rather than by re-reading this section.
 
 ## Internal layers across the runtime assemblies
 

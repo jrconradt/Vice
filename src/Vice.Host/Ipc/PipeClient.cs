@@ -1,12 +1,11 @@
 using System.IO.Pipes;
+using System.Runtime.InteropServices;
 using Vice.Logging;
 
 namespace Vice.Ipc;
 
 internal sealed class PipeClient : IPipeClient
 {
-    private static readonly TimeSpan RoundTripTimeout = TimeSpan.FromSeconds(30);
-
     private readonly NamedPipeClientStream _stream;
 
     private PipeClient(NamedPipeClientStream stream)
@@ -33,6 +32,7 @@ internal sealed class PipeClient : IPipeClient
         try
         {
             await stream.ConnectAsync(timeoutMs, ct).ConfigureAwait(false);
+            VerifyServerIdentity(stream, pipeName, log);
             return new PipeClient(stream);
         }
         catch (TimeoutException)
@@ -59,22 +59,44 @@ internal sealed class PipeClient : IPipeClient
         }
     }
 
+    private static void VerifyServerIdentity(
+        NamedPipeClientStream stream,
+        string pipeName,
+        IViceLogger log)
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            return;
+        }
+
+        var gotEuid = PeerCredentials.TryGetEuid(out var euid);
+        if (!gotEuid)
+        {
+            var message = $"server-identity check: geteuid failed connecting to daemon pipe '{pipeName}'; refusing to send";
+            log.Log(ViceLogLevel.Error, message);
+            throw new UnauthorizedAccessException(message);
+        }
+
+        var gotPeer = PeerCredentials.TryGetPeerUid(stream.SafePipeHandle, out var peerUid);
+        if (!gotPeer)
+        {
+            var message = $"server-identity check: unable to determine server uid on '{pipeName}'; refusing to send";
+            log.Log(ViceLogLevel.Error, message);
+            throw new UnauthorizedAccessException(message);
+        }
+
+        if (peerUid != euid)
+        {
+            var message = $"server-identity mismatch on '{pipeName}': server-uid={peerUid} euid={euid}; refusing to send";
+            log.Log(ViceLogLevel.Error, message);
+            throw new UnauthorizedAccessException(message);
+        }
+    }
+
     public async Task<PipeMessage?> SendAsync(PipeMessage message, CancellationToken ct)
     {
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeoutCts.CancelAfter(RoundTripTimeout);
-        var token = timeoutCts.Token;
-
-        try
-        {
-            await PipeProtocol.WriteMessageAsync(_stream, message, token).ConfigureAwait(false);
-            return await PipeProtocol.ReadMessageAsync(_stream, token).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !ct.IsCancellationRequested)
-        {
-            throw new TimeoutException(
-                $"IPC round-trip exceeded {RoundTripTimeout.TotalSeconds:0}s with no response from the daemon.");
-        }
+        await PipeProtocol.WriteMessageAsync(_stream, message, ct).ConfigureAwait(false);
+        return await PipeProtocol.ReadMessageAsync(_stream, ct).ConfigureAwait(false);
     }
 
     public ValueTask DisposeAsync()

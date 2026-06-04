@@ -1,8 +1,9 @@
 using Vice.Build.Dotnet;
 using Vice.Composition;
 using Vice.Contracts;
+using Vice.Core;
 using Vice.Lexicon;
-using static Vice.Dsl;
+using static Vice.Core.Dsl;
 
 namespace Vice.Build;
 

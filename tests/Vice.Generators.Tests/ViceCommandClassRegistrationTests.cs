@@ -32,7 +32,7 @@ public class ViceCommandClassRegistrationTests
         Assert.Empty(result.GeneratorDiagnostics.Where(d => d.Severity == DiagnosticSeverity.Error));
         var emitted = result.CombinedSource;
         Assert.Contains("ViceCommandRegistration.Register<global::MyApp.OutdatedCommand>", emitted);
-        Assert.Contains("global::Vice.Dsl.verb(\"outdated\")", emitted);
+        Assert.Contains("global::Vice.Core.Dsl.verb(\"outdated\")", emitted);
         Assert.Contains("\"list outdated\"", emitted);
     }
 
@@ -61,7 +61,7 @@ public class ViceCommandClassRegistrationTests
 
         Assert.Empty(result.GeneratorDiagnostics.Where(d => d.Severity == DiagnosticSeverity.Error));
         var emitted = result.CombinedSource;
-        Assert.Contains("global::Vice.Dsl.verb(\"check-outdated\")", emitted);
+        Assert.Contains("global::Vice.Core.Dsl.verb(\"check-outdated\")", emitted);
     }
 
     [Fact]
@@ -93,7 +93,7 @@ public class ViceCommandClassRegistrationTests
         Assert.Contains("global::Vice.Composition.IViceCommand", emitted);
         Assert.Contains("TargetSet Targets(", emitted);
         Assert.Contains("public string Project => _ctx[\"project\"]", emitted);
-        Assert.Contains("global::Vice.Dsl.target(\"project\")", emitted);
+        Assert.Contains("global::Vice.Core.Dsl.target(\"project\")", emitted);
     }
 
     [Fact]

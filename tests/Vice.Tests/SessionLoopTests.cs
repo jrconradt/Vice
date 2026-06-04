@@ -1,14 +1,14 @@
 using System.Threading;
 using System.Threading.Tasks;
-using Vice;
 using Vice.Commands;
+using Vice.Core;
 using Vice.Display;
 using Vice.Display.Rendering;
 using Vice.Jobs;
 using Vice.Logging;
 using Vice.Session;
 using Xunit;
-using static Vice.Dsl;
+using static Vice.Core.Dsl;
 
 namespace Vice.Tests;
 
@@ -64,10 +64,14 @@ public class SessionLoopTests
     [Fact]
     public async Task QuitSynonym_AlsoExits()
     {
-        var (loop, jobs, _, _) = Build("quit\n");
+        var (loop, jobs, console, _) = Build("quit\n");
         await using (jobs)
         {
-            await loop.RunAsync(CancellationToken.None);
+            var transitionToDaemon = await loop.RunAsync(CancellationToken.None);
+            Assert.False(transitionToDaemon);
+
+            var promptCount = console.Output.Split("vice>").Length - 1;
+            Assert.Equal(1, promptCount);
         }
     }
 

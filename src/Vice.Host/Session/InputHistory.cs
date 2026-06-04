@@ -14,7 +14,7 @@ internal sealed class InputHistory : IInputHistory
         RedactTimeout);
 
     private static readonly Regex JsonCredentialField = new(
-        @"""(authorization|auth[-_]?token|api[-_]?key|x-api[-_]?key|x-auth[-_]?token|bearer|password|secret|cookie|set-cookie|token)""\s*:\s*""([^""\\]*)""",
+        @"""(authorization|auth[-_]?token|api[-_]?key|x-api[-_]?key|x-auth[-_]?token|bearer|password|secret|cookie|set-cookie|token)""\s*:\s*""((?:[^""\\]|\\.)*)""",
         RegexOptions.IgnoreCase | RegexOptions.Compiled,
         RedactTimeout);
 

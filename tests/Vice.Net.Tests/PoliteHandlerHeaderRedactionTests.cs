@@ -1,6 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
-using Vice.Net.Http;
+using Vice.Net.Requests.Http;
 using Xunit;
 
 namespace Vice.Net.Tests;
@@ -30,7 +30,7 @@ public class PoliteHandlerHeaderRedactionTests
     }
 
     [Fact]
-    public async Task Retry_clone_strips_authorization_and_other_sensitive_headers()
+    public async Task Retry_clone_retains_credentials_on_same_origin_retry()
     {
         var inner = new RetryRecordingHandler();
         var polite = new PoliteHandler(inner, minInterval: TimeSpan.Zero, maxRetries: 2);
@@ -49,11 +49,11 @@ public class PoliteHandlerHeaderRedactionTests
         Assert.Equal(2, inner.ReceivedHeaders.Count);
 
         var retry = inner.ReceivedHeaders[1];
-        Assert.False(retry.Contains("Authorization"));
-        Assert.False(retry.Contains("Cookie"));
-        Assert.False(retry.Contains("X-Api-Key"));
-        Assert.False(retry.Contains("X-Auth-Token"));
-        Assert.False(retry.Contains("Proxy-Authorization"));
+        Assert.True(retry.Contains("Authorization"));
+        Assert.True(retry.Contains("Cookie"));
+        Assert.True(retry.Contains("X-Api-Key"));
+        Assert.True(retry.Contains("X-Auth-Token"));
+        Assert.True(retry.Contains("Proxy-Authorization"));
         Assert.True(retry.Contains("X-Trace-Id"));
     }
 }

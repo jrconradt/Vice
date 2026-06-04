@@ -205,7 +205,7 @@ public class ProtobufJsonTranscoderTests
     }
 
     [Fact]
-    public void Deeply_nested_json_is_rejected_by_some_depth_guard()
+    public void Deeply_nested_json_is_rejected_by_encode_depth_guard()
     {
         var desc = Kitchen();
 
@@ -214,10 +214,66 @@ public class ProtobufJsonTranscoderTests
             + "{\"label\":\"x\"}"
             + new string('}', depth);
 
-        var ex = Assert.ThrowsAny<Exception>(() =>
+        var ex = Assert.Throws<BadArgument>(() =>
             ProtobufJsonTranscoder.JsonToProtobuf(payload, desc));
-        Assert.True(ex is BadArgument || ex is JsonException,
-            $"Expected BadArgument or JsonException, got {ex.GetType().Name}");
+        Assert.Contains("nesting exceeds transcoder limit", ex.Detail);
+    }
+
+    [Fact]
+    public void Deeply_nested_protobuf_is_rejected_by_decode_depth_guard()
+    {
+        var desc = Recursive();
+
+        var depth = ProtobufJsonTranscoder.MAX_NESTING_DEPTH + 2;
+        var bytes = BuildNestedRecursiveProtobuf(depth);
+
+        var ex = Assert.Throws<BadArgument>(() =>
+            ProtobufJsonTranscoder.ProtobufToJson(bytes, desc));
+        Assert.Contains("Protobuf nesting exceeds transcoder limit", ex.Detail);
+    }
+
+    private static byte[] BuildNestedRecursiveProtobuf(int depth)
+    {
+        var current = Array.Empty<byte>();
+        for (var level = 0; level < depth; level++)
+        {
+            using var ms = new MemoryStream();
+            var cos = new CodedOutputStream(ms);
+            cos.WriteTag(1, WireFormat.WireType.LengthDelimited);
+            cos.WriteBytes(ByteString.CopyFrom(current));
+            cos.Flush();
+            current = ms.ToArray();
+        }
+
+        return current;
+    }
+
+    private static MessageDescriptor Recursive()
+        => BuildRecursiveDescriptor().FindTypeByName<MessageDescriptor>("Recursive");
+
+    private static FileDescriptor BuildRecursiveDescriptor()
+    {
+        var fileProto = new FileDescriptorProto
+        {
+            Name = "recursive.proto",
+            Package = "vice.test",
+            Syntax = "proto3",
+        };
+
+        var msg = new DescriptorProto { Name = "Recursive" };
+        msg.Field.Add(new FieldDescriptorProto
+        {
+            Name = "child",
+            Number = 1,
+            Type = FieldDescriptorProto.Types.Type.Message,
+            TypeName = ".vice.test.Recursive",
+            Label = FieldDescriptorProto.Types.Label.Optional,
+        });
+        fileProto.MessageType.Add(msg);
+
+        var bytes = fileProto.ToByteString();
+        var files = FileDescriptor.BuildFromByteStrings(new[] { bytes });
+        return files[0];
     }
 
     [Fact]

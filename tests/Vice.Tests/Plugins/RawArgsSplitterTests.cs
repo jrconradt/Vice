@@ -1,11 +1,12 @@
 using System.Reflection;
+using Vice.Host;
 using Xunit;
 
 namespace Vice.Tests.Plugins;
 
 public class RawArgsSplitterTests
 {
-    private static readonly Type SplitterType = typeof(Vice.ViceApp).Assembly
+    private static readonly Type SplitterType = typeof(Vice.Host.ViceApp).Assembly
         .GetType("Vice.Plugins.RawArgsSplitter")!;
 
     private static bool ContainsPiping(string[] args)
@@ -79,7 +80,7 @@ public class RawArgsSplitterTests
 
 public class RawArgsSplitterFanTests
 {
-    private static readonly Type SplitterType = typeof(Vice.ViceApp).Assembly
+    private static readonly Type SplitterType = typeof(Vice.Host.ViceApp).Assembly
         .GetType("Vice.Plugins.RawArgsSplitter")!;
 
     private static bool ContainsFan(string[] args)

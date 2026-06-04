@@ -3,8 +3,9 @@ using System.Diagnostics;
 using System.Threading.Channels;
 using Vice.Commands;
 using Vice.Contracts;
-using Vice.Execution;
+using Vice.Foundation.Execution;
 using Vice.Logging;
+using Vice.Options;
 
 namespace Vice.Plugins;
 
@@ -24,34 +25,39 @@ internal static class MultiProcessPipeline
             throw new ArgumentException("MultiProcessPipeline requires at least 2 segments");
         }
 
-        var resolution = ResolveSegments(appName, segments, registry, logger);
+        var locale = ExtractLocale(segments);
+        var hoisted = locale is null
+            ? segments
+            : StripLocale(segments);
+
+        var resolution = ResolveSegments(appName, hoisted, registry, logger);
         if (resolution.Error is int resolveError)
         {
             return resolveError;
         }
 
         var resolved = resolution.Resolved!;
-        var topology = BuildTopology(segments);
+        var topology = BuildTopology(hoisted);
 
-        var procs = new Process[segments.Count];
+        var procs = new Process[hoisted.Count];
         int started = 0;
         try
         {
-            var startError = StartProcesses(segments.Count, resolved, topology, procs, ref started);
+            var startError = StartProcesses(hoisted.Count, resolved, topology, locale, procs, ref started);
             if (startError is int startCode)
             {
                 KillAll(procs, logger);
                 return startCode;
             }
 
-            var pumps = WirePumps(segments.Count, topology, procs, logger, ct);
+            var pumps = WirePumps(hoisted.Count, topology, procs, logger, ct);
 
             using var registration = ct.Register(() => KillAll(procs, logger));
 
             await Task.WhenAll(pumps).ConfigureAwait(false);
 
-            var waits = new Task[segments.Count];
-            for (int i = 0; i < segments.Count; i++)
+            var waits = new Task[hoisted.Count];
+            for (int i = 0; i < hoisted.Count; i++)
             {
                 waits[i] = procs[i].WaitForExitAsync(ct);
             }
@@ -117,7 +123,7 @@ internal static class MultiProcessPipeline
         upstreamIdx[0] = -1;
         for (int i = 1; i < segments.Count; i++)
         {
-            upstreamIdx[i] = segments[i].OperatorWord is "fan"
+            upstreamIdx[i] = string.Equals(segments[i].OperatorWord, "fan", StringComparison.OrdinalIgnoreCase)
                 ? upstreamIdx[i - 1]
                 : i - 1;
         }
@@ -139,13 +145,76 @@ internal static class MultiProcessPipeline
         return new PipelineTopology(upstreamIdx, downstreams);
     }
 
+    private static string? ExtractLocale(IReadOnlyList<RawArgsSplitter.Segment> segments)
+    {
+        var name = new LocaleOption().Name;
+        var inline = $"--{name}=";
+        var flag = $"--{name}";
+        foreach (var seg in segments)
+        {
+            var args = seg.Args;
+            for (int i = 0; i < args.Length; i++)
+            {
+                var arg = args[i];
+                if (arg.StartsWith(inline, StringComparison.OrdinalIgnoreCase))
+                {
+                    return arg[inline.Length..];
+                }
+
+                if (string.Equals(arg, flag, StringComparison.OrdinalIgnoreCase)
+                    && i + 1 < args.Length)
+                {
+                    return args[i + 1];
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static IReadOnlyList<RawArgsSplitter.Segment> StripLocale(IReadOnlyList<RawArgsSplitter.Segment> segments)
+    {
+        var name = new LocaleOption().Name;
+        var inline = $"--{name}=";
+        var flag = $"--{name}";
+        var result = new RawArgsSplitter.Segment[segments.Count];
+        for (int s = 0; s < segments.Count; s++)
+        {
+            var seg = segments[s];
+            var kept = new List<string>(seg.Args.Length);
+            for (int i = 0; i < seg.Args.Length; i++)
+            {
+                var arg = seg.Args[i];
+                if (arg.StartsWith(inline, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (string.Equals(arg, flag, StringComparison.OrdinalIgnoreCase)
+                    && i + 1 < seg.Args.Length)
+                {
+                    i++;
+                    continue;
+                }
+
+                kept.Add(arg);
+            }
+
+            result[s] = new RawArgsSplitter.Segment(kept.ToArray(), seg.OperatorWord);
+        }
+
+        return result;
+    }
+
     private static int? StartProcesses(
         int count,
         ResolvedSegment[] resolved,
         PipelineTopology topology,
+        string? locale,
         Process[] procs,
         ref int started)
     {
+        var localeName = new LocaleOption().Name;
         for (int i = 0; i < count; i++)
         {
             var psi = new ProcessStartInfo
@@ -155,19 +224,25 @@ internal static class MultiProcessPipeline
                 RedirectStandardInput = topology.UpstreamIdx[i] >= 0,
                 RedirectStandardOutput = topology.Downstreams[i].Count > 0,
             };
+            if (locale is not null)
+            {
+                psi.ArgumentList.Add($"--{localeName}");
+                psi.ArgumentList.Add(locale);
+            }
+
             foreach (var a in resolved[i].Args)
             {
                 psi.ArgumentList.Add(a);
             }
 
-            var p = new Process { StartInfo = psi };
-            if (!p.Start())
+            var process = new Process { StartInfo = psi };
+            if (!process.Start())
             {
                 Console.Error.WriteLine($"Pipeline segment {i + 1}: failed to start '{resolved[i].FileName}'");
                 return 127;
             }
 
-            procs[i] = p;
+            procs[i] = process;
             started = i + 1;
         }
 
@@ -212,7 +287,7 @@ internal static class MultiProcessPipeline
             }
             catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException or System.ComponentModel.Win32Exception)
             {
-                Vice.Quietly.Swallow(ex, logger);
+                Vice.Logging.Quietly.Swallow(ex, logger);
             }
         }
     }
@@ -262,7 +337,7 @@ internal static class MultiProcessPipeline
         }
         catch (OperationCanceledException ex)
         {
-            Vice.Quietly.Swallow(ex, logger);
+            Vice.Logging.Quietly.Swallow(ex, logger);
         }
         finally
         {
@@ -278,7 +353,7 @@ internal static class MultiProcessPipeline
         }
         catch (Exception ex) when (ex is IOException or ObjectDisposedException)
         {
-            Vice.Quietly.Swallow(ex);
+            Vice.Logging.Quietly.Swallow(ex);
         }
 
         try
@@ -287,7 +362,7 @@ internal static class MultiProcessPipeline
         }
         catch (Exception ex) when (ex is IOException or ObjectDisposedException)
         {
-            Vice.Quietly.Swallow(ex);
+            Vice.Logging.Quietly.Swallow(ex);
         }
     }
 
@@ -337,7 +412,7 @@ internal static class MultiProcessPipeline
                 }
                 catch (OperationCanceledException ex)
                 {
-                    Vice.Quietly.Swallow(ex, logger);
+                    Vice.Logging.Quietly.Swallow(ex, logger);
                 }
                 finally
                 {
@@ -373,7 +448,7 @@ internal static class MultiProcessPipeline
         }
         catch (OperationCanceledException ex)
         {
-            Vice.Quietly.Swallow(ex, logger);
+            Vice.Logging.Quietly.Swallow(ex, logger);
         }
         finally
         {

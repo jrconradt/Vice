@@ -14,6 +14,12 @@ internal static partial class AnsiStripper
             return text;
         }
 
+        if (text.AsSpan().IndexOfAnyInRange('\u0000', '\u001f') < 0
+            && text.IndexOf('\u007f') < 0)
+        {
+            return text;
+        }
+
         return ControlPattern().Replace(text, "");
     }
 }

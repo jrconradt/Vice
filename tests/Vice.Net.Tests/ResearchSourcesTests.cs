@@ -1,5 +1,5 @@
 using Vice.Logging;
-using Vice.Net.Research;
+using Vice.Research;
 using Xunit;
 
 namespace Vice.Net.Tests;

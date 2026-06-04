@@ -2,12 +2,23 @@ using Xunit;
 
 namespace Vice.Tests;
 
+public sealed class EnvVarSerialFixture
+{
+}
+
+[CollectionDefinition("EnvVarSerial", DisableParallelization = true)]
+public class EnvVarSerialCollection : ICollectionFixture<EnvVarSerialFixture>
+{
+}
+
 internal sealed class EnvScope : IDisposable
 {
     private readonly List<(string Name, string? Original)> _previous = new();
 
-    public EnvScope(params (string Name, string? Value)[] sets)
+    public EnvScope(EnvVarSerialFixture serial,
+                    params (string Name, string? Value)[] sets)
     {
+        ArgumentNullException.ThrowIfNull(serial);
         foreach (var (name, value) in sets)
         {
             _previous.Add((name, Environment.GetEnvironmentVariable(name)));
@@ -23,6 +34,3 @@ internal sealed class EnvScope : IDisposable
         }
     }
 }
-
-[CollectionDefinition("EnvVarSerial", DisableParallelization = true)]
-public class EnvVarSerialCollection { }

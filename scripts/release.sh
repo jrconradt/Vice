@@ -27,8 +27,8 @@ while [[ "$#" -gt 0 ]]; do
     -h|--help)
       echo "usage: scripts/release.sh [--push] [--verify-tag]"
       echo "  packs Vice, Vice.Parser, Vice.Cli, and Vice.Mux.Cli at version $VERSION into $OUT_DIR"
-      echo "  --push        push the produced .nupkg files to \$VICE_NUGET_FEED (default nuget.org)"
-      echo "  --verify-tag  require an annotated git tag v$VERSION at HEAD before packing"
+      echo "  --push        push the produced .nupkg files to \$VICE_NUGET_FEED (default nuget.org); implies --verify-tag"
+      echo "  --verify-tag  require an annotated git tag v$VERSION at HEAD before packing, on a clean tree"
       echo "  push requires \$NUGET_API_KEY in the environment"
       exit 0
       ;;
@@ -39,6 +39,10 @@ while [[ "$#" -gt 0 ]]; do
   esac
   shift
 done
+
+if [[ "$PUSH" -eq 1 ]]; then
+  VERIFY_TAG=1
+fi
 
 if [[ "$VERIFY_TAG" -eq 1 ]]; then
   TAG="v$VERSION"
@@ -84,7 +88,7 @@ if [[ "$PUSH" -eq 1 ]]; then
   printf '%s\n' '<?xml version="1.0" encoding="utf-8"?>' '<configuration />' > "$NUGET_CONFIG"
   dotnet nuget setapikey "$NUGET_API_KEY" --source "$FEED" --configfile "$NUGET_CONFIG" >/dev/null
   for pkg in "$OUT_DIR"/*.nupkg; do
-    dotnet nuget push "$pkg" --source "$FEED" --configfile "$NUGET_CONFIG" --skip-duplicate
+    dotnet nuget push "$pkg" --source "$FEED" --configfile "$NUGET_CONFIG"
   done
   echo "Pushed $VERSION to $FEED"
 else

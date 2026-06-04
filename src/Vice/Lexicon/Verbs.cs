@@ -1,5 +1,5 @@
 using Vice.Nodes;
-using static Vice.Dsl;
+using static Vice.Core.Dsl;
 
 namespace Vice.Lexicon;
 

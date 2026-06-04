@@ -1,4 +1,5 @@
 using System.Threading.Channels;
+using Vice.Logging;
 
 namespace Vice.Concurrency;
 
@@ -8,10 +9,12 @@ internal sealed class SerialQueue : IAsyncDisposable
 
     private readonly Channel<Func<Task>> _channel;
     private readonly Task _worker;
+    private readonly IViceLogger? _logger;
     private int _disposed;
 
-    public SerialQueue(int capacity = DefaultCapacity)
+    public SerialQueue(IViceLogger? logger = null, int capacity = DefaultCapacity)
     {
+        _logger = logger;
         _channel = Channel.CreateBounded<Func<Task>>(new BoundedChannelOptions(capacity)
         {
             SingleReader = true,
@@ -85,7 +88,7 @@ internal sealed class SerialQueue : IAsyncDisposable
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine(ex);
+            _logger?.Log(ViceLogLevel.Warn, "SerialQueue drain worker faulted during disposal.", ex);
         }
     }
 }

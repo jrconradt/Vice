@@ -1,3 +1,4 @@
+using Vice.Core;
 using Vice.Nodes;
 
 namespace Vice.Composition;

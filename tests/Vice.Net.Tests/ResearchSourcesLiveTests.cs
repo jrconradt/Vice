@@ -1,5 +1,5 @@
 using Vice.Logging;
-using Vice.Net.Research;
+using Vice.Research;
 using Xunit;
 
 namespace Vice.Net.Tests;
@@ -10,7 +10,7 @@ public sealed class ResearchSourcesLiveTests
     [LiveNetFact]
     public async Task Arxiv_Search_RealEndpoint_ExtractsHits()
     {
-        using var http = ResearchHttp.Create();
+        using var http = ResearchHttp.Create(NullViceLogger.Instance);
         var arxiv = new ArxivSource();
 
         var hits = await arxiv.SearchAsync(http,
@@ -27,7 +27,7 @@ public sealed class ResearchSourcesLiveTests
     [LiveNetFact]
     public async Task Arxiv_Fetch_RealEndpoint_BuildsMetadata()
     {
-        using var http = ResearchHttp.Create();
+        using var http = ResearchHttp.Create(NullViceLogger.Instance);
         var arxiv = new ArxivSource();
 
         var result = await arxiv.FetchAsync(http,
@@ -41,7 +41,7 @@ public sealed class ResearchSourcesLiveTests
     [LiveNetFact]
     public async Task PubMed_Search_RealEndpoint_ExtractsHits()
     {
-        using var http = ResearchHttp.Create();
+        using var http = ResearchHttp.Create(NullViceLogger.Instance);
         var pubmed = new PubMedSource();
 
         var hits = await pubmed.SearchAsync(http,
@@ -57,7 +57,7 @@ public sealed class ResearchSourcesLiveTests
     [LiveNetFact]
     public async Task Gutenberg_Search_RealEndpoint_ExtractsHits()
     {
-        using var http = ResearchHttp.Create();
+        using var http = ResearchHttp.Create(NullViceLogger.Instance);
         var gutenberg = new GutenbergSource();
 
         var hits = await gutenberg.SearchAsync(http,
@@ -74,7 +74,7 @@ public sealed class ResearchSourcesLiveTests
     [LiveNetFact]
     public async Task Gutenberg_ResolveDownload_RealEndpoint_SelectsPlainText()
     {
-        using var http = ResearchHttp.Create();
+        using var http = ResearchHttp.Create(NullViceLogger.Instance);
         var gutenberg = new GutenbergSource();
 
         var target = await gutenberg.ResolveDownloadAsync(http,
@@ -90,7 +90,7 @@ public sealed class ResearchSourcesLiveTests
     [LiveNetFact]
     public async Task UniProt_Search_RealEndpoint_ExtractsName()
     {
-        using var http = ResearchHttp.Create();
+        using var http = ResearchHttp.Create(NullViceLogger.Instance);
         var uniprot = new UniProtSource();
 
         var hits = await uniprot.SearchAsync(http,
@@ -107,7 +107,7 @@ public sealed class ResearchSourcesLiveTests
     [LiveNetFact]
     public async Task AlphaFold_Fetch_RealEndpoint_BuildsMetadata()
     {
-        using var http = ResearchHttp.Create();
+        using var http = ResearchHttp.Create(NullViceLogger.Instance);
         var alphafold = new AlphaFoldSource();
 
         var result = await alphafold.FetchAsync(http,

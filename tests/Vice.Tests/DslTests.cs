@@ -2,7 +2,7 @@ using Vice.Lexicon;
 using Vice.Nodes;
 using Vice.Parser;
 using Xunit;
-using static Vice.Dsl;
+using static Vice.Core.Dsl;
 
 namespace Vice.Tests;
 

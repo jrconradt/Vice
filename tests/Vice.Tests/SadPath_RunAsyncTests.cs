@@ -1,8 +1,9 @@
 using System.Threading.Tasks;
-using Vice;
+using Vice.Core;
 using Vice.Display;
+using Vice.Host;
 using Xunit;
-using static Vice.Dsl;
+using static Vice.Core.Dsl;
 
 namespace Vice.Tests;
 

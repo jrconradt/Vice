@@ -1,19 +1,19 @@
 using System.Text;
 using Vice.Composition;
 using Vice.Contracts;
-using Vice.Execution;
+using Vice.Core;
+using Vice.Foundation.Execution;
 using Vice.Lexicon;
 using Vice.Logging;
 using Vice.Persistence;
 using Vice.Streaming;
-using static Vice.Dsl;
+using static Vice.Core.Dsl;
 
 namespace Vice.Files;
 
 [ViceCommandPack]
 public static class FileIoCommands
 {
-    private const int DEFAULT_CHUNK_SIZE = 81920;
     private const int MAX_CHUNK_SIZE = 16 * 1024 * 1024;
 
     public static void Register(IViceApp app)
@@ -62,7 +62,7 @@ public static class FileIoCommands
 
     private static int ChunkSizeOf(ICommandContext ctx)
     {
-        var chunkSize = ctx.GetGlobalOption("chunk-size").AsPositiveInt() ?? DEFAULT_CHUNK_SIZE;
+        var chunkSize = ctx.GetGlobalOption("chunk-size").AsPositiveInt() ?? BufferConstants.FILE_IO;
         if (chunkSize > MAX_CHUNK_SIZE)
         {
             throw new BadArgument($"chunk-size {chunkSize} exceeds the maximum of {MAX_CHUNK_SIZE} bytes.");
@@ -106,7 +106,6 @@ public static class FileIoCommands
         var chunkSize = ChunkSizeOf(ctx);
 
         await using var source = Decompression.OpenReadStream(resolved);
-        await using var stdout = System.Console.OpenStandardOutput();
         var decoder = Encoding.UTF8.GetDecoder();
         var buffer = new byte[chunkSize];
         var chars = new char[Encoding.UTF8.GetMaxCharCount(chunkSize)];
@@ -116,19 +115,16 @@ public static class FileIoCommands
             var charCount = decoder.GetChars(buffer, 0, read, chars, 0, flush: false);
             if (charCount > 0)
             {
-                var bytes = Encoding.UTF8.GetBytes(chars, 0, charCount);
-                await stdout.WriteAsync(bytes.AsMemory(0, bytes.Length), ct).ConfigureAwait(false);
+                ctx.Console.Write(new string(chars, 0, charCount));
             }
         }
 
         var tail = decoder.GetChars(Array.Empty<byte>(), 0, 0, chars, 0, flush: true);
         if (tail > 0)
         {
-            var bytes = Encoding.UTF8.GetBytes(chars, 0, tail);
-            await stdout.WriteAsync(bytes.AsMemory(0, bytes.Length), ct).ConfigureAwait(false);
+            ctx.Console.Write(new string(chars, 0, tail));
         }
 
-        await stdout.FlushAsync(ct).ConfigureAwait(false);
         return ViceExitCode.SUCCESS;
     }
 
@@ -173,7 +169,7 @@ public static class FileIoCommands
                 mode,
                 FileAccess.Write,
                 share,
-                bufferSize: DEFAULT_CHUNK_SIZE,
+                bufferSize: BufferConstants.FILE_IO,
                 useAsync: true);
             await StreamLoop.RunAsync(
                 ctx.Input,
@@ -186,7 +182,7 @@ public static class FileIoCommands
             return ViceExitCode.SUCCESS;
         }
 
-        var partial = resolved + ".partial";
+        var partial = $"{resolved}.{Guid.NewGuid():N}.partial";
         if (!SafeWriteRoots.IsAllowed(partial, out var resolvedPartial, out var partialReason, ctx.Logger))
         {
             throw new BadArgument($"Temporary destination '{partial}' is outside allowed write roots: {partialReason}.");
@@ -200,7 +196,7 @@ public static class FileIoCommands
                 FileMode.Create,
                 FileAccess.Write,
                 share,
-                bufferSize: DEFAULT_CHUNK_SIZE,
+                bufferSize: BufferConstants.FILE_IO,
                 useAsync: true))
             {
                 await StreamLoop.RunAsync(

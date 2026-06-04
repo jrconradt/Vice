@@ -1,10 +1,12 @@
 using System.Threading.Tasks;
-using Vice;
+using Vice.Core;
 using Vice.Display;
 using Vice.Execution;
+using Vice.Foundation.Execution;
+using Vice.Host;
 using Vice.Logging;
 using Xunit;
-using static Vice.Dsl;
+using static Vice.Core.Dsl;
 
 namespace Vice.Tests;
 

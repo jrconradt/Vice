@@ -2,7 +2,7 @@ using Vice.Logging;
 
 namespace Vice.Mux.Sinks;
 
-internal abstract class StreamBackedSink : ISink
+public abstract class StreamBackedSink : ISink
 {
     private readonly Stream _stream;
     private protected readonly IViceLogger Logger;

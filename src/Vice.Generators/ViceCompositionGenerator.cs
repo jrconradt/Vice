@@ -11,7 +11,7 @@ using Microsoft.CodeAnalysis.Text;
 namespace Vice.Generators;
 
 [Generator]
-public sealed partial class ViceCompositionGenerator : IIncrementalGenerator
+public sealed class ViceCompositionGenerator : IIncrementalGenerator
 {
     const string HOST_ATTR = "Vice.Composition.ViceHostAttribute";
     const string PACK_ATTR = "Vice.Composition.ViceCommandPackAttribute";
@@ -36,7 +36,7 @@ public sealed partial class ViceCompositionGenerator : IIncrementalGenerator
 
     static readonly DiagnosticDescriptor NoRegisterMethod = new(
         "VICE004", "[ViceCommandPack] has no Register(IViceApp, ...) method",
-        "[ViceCommandPack] class '{0}' must declare a static method 'Register' whose first parameter is Vice.IViceApp",
+        "[ViceCommandPack] class '{0}' must declare a static method 'Register' whose first parameter is Vice.Core.IViceApp",
         "Vice.Composition", DiagnosticSeverity.Error, isEnabledByDefault: true);
 
     static readonly DiagnosticDescriptor DuplicateFactory = new(
@@ -66,101 +66,14 @@ public sealed partial class ViceCompositionGenerator : IIncrementalGenerator
 
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
-        var hosts = context.SyntaxProvider
-            .ForAttributeWithMetadataName(
-                HOST_ATTR,
-                predicate: static (_, _) => true,
-                transform: static (ctx, _) => (INamedTypeSymbol)ctx.TargetSymbol)
-            .Collect();
-
-        var localPacks = context.SyntaxProvider
-            .ForAttributeWithMetadataName(
-                PACK_ATTR,
-                predicate: static (node, _) => node is TypeDeclarationSyntax,
-                transform: static (ctx, _) => ctx.TargetSymbol as INamedTypeSymbol)
-            .Where(static t => t is not null && t.DeclaredAccessibility != Accessibility.Private)
-            .Collect();
-
-        var localJobRunners = context.SyntaxProvider
-            .ForAttributeWithMetadataName(
-                JOB_RUNNER_ATTR,
-                predicate: static (node, _) => node is MethodDeclarationSyntax,
-                transform: static (ctx, _) => ctx.TargetSymbol as IMethodSymbol)
-            .Where(static m => m is not null)
-            .Collect();
-
-        var localSessionServices = context.SyntaxProvider
-            .ForAttributeWithMetadataName(
-                SESSION_SERVICE_ATTR,
-                predicate: static (node, _) => node is MethodDeclarationSyntax,
-                transform: static (ctx, _) => ctx.TargetSymbol as IMethodSymbol)
-            .Where(static m => m is not null)
-            .Collect();
-
-        var localOptions = context.SyntaxProvider
-            .ForAttributeWithMetadataName(
-                OPTION_ATTR,
-                predicate: static (node, _) => node is TypeDeclarationSyntax,
-                transform: static (ctx, _) => ctx.TargetSymbol as INamedTypeSymbol)
-            .Where(static t => t is { IsAbstract: false } && t.DeclaredAccessibility != Accessibility.Private)
-            .Collect();
-
-        var localCommands = context.SyntaxProvider
-            .ForAttributeWithMetadataName(
-                COMMAND_ATTR,
-                predicate: static (node, _) => node is TypeDeclarationSyntax,
-                transform: static (ctx, _) => ctx.TargetSymbol as INamedTypeSymbol)
-            .Where(static t => t is not null)
-            .Collect();
-
-        var local = localPacks.Combine(localJobRunners)
-            .Combine(localSessionServices)
-            .Combine(localOptions)
-            .Combine(localCommands);
-
-        var compilation = context.CompilationProvider;
-
-        context.RegisterSourceOutput(hosts.Combine(local).Combine(compilation), static (spc, pair) =>
-        {
-            var ((hostList, locals), comp) = pair;
-            var ((((packs, jobRunners), sessionServices), options), commands) = locals;
-            var localDiscovery = new LocalDiscovery(packs, jobRunners, sessionServices, options, commands);
-            Run(spc, hostList, localDiscovery, comp);
-        });
-
-        InitializeTargetsPipeline(context);
-    }
-
-    sealed class LocalDiscovery
-    {
-        public ImmutableArray<INamedTypeSymbol?> Packs { get; }
-        public ImmutableArray<IMethodSymbol?> JobRunners { get; }
-        public ImmutableArray<IMethodSymbol?> SessionServices { get; }
-        public ImmutableArray<INamedTypeSymbol?> Options { get; }
-        public ImmutableArray<INamedTypeSymbol?> Commands { get; }
-
-        public LocalDiscovery(
-            ImmutableArray<INamedTypeSymbol?> packs,
-            ImmutableArray<IMethodSymbol?> jobRunners,
-            ImmutableArray<IMethodSymbol?> sessionServices,
-            ImmutableArray<INamedTypeSymbol?> options,
-            ImmutableArray<INamedTypeSymbol?> commands)
-        {
-            Packs = packs;
-            JobRunners = jobRunners;
-            SessionServices = sessionServices;
-            Options = options;
-            Commands = commands;
-        }
+        context.RegisterSourceOutput(context.CompilationProvider, static (spc, comp) => Run(spc, comp));
     }
 
     static void Run(
         SourceProductionContext spc,
-        ImmutableArray<INamedTypeSymbol> hostList,
-        LocalDiscovery local,
         Compilation comp)
     {
-        var discovered = Discover(hostList, local, comp, spc);
+        var discovered = Discover(comp, spc);
         var (host, errors) = Validate(discovered, spc);
         foreach (var e in errors)
         {
@@ -177,94 +90,21 @@ public sealed partial class ViceCompositionGenerator : IIncrementalGenerator
     }
 
     static HostInfo Discover(
-        ImmutableArray<INamedTypeSymbol> hostList,
-        LocalDiscovery local,
         Compilation comp,
         SourceProductionContext spc)
     {
         var sink = new DiscoverySink();
 
-        foreach (var pack in local.Packs)
-        {
-            if (pack is not null)
-            {
-                sink.Packs.Add(new PackEntry(pack));
-            }
-        }
-
-        foreach (var runner in local.JobRunners)
-        {
-            if (runner is null)
-            {
-                continue;
-            }
-
-            if (IsUsableFactory(runner))
-            {
-                sink.JobRunners.Add(new FactoryEntry(runner));
-            }
-            else
-            {
-                spc.ReportDiagnostic(Diagnostic.Create(BadFactoryMethod,
-                                                       runner.Locations.FirstOrDefault(),
-                                                       "ViceJobRunner",
-                                                       runner.ToDisplayString()));
-            }
-        }
-
-        foreach (var service in local.SessionServices)
-        {
-            if (service is null)
-            {
-                continue;
-            }
-
-            if (IsUsableFactory(service))
-            {
-                sink.SessionServices.Add(new FactoryEntry(service));
-            }
-            else
-            {
-                spc.ReportDiagnostic(Diagnostic.Create(BadFactoryMethod,
-                                                       service.Locations.FirstOrDefault(),
-                                                       "ViceSessionService",
-                                                       service.ToDisplayString()));
-            }
-        }
-
-        foreach (var option in local.Options)
-        {
-            if (option is not null)
-            {
-                sink.GlobalOptions.Add(option);
-            }
-        }
-
-        foreach (var command in local.Commands)
-        {
-            if (command is null)
-            {
-                continue;
-            }
-
-            if (IsUsableCommand(command))
-            {
-                sink.CommandClasses.Add(command);
-            }
-            else
-            {
-                spc.ReportDiagnostic(Diagnostic.Create(BadCommandType,
-                                                       command.Locations.FirstOrDefault(),
-                                                       command.ToDisplayString()));
-            }
-        }
-
         var frameworkAssembly = comp.GetTypeByMetadataName("Vice.Options.GlobalOption")?.ContainingAssembly;
+
+        Scan(comp.Assembly.GlobalNamespace, sink, comp.Assembly, frameworkAssembly, spc);
+
         foreach (var r in comp.References)
         {
-            if (comp.GetAssemblyOrModuleSymbol(r) is IAssemblySymbol asm)
+            if (comp.GetAssemblyOrModuleSymbol(r) is IAssemblySymbol asm
+                && ReferencesFramework(asm, frameworkAssembly))
             {
-                Scan(asm.GlobalNamespace, sink, comp.Assembly, frameworkAssembly);
+                Scan(asm.GlobalNamespace, sink, comp.Assembly, frameworkAssembly, spc);
             }
         }
 
@@ -275,12 +115,48 @@ public sealed partial class ViceCompositionGenerator : IIncrementalGenerator
         sink.CommandClasses.Sort(static (a, b) => string.CompareOrdinal(a.ToDisplayString(), b.ToDisplayString()));
 
         return new HostInfo(
-            hostList,
+            FindHosts(comp.Assembly),
             sink.Packs,
             sink.JobRunners,
             sink.SessionServices,
             sink.GlobalOptions,
             sink.CommandClasses);
+    }
+
+    static ImmutableArray<INamedTypeSymbol> FindHosts(IAssemblySymbol asm)
+    {
+        var hosts = ImmutableArray.CreateBuilder<INamedTypeSymbol>();
+        var pending = new Stack<INamespaceOrTypeSymbol>();
+        pending.Push(asm.GlobalNamespace);
+
+        while (pending.Count > 0)
+        {
+            var current = pending.Pop();
+            switch (current)
+            {
+                case INamespaceSymbol n:
+                    foreach (var member in n.GetMembers())
+                    {
+                        pending.Push(member);
+                    }
+
+                    break;
+                case INamedTypeSymbol t:
+                    if (t.GetAttributes().Any(a => a.AttributeClass?.ToDisplayString() == HOST_ATTR))
+                    {
+                        hosts.Add(t);
+                    }
+
+                    foreach (var nested in t.GetTypeMembers())
+                    {
+                        pending.Push(nested);
+                    }
+
+                    break;
+            }
+        }
+
+        return hosts.ToImmutable();
     }
 
     static (HostInfo? host, IReadOnlyList<Diagnostic> errors) Validate(HostInfo discovered, SourceProductionContext spc)
@@ -379,8 +255,11 @@ public sealed partial class ViceCompositionGenerator : IIncrementalGenerator
     static string RenderHostSessionServices(INamedTypeSymbol host)
     {
         var lines = new List<string>();
-        foreach (var hostMember in host.GetMembers()
-                     .Where(m => !m.IsStatic && HasAttr(m, SESSION_SERVICE_ATTR)))
+        var members = host.GetMembers()
+            .Where(m => !m.IsStatic && ViceGeneratorHelpers.HasAttr(m, SESSION_SERVICE_ATTR))
+            .ToList();
+        members.Sort(static (a, b) => string.CompareOrdinal(a.Name, b.Name));
+        foreach (var hostMember in members)
         {
             ITypeSymbol? memberType = hostMember switch
             {
@@ -473,12 +352,11 @@ public sealed partial class ViceCompositionGenerator : IIncrementalGenerator
         return
             $"#nullable enable\n" +
             $"using System;\n" +
-            $"using Vice;\n" +
             $"\n" +
             $"{namespaceBlock}" +
             $"{visibility} static class ViceComposition\n" +
             $"{{\n" +
-            $"    {visibility} static global::Vice.ViceAppBuilder ComposeFromAttributes(this global::Vice.ViceAppBuilder builder, {hostFq} host)\n" +
+            $"    {visibility} static global::Vice.Host.ViceAppBuilder ComposeFromAttributes(this global::Vice.Host.ViceAppBuilder builder, {hostFq} host)\n" +
             $"    {{\n" +
             $"        if (builder is null)\n" +
             $"        {{\n" +
@@ -489,7 +367,7 @@ public sealed partial class ViceCompositionGenerator : IIncrementalGenerator
             $"        return builder;\n" +
             $"    }}\n" +
             $"\n" +
-            $"    {visibility} static global::Vice.IViceApp RegisterDiscoveredPacks(this global::Vice.IViceApp app, {hostFq} host)\n" +
+            $"    {visibility} static global::Vice.Core.IViceApp RegisterDiscoveredPacks(this global::Vice.Core.IViceApp app, {hostFq} host)\n" +
             $"    {{\n" +
             $"        if (app is null)\n" +
             $"        {{\n" +
@@ -559,11 +437,39 @@ public sealed partial class ViceCompositionGenerator : IIncrementalGenerator
         return list;
     }
 
+    static bool ReferencesFramework(IAssemblySymbol asm, IAssemblySymbol? frameworkAssembly)
+    {
+        if (frameworkAssembly is null)
+        {
+            return false;
+        }
+
+        if (SymbolEqualityComparer.Default.Equals(asm, frameworkAssembly))
+        {
+            return true;
+        }
+
+        var frameworkName = frameworkAssembly.Identity.Name;
+        foreach (var module in asm.Modules)
+        {
+            foreach (var referenced in module.ReferencedAssemblies)
+            {
+                if (string.Equals(referenced.Name, frameworkName, StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
     static void Scan(
         INamespaceSymbol ns,
         DiscoverySink sink,
         IAssemblySymbol consumer,
-        IAssemblySymbol? frameworkAssembly)
+        IAssemblySymbol? frameworkAssembly,
+        SourceProductionContext spc)
     {
         var pending = new Stack<INamespaceOrTypeSymbol>();
         pending.Push(ns);
@@ -581,7 +487,7 @@ public sealed partial class ViceCompositionGenerator : IIncrementalGenerator
 
                     break;
                 case INamedTypeSymbol t:
-                    ScanType(t, sink, consumer, frameworkAssembly);
+                    ScanType(t, sink, consumer, frameworkAssembly, spc);
                     foreach (var nested in t.GetTypeMembers())
                     {
                         pending.Push(nested);
@@ -596,7 +502,8 @@ public sealed partial class ViceCompositionGenerator : IIncrementalGenerator
         INamedTypeSymbol t,
         DiscoverySink sink,
         IAssemblySymbol consumer,
-        IAssemblySymbol? frameworkAssembly)
+        IAssemblySymbol? frameworkAssembly,
+        SourceProductionContext spc)
     {
         if (!IsAccessibleFrom(t, consumer))
         {
@@ -609,14 +516,22 @@ public sealed partial class ViceCompositionGenerator : IIncrementalGenerator
             sink.Packs.Add(new PackEntry(t));
         }
 
-        if (HasAttr(t, COMMAND_ATTR)
-            && IsUsableCommand(t))
+        if (ViceGeneratorHelpers.HasAttr(t, ViceGeneratorHelpers.COMMAND_ATTR))
         {
-            sink.CommandClasses.Add(t);
+            if (IsUsableCommand(t))
+            {
+                sink.CommandClasses.Add(t);
+            }
+            else if (SymbolEqualityComparer.Default.Equals(t.ContainingAssembly, consumer))
+            {
+                spc.ReportDiagnostic(Diagnostic.Create(BadCommandType,
+                                                       t.Locations.FirstOrDefault(),
+                                                       t.ToDisplayString()));
+            }
         }
 
         if (!t.IsAbstract
-            && HasAttr(t, OPTION_ATTR)
+            && ViceGeneratorHelpers.HasAttr(t, OPTION_ATTR)
             && !SymbolEqualityComparer.Default.Equals(t.ContainingAssembly, frameworkAssembly))
         {
             sink.GlobalOptions.Add(t);
@@ -626,15 +541,35 @@ public sealed partial class ViceCompositionGenerator : IIncrementalGenerator
         {
             switch (m)
             {
-                case IMethodSymbol method when method.IsStatic && IsAccessibleFrom(method, consumer):
-                    if (HasAttr(method, JOB_RUNNER_ATTR))
+                case IMethodSymbol method when IsAccessibleFrom(method, consumer):
+                    if (ViceGeneratorHelpers.HasAttr(method, JOB_RUNNER_ATTR))
                     {
-                        sink.JobRunners.Add(new FactoryEntry(method));
+                        if (IsUsableFactory(method))
+                        {
+                            sink.JobRunners.Add(new FactoryEntry(method));
+                        }
+                        else
+                        {
+                            spc.ReportDiagnostic(Diagnostic.Create(BadFactoryMethod,
+                                                                   method.Locations.FirstOrDefault(),
+                                                                   "ViceJobRunner",
+                                                                   method.ToDisplayString()));
+                        }
                     }
 
-                    if (HasAttr(method, SESSION_SERVICE_ATTR))
+                    if (ViceGeneratorHelpers.HasAttr(method, SESSION_SERVICE_ATTR))
                     {
-                        sink.SessionServices.Add(new FactoryEntry(method));
+                        if (IsUsableFactory(method))
+                        {
+                            sink.SessionServices.Add(new FactoryEntry(method));
+                        }
+                        else
+                        {
+                            spc.ReportDiagnostic(Diagnostic.Create(BadFactoryMethod,
+                                                                   method.Locations.FirstOrDefault(),
+                                                                   "ViceSessionService",
+                                                                   method.ToDisplayString()));
+                        }
                     }
 
                     break;
@@ -673,19 +608,6 @@ public sealed partial class ViceCompositionGenerator : IIncrementalGenerator
         public List<FactoryEntry> SessionServices { get; } = new();
         public List<INamedTypeSymbol> GlobalOptions { get; } = new();
         public List<INamedTypeSymbol> CommandClasses { get; } = new();
-    }
-
-    static bool HasAttr(ISymbol sym, string fullName)
-    {
-        foreach (var a in sym.GetAttributes())
-        {
-            if (a.AttributeClass?.ToDisplayString() == fullName)
-            {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     static bool IsContainerVisible(IMethodSymbol method)
@@ -735,7 +657,7 @@ public sealed partial class ViceCompositionGenerator : IIncrementalGenerator
 
     static IMethodSymbol? FindPackRegister(INamedTypeSymbol pack, Compilation comp)
     {
-        var viceApp = comp.GetTypeByMetadataName("Vice.IViceApp");
+        var viceApp = comp.GetTypeByMetadataName("Vice.Core.IViceApp");
         if (viceApp is null)
         {
             return null;
@@ -749,24 +671,11 @@ public sealed partial class ViceCompositionGenerator : IIncrementalGenerator
                 && IsAccessibleFrom(m, comp.Assembly));
     }
 
-    static bool ImplementsIViceCommand(INamedTypeSymbol t)
-    {
-        foreach (var i in t.AllInterfaces)
-        {
-            if (i.ToDisplayString() == "Vice.Composition.IViceCommand")
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
     static bool IsUsableCommand(INamedTypeSymbol t)
     {
         if (t.IsAbstract
             || t.TypeKind != TypeKind.Class
-            || !ImplementsIViceCommand(t))
+            || !ViceGeneratorHelpers.ImplementsIViceCommand(t))
         {
             return false;
         }
@@ -785,16 +694,16 @@ public sealed partial class ViceCompositionGenerator : IIncrementalGenerator
 
     static string RenderCommandRegistration(INamedTypeSymbol cmd)
     {
-        var attr = cmd.GetAttributes().FirstOrDefault(a => a.AttributeClass?.ToDisplayString() == COMMAND_ATTR);
+        var attr = cmd.GetAttributes().FirstOrDefault(a => a.AttributeClass?.ToDisplayString() == ViceGeneratorHelpers.COMMAND_ATTR);
         var fq = cmd.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
         var verb = ReadCommandVerb(attr, cmd);
-        var targets = ReadExplicitTargets(attr) ?? new List<string>();
+        var targets = ViceGeneratorHelpers.ReadExplicitTargets(attr) ?? new List<string>();
         var description = ReadCommandDescription(attr);
 
-        var chain = $"global::Vice.Dsl.verb({SymbolDisplay.FormatLiteral(verb, true)})";
+        var chain = $"global::Vice.Core.Dsl.verb({SymbolDisplay.FormatLiteral(verb, true)})";
         foreach (var target in targets)
         {
-            chain += $" * global::Vice.Dsl.target({SymbolDisplay.FormatLiteral(target, true)})";
+            chain += $" * global::Vice.Core.Dsl.target({SymbolDisplay.FormatLiteral(target, true)})";
         }
 
         return $"        global::Vice.Composition.ViceCommandRegistration.Register<{fq}>(app, {chain}, {SymbolDisplay.FormatLiteral(description, true)});\n";
@@ -815,7 +724,7 @@ public sealed partial class ViceCompositionGenerator : IIncrementalGenerator
             }
         }
 
-        return KebabFromTypeName(cmd.Name);
+        return ViceGeneratorHelpers.KebabFromTypeName(cmd.Name);
     }
 
     static string ReadCommandDescription(AttributeData? attr)
@@ -833,34 +742,6 @@ public sealed partial class ViceCompositionGenerator : IIncrementalGenerator
         }
 
         return "";
-    }
-
-    static string KebabFromTypeName(string name)
-    {
-        var core = name.EndsWith("Command", StringComparison.Ordinal) && name.Length > 7
-            ? name.Substring(0, name.Length - 7)
-            : name;
-
-        var result = "";
-        for (int i = 0; i < core.Length; i++)
-        {
-            var c = core[i];
-            if (char.IsUpper(c))
-            {
-                if (i > 0)
-                {
-                    result += "-";
-                }
-
-                result += char.ToLowerInvariant(c);
-            }
-            else
-            {
-                result += c;
-            }
-        }
-
-        return result.Length == 0 ? name.ToLowerInvariant() : result;
     }
 
     static bool TryRenderFactoryCall(

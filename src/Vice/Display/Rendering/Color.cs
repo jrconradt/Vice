@@ -72,9 +72,7 @@ public readonly record struct Color
             ColorDepth.None => "",
             _ => _kind switch
             {
-                ColorKind.Basic => _index < 8
-                    ? $"\u001b[{30 + _index}m"
-                    : $"\u001b[{90 + _index - 8}m",
+                ColorKind.Basic => BasicFgCode(_index),
                 ColorKind.Color256 => depth >= ColorDepth.Color256
                     ? Fg256Cache[_index]
                     : DowngradeToBasicFg(),
@@ -95,9 +93,7 @@ public readonly record struct Color
             ColorDepth.None => "",
             _ => _kind switch
             {
-                ColorKind.Basic => _index < 8
-                    ? $"\u001b[{40 + _index}m"
-                    : $"\u001b[{100 + _index - 8}m",
+                ColorKind.Basic => BasicBgCode(_index),
                 ColorKind.Color256 => depth >= ColorDepth.Color256
                     ? Bg256Cache[_index]
                     : DowngradeToBasicBg(),
@@ -113,25 +109,31 @@ public readonly record struct Color
 
     private string DowngradeToBasicFg()
     {
-        var basic = Index256ToBasic(_index);
-        return basic < 8 ? $"\u001b[{30 + basic}m" : $"\u001b[{90 + basic - 8}m";
+        return BasicFgCode(Index256ToBasic(_index));
     }
 
     private string DowngradeToBasicBg()
     {
-        var basic = Index256ToBasic(_index);
-        return basic < 8 ? $"\u001b[{40 + basic}m" : $"\u001b[{100 + basic - 8}m";
+        return BasicBgCode(Index256ToBasic(_index));
     }
 
     private string DowngradeRgbToBasicFg()
     {
-        var basic = RgbToBasic(_r, _g, _b);
-        return basic < 8 ? $"\u001b[{30 + basic}m" : $"\u001b[{90 + basic - 8}m";
+        return BasicFgCode(RgbToBasic(_r, _g, _b));
     }
 
     private string DowngradeRgbToBasicBg()
     {
-        var basic = RgbToBasic(_r, _g, _b);
+        return BasicBgCode(RgbToBasic(_r, _g, _b));
+    }
+
+    private static string BasicFgCode(byte basic)
+    {
+        return basic < 8 ? $"\u001b[{30 + basic}m" : $"\u001b[{90 + basic - 8}m";
+    }
+
+    private static string BasicBgCode(byte basic)
+    {
         return basic < 8 ? $"\u001b[{40 + basic}m" : $"\u001b[{100 + basic - 8}m";
     }
 

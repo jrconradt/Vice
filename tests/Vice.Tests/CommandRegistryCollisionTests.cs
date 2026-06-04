@@ -1,7 +1,7 @@
 using System.Threading.Tasks;
 using Vice.Commands;
 using Xunit;
-using static Vice.Dsl;
+using static Vice.Core.Dsl;
 
 namespace Vice.Tests;
 

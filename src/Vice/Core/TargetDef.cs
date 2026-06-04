@@ -1,7 +1,7 @@
 using Vice.Nodes;
 using Vice.Parser;
 
-namespace Vice;
+namespace Vice.Core;
 
 public record TargetDef(string Name, bool Required = true, bool Variadic = false) : ITargetDescriptor
 {

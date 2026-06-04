@@ -1,4 +1,4 @@
-namespace Vice.Execution;
+namespace Vice.Foundation.Execution;
 
 public static class ViceExitCode
 {

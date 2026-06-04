@@ -1,9 +1,11 @@
 using Vice.Composition;
 using Vice.Contracts;
+using Vice.Core;
 using Vice.Execution;
 using Vice.Lexicon;
 using Vice.Mux.Routing;
-using static Vice.Dsl;
+using Vice.Mux.Sinks;
+using static Vice.Core.Dsl;
 
 namespace Vice.Mux.Commands;
 
@@ -12,7 +14,7 @@ public static class RouteCommands
 {
     private const int MaxClauses = 64;
 
-    public static void Register(IViceApp app)
+    public static void Register(IViceApp app, TcpSinkConnector connectTcp)
     {
         app.Register(
             Verbs.Route()
@@ -20,10 +22,10 @@ public static class RouteCommands
                          min: 1,
                          max: MaxClauses),
             "Route stdin to the destinations whose condition matches the upstream exit code",
-            HandleAsync);
+            (ctx, ct) => HandleAsync(ctx, ct, connectTcp));
     }
 
-    private static Task<int> HandleAsync(CommandContext ctx, CancellationToken ct)
+    private static Task<int> HandleAsync(CommandContext ctx, CancellationToken ct, TcpSinkConnector connectTcp)
     {
         var conds = ctx.GetTargets("cond");
         var sinks = ctx.GetTargets("sink");
@@ -46,7 +48,8 @@ public static class RouteCommands
                                  Console.OpenStandardInput(),
                                  chunkSize,
                                  ct,
-                                 ctx.Logger);
+                                 ctx.Logger,
+                                 connectTcp);
     }
 
     private static int ParseCode(string? v)

@@ -2,14 +2,14 @@ using System.Text.Json;
 using Vice.Contracts;
 using Vice.Display;
 using Vice.Display.Rendering;
-using Vice.Execution;
+using Vice.Foundation.Execution;
 using Vice.Ipc;
 using Vice.Jobs;
 using Vice.Logging;
 using Vice.Parser;
 using Vice.Session;
 
-namespace Vice;
+namespace Vice.Host.Core;
 
 internal sealed class DaemonMessageHandler
 {

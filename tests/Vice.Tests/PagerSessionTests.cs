@@ -1,10 +1,11 @@
 using System.Threading.Tasks;
-using Vice;
 using Vice.Contracts;
+using Vice.Core;
 using Vice.Display;
 using Vice.Execution;
+using Vice.Host;
 using Xunit;
-using static Vice.Dsl;
+using static Vice.Core.Dsl;
 
 namespace Vice.Tests;
 
@@ -50,5 +51,6 @@ public class PagerSessionTests
         var ctx = FakeContext(noPager: true);
         var session = PagerSession.Open(ctx);
         await session.DisposeAsync();
+        Assert.False(session.IsActive);
     }
 }

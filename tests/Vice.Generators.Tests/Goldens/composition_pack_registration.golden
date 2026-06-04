@@ -1,12 +1,11 @@
 #nullable enable
 using System;
-using Vice;
 
 namespace MyApp;
 
 internal static class ViceComposition
 {
-    internal static global::Vice.ViceAppBuilder ComposeFromAttributes(this global::Vice.ViceAppBuilder builder, global::MyApp.HostServices host)
+    internal static global::Vice.Host.ViceAppBuilder ComposeFromAttributes(this global::Vice.Host.ViceAppBuilder builder, global::MyApp.HostServices host)
     {
         if (builder is null)
         {
@@ -19,7 +18,7 @@ internal static class ViceComposition
         return builder;
     }
 
-    internal static global::Vice.IViceApp RegisterDiscoveredPacks(this global::Vice.IViceApp app, global::MyApp.HostServices host)
+    internal static global::Vice.Core.IViceApp RegisterDiscoveredPacks(this global::Vice.Core.IViceApp app, global::MyApp.HostServices host)
     {
         if (app is null)
         {

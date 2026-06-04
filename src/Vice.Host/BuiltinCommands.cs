@@ -1,14 +1,15 @@
+using Vice.Commands;
 using Vice.Completions;
 using Vice.Contracts;
-using Vice.Execution;
+using Vice.Foundation.Execution;
 using Vice.Help;
 using Vice.Ipc;
 using Vice.Lexicon;
 using Vice.Manpages;
 using Vice.Options;
-using static Vice.Dsl;
+using static Vice.Core.Dsl;
 
-namespace Vice.Commands;
+namespace Vice.Host.Commands;
 
 internal static class BuiltinCommands
 {
@@ -121,8 +122,10 @@ internal static class BuiltinCommands
                         return ViceExitCode.FAILURE;
                     }
 
-                    var listening = health.Listening && !health.AcceptLoopCrashed;
-                    ctx.Console.WriteLine($"{app.Name} daemon v{health.Version} — {(listening ? "healthy" : "unhealthy")}");
+                    var poolDegraded = health.WorkerPoolDegraded || health.LiveWorkers < health.ConfiguredWorkers;
+                    var healthy = health.Listening && !health.AcceptLoopCrashed
+                        && !poolDegraded;
+                    ctx.Console.WriteLine($"{app.Name} daemon v{health.Version} — {(healthy ? "healthy" : "unhealthy")}");
                     ctx.Console.WriteLine($"  listening: {(health.Listening ? "yes" : "no")}");
                     ctx.Console.WriteLine($"  accept loop: {(health.AcceptLoopCrashed ? $"crashed ({health.FaultSummary ?? "unknown fault"})" : "running")}");
                     ctx.Console.WriteLine($"  uptime: {health.UptimeSeconds:0.0}s");
@@ -138,14 +141,14 @@ internal static class BuiltinCommands
                     if (statuses.Jobs.Count == 0)
                     {
                         ctx.Console.WriteLine("No jobs.");
-                        return listening ? ViceExitCode.SUCCESS : ViceExitCode.FAILURE;
+                        return healthy ? ViceExitCode.SUCCESS : ViceExitCode.FAILURE;
                     }
                     foreach (var job in statuses.Jobs)
                     {
                         ctx.Console.WriteLine($"#{job.Id} [{job.Kind}] {job.Status} — {job.Label}");
                     }
 
-                    return listening ? ViceExitCode.SUCCESS : ViceExitCode.FAILURE;
+                    return healthy ? ViceExitCode.SUCCESS : ViceExitCode.FAILURE;
                 }
             },
             isBuiltin: true);

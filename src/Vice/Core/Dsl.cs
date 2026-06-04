@@ -1,7 +1,7 @@
 using Vice.Nodes;
 using Vice.Parser;
 
-namespace Vice;
+namespace Vice.Core;
 
 public static class Dsl
 {

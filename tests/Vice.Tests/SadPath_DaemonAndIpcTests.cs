@@ -1,9 +1,10 @@
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using Vice;
 using Vice.Contracts;
+using Vice.Core;
 using Vice.Display;
+using Vice.Host;
 using Vice.Ipc;
 using Vice.Logging;
 using Vice.Session;

@@ -7,9 +7,21 @@ dotnet pack src/Vice.Parser/Vice.Parser.csproj -c Release -o "$PKG_DIR" --nologo
 dotnet pack src/Vice/Vice.csproj -c Release -o "$PKG_DIR" --nologo
 dotnet pack src/Vice.Cli/Vice.Cli.csproj -c Release -o "$PKG_DIR" --nologo
 dotnet pack src/Vice.Mux.Cli/Vice.Mux.Cli.csproj -c Release -o "$PKG_DIR" --nologo
+NUGET_CONFIG_DIR="$(mktemp -d)"
+trap 'rm -rf "$NUGET_CONFIG_DIR"' EXIT
+NUGET_CONFIG="$NUGET_CONFIG_DIR/nuget.config"
+printf '%s\n' \
+  '<?xml version="1.0" encoding="utf-8"?>' \
+  '<configuration>' \
+  '  <packageSources>' \
+  '    <clear />' \
+  "    <add key=\"vice-local\" value=\"$PKG_DIR\" />" \
+  '  </packageSources>' \
+  '</configuration>' > "$NUGET_CONFIG"
+
 install_tool() {
   local pkg="$1"
-  if dotnet tool update --global "$pkg" --configfile "$(pwd)/nuget.config"; then
+  if dotnet tool update --global "$pkg" --configfile "$NUGET_CONFIG"; then
     return 0
   fi
   echo "error: '$pkg' update failed; the previously installed tool (if any) is left intact" >&2

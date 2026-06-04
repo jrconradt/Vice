@@ -4,7 +4,7 @@ using Vice.Nodes;
 using Vice.Options;
 using Vice.Streaming;
 
-namespace Vice;
+namespace Vice.Core;
 
 public interface IViceApp : IAsyncDisposable
 {
