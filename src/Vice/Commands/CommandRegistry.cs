@@ -14,17 +14,34 @@ internal sealed class CommandRegistry : ICommandRegistry
     {
         public Snapshot(IReadOnlyList<CommandRegistration> registrations)
         {
-            Registrations = registrations;
-            UserRegistrations = registrations.Where(r => !r.IsBuiltin).ToList();
-            HelpVisibleRegistrations = registrations.Where(r => r.ShowInHelp).ToList();
-            Descriptors = registrations.Select(r => (IChainDescriptor)r.Chain).ToList();
+            AllRegistrations = registrations;
+            Registrations = Deduplicate(registrations);
+            UserRegistrations = Registrations.Where(r => !r.IsBuiltin).ToList();
+            HelpVisibleRegistrations = Registrations.Where(r => r.ShowInHelp).ToList();
+            Descriptors = Registrations.Select(r => (IChainDescriptor)r.Chain).ToList();
         }
 
+        public IReadOnlyList<CommandRegistration> AllRegistrations { get; }
         public IReadOnlyList<CommandRegistration> Registrations { get; }
         public IReadOnlyList<CommandRegistration> UserRegistrations { get; }
         public IReadOnlyList<CommandRegistration> HelpVisibleRegistrations { get; }
         public IReadOnlyList<IChainDescriptor> Descriptors { get; }
         public int CollisionsReported;
+
+        private static IReadOnlyList<CommandRegistration> Deduplicate(IReadOnlyList<CommandRegistration> registrations)
+        {
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            var kept = new List<CommandRegistration>(registrations.Count);
+            foreach (var registration in registrations)
+            {
+                if (seen.Add(ChainSignature(registration.Chain)))
+                {
+                    kept.Add(registration);
+                }
+            }
+
+            return kept;
+        }
     }
 
     private Snapshot _snapshot = new(Array.Empty<CommandRegistration>());
@@ -403,7 +420,7 @@ internal sealed class CommandRegistry : ICommandRegistry
 
     public IReadOnlyList<string> ValidateCollisions()
     {
-        var registrations = Volatile.Read(ref _snapshot).Registrations;
+        var registrations = Volatile.Read(ref _snapshot).AllRegistrations;
         var bySignature = new Dictionary<string, List<int>>(StringComparer.Ordinal);
         for (var i = 0; i < registrations.Count; i++)
         {
