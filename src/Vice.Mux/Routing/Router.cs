@@ -12,7 +12,8 @@ public static class Router
         Stream input,
         int chunkSize,
         CancellationToken ct,
-        IViceLogger logger)
+        IViceLogger logger,
+        TcpSinkConnector? connectTcp = null)
     {
         var matched = new List<RouteClause>(clauses.Count);
         foreach (var clause in clauses)
@@ -31,7 +32,7 @@ public static class Router
         var opens = new Task<ISink>[matched.Count];
         for (int i = 0; i < matched.Count; i++)
         {
-            opens[i] = SinkFactory.OpenAsync(matched[i].SinkSpec, ct, logger).AsTask();
+            opens[i] = SinkFactory.OpenAsync(matched[i].SinkSpec, ct, logger, connectTcp).AsTask();
         }
 
         var live = new List<ISink>(await Task.WhenAll(opens));

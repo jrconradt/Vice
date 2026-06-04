@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Net.Sockets;
 using Vice.Logging;
 using Vice.Persistence;
 
@@ -12,7 +11,7 @@ public static class SinkFactory
         var (scheme, rest) = Split(spec);
         if (scheme == "tcp")
         {
-            throw new ArgumentException($"tcp sink scheme requires the async open path; call SinkFactory.OpenAsync for '{spec}'");
+            throw new ArgumentException($"tcp sink scheme requires a network connector; call SinkFactory.OpenAsync with a TcpSinkConnector for '{spec}'");
         }
 
         return OpenNonTcp(scheme,
@@ -21,12 +20,17 @@ public static class SinkFactory
                           logger);
     }
 
-    public static async ValueTask<ISink> OpenAsync(string spec, CancellationToken ct, IViceLogger logger)
+    public static async ValueTask<ISink> OpenAsync(string spec, CancellationToken ct, IViceLogger logger, TcpSinkConnector? connectTcp = null)
     {
         var (scheme, rest) = Split(spec);
         if (scheme == "tcp")
         {
-            return await OpenTcpAsync(rest, ct, logger);
+            if (connectTcp is null)
+            {
+                throw new ArgumentException($"tcp sink scheme requires a network connector; none was provided for '{spec}'");
+            }
+
+            return await connectTcp(rest, ct, logger);
         }
 
         return OpenNonTcp(scheme,
@@ -78,34 +82,7 @@ public static class SinkFactory
         return new StreamSink(stream, $"file:{canonical}", logger);
     }
 
-    private static async ValueTask<ISink> OpenTcpAsync(string hostPort, CancellationToken ct, IViceLogger logger)
-    {
-        var (host, port) = ParseEndpoint(hostPort);
-        var client = new TcpClient();
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        cts.CancelAfter(TimeSpan.FromSeconds(5));
-        try
-        {
-            await client.ConnectAsync(host,
-                                      port,
-                                      cts.Token);
-        }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
-        {
-            client.Dispose();
-            throw new TimeoutException($"tcp sink connect to {host}:{port} timed out");
-        }
-        catch
-        {
-            client.Dispose();
-            throw;
-        }
-
-        client.NoDelay = true;
-        return new TcpSink(client, $"tcp:{host}:{port}", logger);
-    }
-
-    private static (string host, int port) ParseEndpoint(string hostPort)
+    public static (string host, int port) ParseTcpEndpoint(string hostPort)
     {
         var bang = hostPort.LastIndexOf(':');
         if (bang < 0)

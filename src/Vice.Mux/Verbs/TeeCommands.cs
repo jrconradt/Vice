@@ -13,15 +13,15 @@ namespace Vice.Mux.Commands;
 [ViceCommandPack]
 public static class TeeCommands
 {
-    public static void Register(IViceApp app)
+    public static void Register(IViceApp app, TcpSinkConnector connectTcp)
     {
         app.Register(
             Verbs.Tee() > Connectors.To() * Targets.Sinks,
             "Read stdin, broadcast every chunk to every sink and to stdout",
-            HandleAsync);
+            (ctx, ct) => HandleAsync(ctx, ct, connectTcp));
     }
 
-    private static async Task<int> HandleAsync(CommandContext ctx, CancellationToken ct)
+    private static async Task<int> HandleAsync(CommandContext ctx, CancellationToken ct, TcpSinkConnector connectTcp)
     {
         var specs = SinkSpec.Collect(ctx, "sinks");
         if (specs.Count == 0)
@@ -35,7 +35,7 @@ public static class TeeCommands
             var opens = new Task<ISink>[specs.Count];
             for (int i = 0; i < specs.Count; i++)
             {
-                opens[i] = SinkFactory.OpenAsync(specs[i], ct, ctx.Logger).AsTask();
+                opens[i] = SinkFactory.OpenAsync(specs[i], ct, ctx.Logger, connectTcp).AsTask();
             }
 
             sinks.AddRange(await Task.WhenAll(opens));
