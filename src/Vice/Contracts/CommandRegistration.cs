@@ -13,6 +13,7 @@ internal sealed class CommandRegistration
     public StageMode Mode { get; }
     public BatchOptions? StreamOptions { get; }
     public IStreamingLauncher? Launcher { get; }
+    public string? SourceNamespace { get; }
 
     public Type? StreamItemType => Launcher?.ItemType;
 
@@ -21,7 +22,8 @@ internal sealed class CommandRegistration
         string description,
         Func<CommandContext, CancellationToken, Task<int>> handler,
         bool isBuiltin = false,
-        bool? showInHelp = null)
+        bool? showInHelp = null,
+        string? sourceNamespace = null)
     {
         Chain = chain;
         Description = description;
@@ -30,6 +32,7 @@ internal sealed class CommandRegistration
         IsBuiltin = isBuiltin;
         ShowInHelp = showInHelp ?? !isBuiltin;
         Mode = StageMode.Buffered;
+        SourceNamespace = sourceNamespace;
     }
 
     public CommandRegistration(
@@ -38,7 +41,8 @@ internal sealed class CommandRegistration
         Func<CommandContext, CancellationToken, Task<int>> handler,
         IReadOnlyDictionary<int, Func<CommandContext, CancellationToken, Task<int>>> stageHandlers,
         bool isBuiltin = false,
-        bool? showInHelp = null)
+        bool? showInHelp = null,
+        string? sourceNamespace = null)
     {
         Chain = chain;
         Description = description;
@@ -47,6 +51,7 @@ internal sealed class CommandRegistration
         IsBuiltin = isBuiltin;
         ShowInHelp = showInHelp ?? !isBuiltin;
         Mode = StageMode.Buffered;
+        SourceNamespace = sourceNamespace;
     }
 
     public CommandRegistration(
@@ -57,7 +62,8 @@ internal sealed class CommandRegistration
         BatchOptions? streamOptions,
         IStreamingLauncher launcher,
         bool isBuiltin = false,
-        bool? showInHelp = null)
+        bool? showInHelp = null,
+        string? sourceNamespace = null)
     {
         Chain = chain;
         Description = description;
@@ -68,5 +74,6 @@ internal sealed class CommandRegistration
         Mode = mode;
         StreamOptions = streamOptions;
         Launcher = launcher;
+        SourceNamespace = sourceNamespace;
     }
 }

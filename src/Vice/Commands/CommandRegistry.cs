@@ -74,6 +74,9 @@ internal sealed class CommandRegistry : ICommandRegistry
         while (!ReferenceEquals(Interlocked.CompareExchange(ref _snapshot, next, current), current));
     }
 
+    private static string? SourceNamespaceOf(Delegate handler)
+        => handler.Method.DeclaringType?.Namespace;
+
     public void Register(
         ChainNode chain,
         string description,
@@ -81,7 +84,7 @@ internal sealed class CommandRegistry : ICommandRegistry
         bool isBuiltin = false,
         bool? showInHelp = null)
     {
-        Append(new CommandRegistration(chain, description, handler, isBuiltin, showInHelp));
+        Append(new CommandRegistration(chain, description, handler, isBuiltin, showInHelp, SourceNamespaceOf(handler)));
     }
 
     public void RegisterPipeline(
@@ -92,7 +95,7 @@ internal sealed class CommandRegistry : ICommandRegistry
         bool isBuiltin = false,
         bool? showInHelp = null)
     {
-        Append(new CommandRegistration(chain, description, defaultHandler, stageHandlers, isBuiltin, showInHelp));
+        Append(new CommandRegistration(chain, description, defaultHandler, stageHandlers, isBuiltin, showInHelp, SourceNamespaceOf(defaultHandler)));
     }
 
     public void RegisterStreaming<T>(
@@ -112,7 +115,7 @@ internal sealed class CommandRegistry : ICommandRegistry
         Append(new CommandRegistration(
             chain, description, fallback,
             StageMode.StreamProducer, options, launcher,
-            isBuiltin, showInHelp));
+            isBuiltin, showInHelp, SourceNamespaceOf(handler)));
     }
 
     private static Func<CommandContext, CancellationToken, Task<int>> BuildStreamingFallback<T>(
@@ -167,7 +170,7 @@ internal sealed class CommandRegistry : ICommandRegistry
         Append(new CommandRegistration(
             chain, description, classicFallback,
             StageMode.StreamConsumer, options, launcher,
-            isBuiltin, showInHelp));
+            isBuiltin, showInHelp, SourceNamespaceOf(handler)));
     }
 
     private static Func<CommandContext, CancellationToken, Task<int>> BuildConsumerFallback<T>(
@@ -246,7 +249,7 @@ internal sealed class CommandRegistry : ICommandRegistry
         Append(new CommandRegistration(
             chain, description, defaultHandler,
             StageMode.StreamProducer, options, launcher,
-            isBuiltin, showInHelp));
+            isBuiltin, showInHelp, SourceNamespaceOf(producer)));
     }
 
     private static Func<CommandContext, CancellationToken, Task<int>> BuildPipelineFallback<T>(
@@ -433,8 +436,8 @@ internal sealed class CommandRegistry : ICommandRegistry
         var collisions = new List<string>();
         foreach (var kv in bySignature.Where(kv => kv.Value.Count >= 2))
         {
-            var indices = string.Join(", ", kv.Value);
-            collisions.Add($"chain signature '{kv.Key}' is claimed by {kv.Value.Count} registrations (indices: {indices})");
+            var namespaces = string.Join(", ", kv.Value.Select(i => registrations[i].SourceNamespace ?? "<unknown namespace>"));
+            collisions.Add($"chain signature '{kv.Key}' is claimed by {kv.Value.Count} registrations from namespaces: {namespaces}");
         }
         return collisions;
     }
