@@ -5,7 +5,6 @@
     <RootNamespace>Vice.Mux.Cli</RootNamespace>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <PackAsTool>true</PackAsTool>
     <ToolCommandName>vice-mux</ToolCommandName>
     <PackageId>Vice.Mux.Cli</PackageId>
     <IsAotCompatible>true</IsAotCompatible>
