@@ -14,6 +14,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\Vice\Vice.csproj" />
+    <ProjectReference Include="..\..\src\Vice.Foundation\Vice.Foundation.csproj" />
     <ProjectReference Include="..\..\src\Vice.Cli\Vice.Cli.csproj"
                       ReferenceOutputAssembly="false"
                       Private="false" />
