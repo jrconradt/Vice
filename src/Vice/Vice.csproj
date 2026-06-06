@@ -8,6 +8,7 @@
     <Description>Vice — fluent CLI framework with natural-language command DSL</Description>
     <IsAotCompatible>true</IsAotCompatible>
     <IsTrimmable>true</IsTrimmable>
+    <TargetsForTfmSpecificBuildOutput>$(TargetsForTfmSpecificBuildOutput);_BundleViceLibrariesForPack</TargetsForTfmSpecificBuildOutput>
   </PropertyGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Vice.Host" />
@@ -23,8 +24,10 @@
     <InternalsVisibleTo Include="Vice.Generators.Tests" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="../Vice.Foundation/Vice.Foundation.csproj" />
-    <ProjectReference Include="../Vice.Jobs/Vice.Jobs.csproj" />
+    <ProjectReference Include="../Vice.Foundation/Vice.Foundation.csproj"
+                      PrivateAssets="all" />
+    <ProjectReference Include="../Vice.Jobs/Vice.Jobs.csproj"
+                      PrivateAssets="all" />
     <ProjectReference Include="../Vice.Parser/Vice.Parser.csproj" />
     <ProjectReference Include="../Vice.Generators/Vice.Generators.csproj"
                       OutputItemType="Analyzer"
@@ -55,6 +58,26 @@
             Pack="true"
             PackagePath="analyzers/dotnet/cs"
             Visible="false" />
+    </ItemGroup>
+  </Target>
+  <Target Name="_BundleViceLibrariesForPack">
+    <MSBuild Projects="../Vice.Foundation/Vice.Foundation.csproj"
+             Targets="GetTargetPath">
+      <Output TaskParameter="TargetOutputs"
+              PropertyName="_ViceFoundationTargetPath" />
+    </MSBuild>
+    <MSBuild Projects="../Vice.Jobs/Vice.Jobs.csproj"
+             Targets="GetTargetPath">
+      <Output TaskParameter="TargetOutputs"
+              PropertyName="_ViceJobsTargetPath" />
+    </MSBuild>
+    <Error Condition="'$(_ViceFoundationTargetPath)' == '' Or !Exists('$(_ViceFoundationTargetPath)')"
+           Text="Vice.Foundation must be built before packing Vice: assembly not found at '$(_ViceFoundationTargetPath)'." />
+    <Error Condition="'$(_ViceJobsTargetPath)' == '' Or !Exists('$(_ViceJobsTargetPath)')"
+           Text="Vice.Jobs must be built before packing Vice: assembly not found at '$(_ViceJobsTargetPath)'." />
+    <ItemGroup>
+      <BuildOutputInPackage Include="$(_ViceFoundationTargetPath)" />
+      <BuildOutputInPackage Include="$(_ViceJobsTargetPath)" />
     </ItemGroup>
   </Target>
 </Project>
