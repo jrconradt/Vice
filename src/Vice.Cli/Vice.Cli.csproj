@@ -5,7 +5,6 @@
     <RootNamespace>Vice.Cli</RootNamespace>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <PackAsTool>true</PackAsTool>
     <ToolCommandName>vice</ToolCommandName>
     <PackageId>Vice.Cli</PackageId>
     <IsAotCompatible>true</IsAotCompatible>

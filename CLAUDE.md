@@ -22,8 +22,9 @@ and none of its rules apply here.
 ./scripts/test.sh     # dotnet test Vice.slnx, every test project
 ```
 
-Quality gates are these local scripts. There is no CI; do not add
-pipeline configs.
+These local scripts are the developer-loop gates. CI lives in
+`.github/workflows/ci.yml`, which builds and packs `Vice.slnx` and
+publishes the library packages to NuGet on push to `main`.
 
 When you change help, manpage, completions, or generator output, the
 golden baselines under each test project's `Goldens/` directory must be
@@ -52,8 +53,8 @@ it; the graph is a DAG with no cycles:
   `Vice.Net` (gRPC, HTTP, TCP/UDP transport), `Vice.Research`
   (research source catalog and commands over `Vice.Net`), `Vice.Files`,
   `Vice.Mux`, `Vice.Build`
-- **Tools:** `Vice.Cli` (`vice`), `Vice.Mux.Cli` (`vice-mux`) — both
-  `PackAsTool` executables
+- **Tools:** `Vice.Cli` (`vice`), `Vice.Mux.Cli` (`vice-mux`) — the two
+  executable application projects; not published to NuGet
 
 Tests live in `tests/`, one project per subject. Benchmarks in `bench/`.
 Docs live in `docs/`; keep them in sync with behavior.
@@ -83,10 +84,12 @@ no ambient static service locators. Logging goes through the injected
   never commit a `packages.lock.json`. Central package management
   (`Directory.Packages.props`) pins versions. If lock files appear,
   remove the property and delete the files.
-- **No CI configs.** No `.github/workflows`, no pipeline definitions of
-  any kind. The local scripts in `scripts/` are the gates.
+- **CI publishes the libraries.** `.github/workflows/ci.yml` builds and
+  packs `Vice.slnx` and pushes the library packages (`Vice`,
+  `Vice.Parser`) to NuGet on push to `main` via the `nuget` environment's
+  `NUGET_API_KEY` secret. The CLI projects are not packed.
 - **Don't hand-edit generator output.** Generated composition wiring
   comes from `Vice.Generators`; change the generator, rebuild.
-- **Packing is scripted.** `scripts/release.sh` and
-  `scripts/install-local.sh` define what gets packed and how; keep them
+- **Local packing is scripted.** `scripts/release.sh` and
+  `scripts/install-local.sh` define local packing and install; keep them
   authoritative rather than packing ad hoc.
