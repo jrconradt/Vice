@@ -71,13 +71,21 @@
       <Output TaskParameter="TargetOutputs"
               PropertyName="_ViceJobsTargetPath" />
     </MSBuild>
+    <MSBuild Projects="../Vice.Host/Vice.Host.csproj"
+             Targets="GetTargetPath">
+      <Output TaskParameter="TargetOutputs"
+              PropertyName="_ViceHostTargetPath" />
+    </MSBuild>
     <Error Condition="'$(_ViceFoundationTargetPath)' == '' Or !Exists('$(_ViceFoundationTargetPath)')"
            Text="Vice.Foundation must be built before packing Vice: assembly not found at '$(_ViceFoundationTargetPath)'." />
     <Error Condition="'$(_ViceJobsTargetPath)' == '' Or !Exists('$(_ViceJobsTargetPath)')"
            Text="Vice.Jobs must be built before packing Vice: assembly not found at '$(_ViceJobsTargetPath)'." />
+    <Error Condition="'$(_ViceHostTargetPath)' == '' Or !Exists('$(_ViceHostTargetPath)')"
+           Text="Vice.Host must be built before packing Vice: assembly not found at '$(_ViceHostTargetPath)'." />
     <ItemGroup>
       <BuildOutputInPackage Include="$(_ViceFoundationTargetPath)" />
       <BuildOutputInPackage Include="$(_ViceJobsTargetPath)" />
+      <BuildOutputInPackage Include="$(_ViceHostTargetPath)" />
     </ItemGroup>
   </Target>
 </Project>

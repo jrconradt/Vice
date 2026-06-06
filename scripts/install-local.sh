@@ -3,10 +3,11 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 PKG_DIR="$(pwd)/artifacts/local-nupkg"
 mkdir -p "$PKG_DIR"
-dotnet pack src/Vice.Parser/Vice.Parser.csproj -c Release -o "$PKG_DIR" --nologo
-dotnet pack src/Vice/Vice.csproj -c Release -o "$PKG_DIR" --nologo
-dotnet pack src/Vice.Cli/Vice.Cli.csproj -c Release -o "$PKG_DIR" --nologo
-dotnet pack src/Vice.Mux.Cli/Vice.Mux.Cli.csproj -c Release -o "$PKG_DIR" --nologo
+dotnet build Vice.slnx -c Release --nologo
+dotnet pack src/Vice.Parser/Vice.Parser.csproj -c Release --no-build -o "$PKG_DIR" --nologo
+dotnet pack src/Vice/Vice.csproj -c Release --no-build -o "$PKG_DIR" --nologo
+dotnet pack src/Vice.Cli/Vice.Cli.csproj -c Release --no-build -o "$PKG_DIR" --nologo
+dotnet pack src/Vice.Mux.Cli/Vice.Mux.Cli.csproj -c Release --no-build -o "$PKG_DIR" --nologo
 NUGET_CONFIG_DIR="$(mktemp -d)"
 trap 'rm -rf "$NUGET_CONFIG_DIR"' EXIT
 NUGET_CONFIG="$NUGET_CONFIG_DIR/nuget.config"

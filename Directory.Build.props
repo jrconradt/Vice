@@ -6,7 +6,7 @@
     <NuGetAuditMode>all</NuGetAuditMode>
     <NuGetAuditLevel>low</NuGetAuditLevel>
     <EnableNETAnalyzers>true</EnableNETAnalyzers>
-    <Version>0.1.1</Version>
+    <Version>0.1.2</Version>
     <Authors>Infalligence Labs LLC</Authors>
     <Company>Infalligence Labs LLC</Company>
     <Copyright>Copyright 2026 Infalligence Labs LLC · Apache-2.0</Copyright>
