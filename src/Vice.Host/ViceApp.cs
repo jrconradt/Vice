@@ -352,9 +352,12 @@ public sealed class ViceApp : IViceApp, IAsyncDisposable
     {
         var poolWasDegraded = false;
         var watchdogInterval = Host.Core.SystemdNotify.WatchdogInterval();
-        var nextWatchdogPing = watchdogInterval is { } interval
-            ? DateTime.UtcNow + interval
-            : (DateTime?)null;
+        var cadenceMs = watchdogInterval is { } interval
+            ? (long)interval.TotalMilliseconds
+            : (long?)null;
+        var nextWatchdogPing = cadenceMs is { } seedCadence
+            ? Environment.TickCount64 + seedCadence
+            : (long?)null;
         var tcs = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
         await using (ct.Register(() => tcs.TrySetResult(ViceExitCode.SUCCESS)))
         {
@@ -376,21 +379,29 @@ public sealed class ViceApp : IViceApp, IAsyncDisposable
 
                 poolWasDegraded = poolHealth.IsDegraded;
 
-                if (watchdogInterval is { } cadence
+                if (cadenceMs is { } cadence
                     && nextWatchdogPing is { } due
-                    && DateTime.UtcNow >= due)
+                    && Environment.TickCount64 >= due)
                 {
                     var alive = server.IsListening
                         && poolHealth.LiveWorkerCount > 0;
                     if (alive)
                     {
-                        Host.Core.SystemdNotify.Watchdog();
-                        nextWatchdogPing = DateTime.UtcNow + cadence;
+                        try
+                        {
+                            Host.Core.SystemdNotify.Watchdog();
+                        }
+                        catch (Exception ex)
+                        {
+                            logger.Log(ViceLogLevel.Warn, "systemd watchdog ping failed; continuing", ex);
+                        }
                     }
                     else
                     {
                         logger.Log(ViceLogLevel.Error, $"daemon liveness probe failed (listening={server.IsListening} live-workers={poolHealth.LiveWorkerCount}); withholding systemd watchdog ping so the supervisor restarts");
                     }
+
+                    nextWatchdogPing = Environment.TickCount64 + cadence;
                 }
 
                 var poll = Task.Delay(TimeSpan.FromMilliseconds(250), CancellationToken.None);

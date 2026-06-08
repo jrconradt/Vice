@@ -231,6 +231,8 @@ public class CommandResolverPropertyTests
     [Fact]
     public void Resolve_SuccessfulChain_ReconstructsFromVocabulary()
     {
+        long successes = 0;
+
         Gen.Select(RegistrationSpecGen, TokenStrings).Sample(pair =>
             {
                 var (chains, args) = pair;
@@ -241,6 +243,8 @@ public class CommandResolverPropertyTests
                 {
                     return;
                 }
+
+                Interlocked.Increment(ref successes);
 
                 var inputValues = new HashSet<string>(args, StringComparer.OrdinalIgnoreCase);
 
@@ -259,5 +263,7 @@ public class CommandResolverPropertyTests
             },
             iter: ITERATIONS,
             seed: "0000ResolverReconst");
+
+        Assert.True(Volatile.Read(ref successes) > 0);
     }
 }

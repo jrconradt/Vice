@@ -88,14 +88,16 @@ public static class SafeWriteRoots
                 continue;
             }
 
+            if (string.Equals(canonical, Path.GetPathRoot(canonical), StringComparison.Ordinal))
+            {
+                logger.Log(ViceLogLevel.Warn,
+                           $"safe-write-root refused over-broad volume root: root='{canonical}'");
+                continue;
+            }
+
             if (seen.Add(canonical))
             {
                 resolved.Add(canonical);
-                if (string.Equals(canonical, Path.GetPathRoot(canonical), StringComparison.Ordinal))
-                {
-                    logger.Log(ViceLogLevel.Warn,
-                               $"safe-write-root over-broad: root='{canonical}' grants write to the entire volume");
-                }
             }
         }
 

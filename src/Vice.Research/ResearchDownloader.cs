@@ -41,21 +41,23 @@ internal static class ResearchDownloader
         var attempt = 0;
         while (true)
         {
-            var startOffset = ResolveResumeOffset(partial, recordedOffset);
-            if (startOffset > 0
-                && !await resumable.SupportsResumeAsync(ct).ConfigureAwait(false))
-            {
-                startOffset = 0;
-            }
-
-            if (startOffset > 0)
-            {
-                logger.Log(ViceLogLevel.Debug,
-                           $"research download resuming {uri} at byte offset {startOffset}");
-            }
-
             try
             {
+                var startOffset = attempt == 0
+                    ? ResolveResumeOffset(partial, recordedOffset)
+                    : ResolvePartialLength(partial);
+                if (startOffset > 0
+                    && !await resumable.SupportsResumeAsync(ct).ConfigureAwait(false))
+                {
+                    startOffset = 0;
+                }
+
+                if (startOffset > 0)
+                {
+                    logger.Log(ViceLogLevel.Debug,
+                               $"research download resuming {uri} at byte offset {startOffset}");
+                }
+
                 return await AtomicDownload.RunAsync(resumable,
                                                      uri,
                                                      fullPath,
@@ -78,7 +80,7 @@ internal static class ResearchDownloader
                     logger.Log(ViceLogLevel.Error,
                                $"research download for {uri} exhausted {MAX_DOWNLOAD_RETRIES} retries",
                                ex);
-                    throw new InvalidOperationException(
+                    throw new Vice.Jobs.NonRetryableJobException(
                         $"research download for {uri} exhausted {MAX_DOWNLOAD_RETRIES} retries: {ex.Message}",
                         ex);
                 }
@@ -123,6 +125,17 @@ internal static class ResearchDownloader
         }
 
         return Math.Min(info.Length, recordedOffset);
+    }
+
+    private static long ResolvePartialLength(string partial)
+    {
+        var info = new FileInfo(partial);
+        if (!info.Exists)
+        {
+            return 0;
+        }
+
+        return Math.Max(0, info.Length);
     }
 
     public static string BuildUrlDestinationPath(string? toPath,

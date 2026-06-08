@@ -208,7 +208,7 @@ public sealed class ResearchHttpIntegrationTests : IAsyncLifetime, IDisposable
                               "doc-1",
                               destination);
 
-        var exhausted = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        var exhausted = await Assert.ThrowsAsync<NonRetryableJobException>(() =>
             runner.RunAsync(job, new Progress<JobProgress>(_ => { }), CancellationToken.None));
         Assert.IsType<HttpRequestException>(exhausted.InnerException);
 

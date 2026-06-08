@@ -46,7 +46,14 @@ public static class Router
             {
                 if (open.Status == TaskStatus.RanToCompletion)
                 {
-                    await open.Result.DisposeAsync();
+                    try
+                    {
+                        await open.Result.DisposeAsync();
+                    }
+                    catch (Exception disposeEx)
+                    {
+                        Quietly.Swallow(disposeEx, logger);
+                    }
                 }
             }
 
@@ -104,7 +111,14 @@ public static class Router
             pool.Return(buffer);
             foreach (var sink in live)
             {
-                await sink.DisposeAsync();
+                try
+                {
+                    await sink.DisposeAsync();
+                }
+                catch (Exception disposeEx)
+                {
+                    Quietly.Swallow(disposeEx, logger);
+                }
             }
         }
 

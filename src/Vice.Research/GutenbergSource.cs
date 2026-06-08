@@ -14,8 +14,6 @@ internal sealed class GutenbergSource : IResearchSource
 
     public string DefaultExtension => "txt";
 
-    private const int PAGE_SIZE = 32;
-
     public async Task<IReadOnlyList<SearchHit>> SearchAsync(HttpClient http,
                                                             string query,
                                                             int limit,
@@ -28,11 +26,9 @@ internal sealed class GutenbergSource : IResearchSource
             return hits;
         }
 
-        var firstPage = offset / PAGE_SIZE + 1;
-        var lastPage = (offset + limit - 1) / PAGE_SIZE + 1;
-        var index = (firstPage - 1) * PAGE_SIZE;
+        var index = 0;
 
-        for (var page = firstPage; page <= lastPage; page++)
+        for (var page = 1; ; page++)
         {
             if (hits.Count >= limit)
             {

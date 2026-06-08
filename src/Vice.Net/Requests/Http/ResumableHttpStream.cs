@@ -233,6 +233,13 @@ public sealed class ResumableHttpStream
 
             if (bytesRead <= 0)
             {
+                if (totalBytes is long expected
+                    && bytesDownloaded + offset < expected)
+                {
+                    throw new IOException(
+                        $"Connection closed after {bytesDownloaded + offset} of {expected} bytes; the partial prefix is retained for resume.");
+                }
+
                 break;
             }
 

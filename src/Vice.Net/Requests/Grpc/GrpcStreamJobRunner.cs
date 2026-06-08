@@ -76,13 +76,16 @@ internal sealed class GrpcStreamJobRunner : IJobRunner
 
     public void OnEvicted(JobState job)
     {
-        var destinationPath = Option(job, DESTINATION_PATH_KEY);
-        if (string.IsNullOrEmpty(destinationPath))
-        {
-            return;
-        }
+        var outputPath = ResolveOutputPath(job);
+        SafeFile.TryDelete(outputPath + ".partial");
+    }
 
-        SafeFile.TryDelete($"{destinationPath}.partial");
+    private static string ResolveOutputPath(JobState job)
+    {
+        var configuredDestination = Option(job, DESTINATION_PATH_KEY);
+        return !string.IsNullOrWhiteSpace(configuredDestination)
+            ? configuredDestination
+            : Path.Combine(Path.GetTempPath(), $"vice-grpc-stream-{job.Id}.jsonl");
     }
 
     public async Task RunAsync(JobState job, IProgress<JobProgress> progress, CancellationToken ct)
@@ -112,10 +115,7 @@ internal sealed class GrpcStreamJobRunner : IJobRunner
         var requestData = !string.IsNullOrWhiteSpace(configuredRequest) ? configuredRequest : "{}";
         var requestBytes = Encoding.UTF8.GetBytes(requestData);
 
-        var configuredDestination = Option(job, DESTINATION_PATH_KEY);
-        var outputPath = !string.IsNullOrWhiteSpace(configuredDestination)
-            ? configuredDestination
-            : Path.Combine(Path.GetTempPath(), $"vice-grpc-stream-{job.Id}.jsonl");
+        var outputPath = ResolveOutputPath(job);
 
         var fullOutputPath = Path.GetFullPath(outputPath);
         if (!SafeWriteRoots.IsAllowed(fullOutputPath, out var rejectionReason))

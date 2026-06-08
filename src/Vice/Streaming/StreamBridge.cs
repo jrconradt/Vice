@@ -1,4 +1,5 @@
 using Vice.Contracts;
+using Vice.Logging;
 
 namespace Vice.Streaming;
 
@@ -6,10 +7,14 @@ internal static class StreamBridge
 {
     private const int MAX_DRAINED_CHARS = 16 * 1024 * 1024;
 
-    public static async Task<string> DrainToStringAsync<T>(IStreamInput<T> input, CancellationToken ct)
+    public static async Task<string> DrainToStringAsync<T>(
+        IStreamInput<T> input,
+        CancellationToken ct,
+        IViceLogger? logger = null)
     {
         var segments = new List<string>();
         var totalChars = 0;
+        var firstTruncation = true;
         await foreach (var item in input.ReadAllAsync(ct))
         {
             if (totalChars >= MAX_DRAINED_CHARS)
@@ -20,7 +25,21 @@ internal static class StreamBridge
             var segment = $"{item?.ToString()}{Environment.NewLine}";
             if (segment.Length > MAX_DRAINED_CHARS - totalChars)
             {
-                segment = segment[..(MAX_DRAINED_CHARS - totalChars)];
+                var cutLength = MAX_DRAINED_CHARS - totalChars;
+                if (cutLength > 0
+                    && char.IsHighSurrogate(segment[cutLength - 1]))
+                {
+                    cutLength--;
+                }
+
+                segment = segment[..cutLength];
+                if (firstTruncation)
+                {
+                    firstTruncation = false;
+                    logger?.Log(
+                        ViceLogLevel.Warn,
+                        $"streaming output clipped at {MAX_DRAINED_CHARS} characters; result is incomplete");
+                }
             }
 
             segments.Add(segment);

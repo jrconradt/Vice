@@ -133,7 +133,7 @@ internal sealed class CommandRegistry : ICommandRegistry
                 int exitCode;
                 try
                 {
-                    output = await StreamBridge.DrainToStringAsync<T>(channel, ct);
+                    output = await StreamBridge.DrainToStringAsync<T>(channel, ct, ctx.Logger);
                     exitCode = await producerTask;
                 }
                 catch

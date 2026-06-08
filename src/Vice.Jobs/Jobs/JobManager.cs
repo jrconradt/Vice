@@ -11,12 +11,16 @@ public sealed class JobManager : IJobManager
     public const int RETRY_BASE_BACKOFF_MS = 500;
     public const int MAX_RETRY_BACKOFF_MS = 30000;
 
+    private const string DESTINATION_PATH_KEY = "destinationPath";
+
     private readonly IReadOnlyList<IJobRunner> _runners;
     private readonly IViceLogger _logger;
     private readonly TimeSpan _shutdownTimeout;
+    private readonly int _maxRetainedJobs;
 
     private readonly ConcurrentDictionary<int, JobStateHolder> _jobs = new();
     private readonly ConcurrentQueue<JobStateHolder> _terminalOrder = new();
+    private readonly ConcurrentDictionary<string, int> _destinations = new(StringComparer.Ordinal);
     private int _nextId;
 
     private readonly CancellationTokenSource _shutdownCts;
@@ -50,7 +54,8 @@ public sealed class JobManager : IJobManager
         int maxConcurrency,
         IViceLogger? logger,
         CancellationToken shutdownLinkedToken,
-        TimeSpan shutdownTimeout)
+        TimeSpan shutdownTimeout,
+        int maxRetainedJobs = MAX_RETAINED_JOBS)
     {
         _logger = logger ?? NullViceLogger.Instance;
         _runners = runners ?? throw new ArgumentNullException(nameof(runners));
@@ -59,6 +64,12 @@ public sealed class JobManager : IJobManager
             throw new ArgumentOutOfRangeException(nameof(maxConcurrency));
         }
 
+        if (maxRetainedJobs <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(maxRetainedJobs));
+        }
+
+        _maxRetainedJobs = maxRetainedJobs;
         _shutdownTimeout = shutdownTimeout;
         _shutdownCts = CancellationTokenSource.CreateLinkedTokenSource(shutdownLinkedToken);
 
@@ -96,10 +107,29 @@ public sealed class JobManager : IJobManager
         var holder = CreateJobState(descriptor);
         var id = holder.Id;
 
+        var destinationKey = ResolveDestinationKey(descriptor.Options);
+        if (destinationKey is not null
+            && !_destinations.TryAdd(destinationKey, id))
+        {
+            throw new InvalidOperationException(
+                $"Job submission rejected: destination '{destinationKey}' is already owned by a live job; concurrent downloads to the same destination would collide on its .partial file.");
+        }
+
         _jobs.TryAdd(id, holder);
 
         await _workerPool.EnqueueAsync(holder, _shutdownCts.Token).ConfigureAwait(false);
         return id;
+    }
+
+    private static string? ResolveDestinationKey(IReadOnlyDictionary<string, string?> options)
+    {
+        if (!options.TryGetValue(DESTINATION_PATH_KEY, out var destination)
+            || string.IsNullOrEmpty(destination))
+        {
+            return null;
+        }
+
+        return Path.GetFullPath(destination);
     }
 
     public async Task PauseAsync(int jobId, CancellationToken ct)
@@ -287,7 +317,9 @@ public sealed class JobManager : IJobManager
             Id = id,
             Kind = descriptor.Kind,
             Label = descriptor.Label,
-            Options = descriptor.Options,
+            Options = descriptor.Options is null
+                ? new Dictionary<string, string?>(StringComparer.Ordinal)
+                : new Dictionary<string, string?>(descriptor.Options, StringComparer.Ordinal),
             CreatedAt = DateTime.UtcNow,
         };
 
@@ -301,13 +333,25 @@ public sealed class JobManager : IJobManager
     {
         if (holder.MarkTerminalRecorded())
         {
+            ReleaseDestination(holder);
             _terminalOrder.Enqueue(holder);
         }
     }
 
+    private void ReleaseDestination(JobStateHolder holder)
+    {
+        var destinationKey = ResolveDestinationKey(holder.Read().Options);
+        if (destinationKey is null)
+        {
+            return;
+        }
+
+        _destinations.TryRemove(new KeyValuePair<string, int>(destinationKey, holder.Id));
+    }
+
     private void EvictOldCompleted()
     {
-        while (_terminalOrder.Count > MAX_RETAINED_JOBS)
+        while (_terminalOrder.Count > _maxRetainedJobs)
         {
             if (!_terminalOrder.TryDequeue(out var stale))
             {
@@ -517,11 +561,24 @@ public sealed class JobManager : IJobManager
         }
     }
 
+    private const int ERROR_SHARING_VIOLATION = unchecked((int)0x80070020);
+    private const int ERROR_LOCK_VIOLATION = unchecked((int)0x80070021);
+
     private static bool IsTransient(Exception ex)
     {
+        if (ex is NonRetryableJobException)
+        {
+            return false;
+        }
+
         Exception? current = ex;
         while (current is not null)
         {
+            if (current is IOException io && IsSharingViolation(io))
+            {
+                return false;
+            }
+
             if (current is TimeoutException || current is IOException
                 || current.GetType().Name == "SocketException"
                 || current.GetType().Name == "HttpRequestException")
@@ -534,6 +591,10 @@ public sealed class JobManager : IJobManager
 
         return false;
     }
+
+    private static bool IsSharingViolation(IOException io)
+        => io.HResult == ERROR_SHARING_VIOLATION
+            || io.HResult == ERROR_LOCK_VIOLATION;
 
     private void EmitCompletedTelemetry(JobState job)
         => _logger.Log(ViceLogLevel.Info,

@@ -38,21 +38,36 @@ public static class TeeCommands
 
         try
         {
-            sinks.AddRange(await Task.WhenAll(opens));
+            await Task.WhenAll(opens);
             sinks.Add(new StreamSink(Console.OpenStandardOutput(), "stdout", ctx.Logger));
+            sinks.AddRange(opens.Select(open => open.Result));
         }
         catch
         {
             foreach (var s in sinks)
             {
-                await s.DisposeAsync();
+                try
+                {
+                    await s.DisposeAsync();
+                }
+                catch (Exception disposeEx)
+                {
+                    Vice.Logging.Quietly.Swallow(disposeEx, ctx.Logger);
+                }
             }
 
             foreach (var open in opens)
             {
                 if (open.Status == TaskStatus.RanToCompletion)
                 {
-                    await open.Result.DisposeAsync();
+                    try
+                    {
+                        await open.Result.DisposeAsync();
+                    }
+                    catch (Exception disposeEx)
+                    {
+                        Vice.Logging.Quietly.Swallow(disposeEx, ctx.Logger);
+                    }
                 }
             }
 
@@ -101,7 +116,14 @@ public static class TeeCommands
             pool.Return(buffer);
             foreach (var s in sinks)
             {
-                await s.DisposeAsync();
+                try
+                {
+                    await s.DisposeAsync();
+                }
+                catch (Exception disposeEx)
+                {
+                    Vice.Logging.Quietly.Swallow(disposeEx, ctx.Logger);
+                }
             }
         }
         return 0;
