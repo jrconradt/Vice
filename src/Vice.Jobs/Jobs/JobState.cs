@@ -17,32 +17,16 @@ public sealed record JobState
     public JobStatus Status { get; init; } = JobStatus.Queued;
 
     [JsonInclude]
-    [JsonPropertyName("source")]
-    public string Source { get; init; } = string.Empty;
+    [JsonPropertyName("label")]
+    public string Label { get; init; } = string.Empty;
 
     [JsonInclude]
-    [JsonPropertyName("resourceId")]
-    public string ResourceId { get; init; } = string.Empty;
+    [JsonPropertyName("progressCurrent")]
+    public long ProgressCurrent { get; init; }
 
     [JsonInclude]
-    [JsonPropertyName("destinationPath")]
-    public string DestinationPath { get; init; } = string.Empty;
-
-    [JsonInclude]
-    [JsonPropertyName("format")]
-    public string? Format { get; init; }
-
-    [JsonInclude]
-    [JsonPropertyName("bytesDownloaded")]
-    public long BytesDownloaded { get; init; }
-
-    [JsonInclude]
-    [JsonPropertyName("totalBytes")]
-    public long? TotalBytes { get; init; }
-
-    [JsonInclude]
-    [JsonPropertyName("messagesReceived")]
-    public long MessagesReceived { get; init; }
+    [JsonPropertyName("progressTotal")]
+    public long? ProgressTotal { get; init; }
 
     [JsonInclude]
     [JsonPropertyName("attempt")]
@@ -53,12 +37,9 @@ public sealed record JobState
     public string? ErrorMessage { get; init; }
 
     [JsonInclude]
-    [JsonPropertyName("endpoint")]
-    public string? Endpoint { get; init; }
-
-    [JsonInclude]
-    [JsonPropertyName("method")]
-    public string? Method { get; init; }
+    [JsonPropertyName("options")]
+    public IReadOnlyDictionary<string, string?> Options { get; init; }
+        = EmptyOptions;
 
     [JsonInclude]
     [JsonPropertyName("createdAt")]
@@ -75,4 +56,7 @@ public sealed record JobState
     [JsonInclude]
     [JsonPropertyName("completedAt")]
     public DateTime? CompletedAt { get; init; }
+
+    private static readonly IReadOnlyDictionary<string, string?> EmptyOptions
+        = new Dictionary<string, string?>(StringComparer.Ordinal);
 }

@@ -71,6 +71,24 @@ public class GrpcStreamJobRunnerRetryTests : IAsyncLifetime, IDisposable
 
     private static IProgress<JobProgress> NoopProgress() => new Progress<JobProgress>(_ => { });
 
+    private static JobState StreamJob(int id,
+                                      string endpoint,
+                                      string method,
+                                      string requestData,
+                                      string destinationPath)
+        => new()
+        {
+            Id = id,
+            Kind = GrpcStreamJobRunner.StreamKind,
+            Options = new Dictionary<string, string?>(StringComparer.Ordinal)
+            {
+                [GrpcStreamJobRunner.ENDPOINT_KEY] = endpoint,
+                [GrpcStreamJobRunner.METHOD_KEY] = method,
+                [GrpcStreamJobRunner.REQUEST_DATA_KEY] = requestData,
+                [GrpcStreamJobRunner.DESTINATION_PATH_KEY] = destinationPath,
+            },
+        };
+
     [Fact]
     public async Task Transient_unavailable_is_retried_and_all_messages_are_recovered()
     {
@@ -90,15 +108,11 @@ public class GrpcStreamJobRunnerRetryTests : IAsyncLifetime, IDisposable
             maxRetryBackoff: TimeSpan.FromMilliseconds(50));
         var dest = Path.Combine(_tempDir, "retry-success.jsonl");
 
-        var job = new JobState
-        {
-            Id = 100,
-            Kind = JobKind.GrpcStream,
-            Endpoint = _endpoint,
-            Method = "vice.test.RetryStreamer/Stream",
-            ResourceId = "{}",
-            DestinationPath = dest,
-        };
+        var job = StreamJob(100,
+                            _endpoint,
+                            "vice.test.RetryStreamer/Stream",
+                            "{}",
+                            dest);
 
         await runner.RunAsync(job, NoopProgress(), CancellationToken.None);
 
@@ -132,15 +146,11 @@ public class GrpcStreamJobRunnerRetryTests : IAsyncLifetime, IDisposable
             maxRetryBackoff: TimeSpan.FromMilliseconds(50));
         var dest = Path.Combine(_tempDir, "retry-exhausted.jsonl");
 
-        var job = new JobState
-        {
-            Id = 101,
-            Kind = JobKind.GrpcStream,
-            Endpoint = _endpoint,
-            Method = "vice.test.RetryStreamer/Stream",
-            ResourceId = "{}",
-            DestinationPath = dest,
-        };
+        var job = StreamJob(101,
+                            _endpoint,
+                            "vice.test.RetryStreamer/Stream",
+                            "{}",
+                            dest);
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             runner.RunAsync(job, NoopProgress(), CancellationToken.None));
@@ -173,15 +183,11 @@ public class GrpcStreamJobRunnerRetryTests : IAsyncLifetime, IDisposable
             maxRetryBackoff: TimeSpan.FromMilliseconds(50));
         var dest = Path.Combine(_tempDir, "retry-max-attempts.jsonl");
 
-        var job = new JobState
-        {
-            Id = 102,
-            Kind = JobKind.GrpcStream,
-            Endpoint = _endpoint,
-            Method = "vice.test.RetryStreamer/Stream",
-            ResourceId = "{}",
-            DestinationPath = dest,
-        };
+        var job = StreamJob(102,
+                            _endpoint,
+                            "vice.test.RetryStreamer/Stream",
+                            "{}",
+                            dest);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             runner.RunAsync(job, NoopProgress(), CancellationToken.None));
@@ -208,15 +214,11 @@ public class GrpcStreamJobRunnerRetryTests : IAsyncLifetime, IDisposable
             maxRetryBackoff: TimeSpan.FromMilliseconds(50));
         var dest = Path.Combine(_tempDir, "retry-nonretryable.jsonl");
 
-        var job = new JobState
-        {
-            Id = 103,
-            Kind = JobKind.GrpcStream,
-            Endpoint = _endpoint,
-            Method = "vice.test.RetryStreamer/Stream",
-            ResourceId = "{}",
-            DestinationPath = dest,
-        };
+        var job = StreamJob(103,
+                            _endpoint,
+                            "vice.test.RetryStreamer/Stream",
+                            "{}",
+                            dest);
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             runner.RunAsync(job, NoopProgress(), CancellationToken.None));
@@ -246,15 +248,11 @@ public class GrpcStreamJobRunnerRetryTests : IAsyncLifetime, IDisposable
             maxRetryBackoff: TimeSpan.FromMilliseconds(50));
         var dest = Path.Combine(_tempDir, "retry-deadline.jsonl");
 
-        var job = new JobState
-        {
-            Id = 104,
-            Kind = JobKind.GrpcStream,
-            Endpoint = _endpoint,
-            Method = "vice.test.RetryStreamer/Stream",
-            ResourceId = "{}",
-            DestinationPath = dest,
-        };
+        var job = StreamJob(104,
+                            _endpoint,
+                            "vice.test.RetryStreamer/Stream",
+                            "{}",
+                            dest);
 
         await runner.RunAsync(job, NoopProgress(), CancellationToken.None);
 

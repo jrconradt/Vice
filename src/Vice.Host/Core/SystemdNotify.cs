@@ -10,6 +10,32 @@ internal static class SystemdNotify
         Send("READY=1");
     }
 
+    public static void Watchdog()
+    {
+        Send("WATCHDOG=1");
+    }
+
+    public static TimeSpan? WatchdogInterval()
+    {
+        var usecText = Environment.GetEnvironmentVariable("WATCHDOG_USEC");
+        if (string.IsNullOrEmpty(usecText)
+            || !long.TryParse(usecText, out var usec)
+            || usec <= 0)
+        {
+            return null;
+        }
+
+        var pidText = Environment.GetEnvironmentVariable("WATCHDOG_PID");
+        if (!string.IsNullOrEmpty(pidText)
+            && (!int.TryParse(pidText, out var pid)
+                || pid != Environment.ProcessId))
+        {
+            return null;
+        }
+
+        return TimeSpan.FromMilliseconds(usec / 1000.0 / 2.0);
+    }
+
     private static void Send(string state)
     {
         var socketPath = Environment.GetEnvironmentVariable("NOTIFY_SOCKET");

@@ -17,10 +17,11 @@ shared primitives), `Vice.Parser` (BCL-only lexer + resolver), and
 producing no runtime assembly reference). `Vice.Jobs` sits just above
 `Vice.Foundation`. The framework root `Vice` references `Vice.Foundation`,
 `Vice.Jobs`, and `Vice.Parser`. `Vice.Host` adds the session REPL on top of
-`Vice` and `Vice.Jobs`. Feature libraries (`Vice.Net`, `Vice.Files`,
-`Vice.Build`, `Vice.Mux`) build on `Vice` and `Vice.Foundation` — `Vice.Net`
-also reaches `Vice.Jobs` for background work. The two entry-point CLIs compose
-the libraries they need.
+`Vice` and `Vice.Jobs`. Feature libraries (`Vice.Net`, `Vice.Research`,
+`Vice.Files`, `Vice.Build`, `Vice.Mux`) build on `Vice` and `Vice.Foundation` —
+`Vice.Net` also reaches `Vice.Jobs` for background work, and `Vice.Research`
+builds on `Vice.Net`, reaching `Vice`, `Vice.Foundation`, and `Vice.Jobs`
+transitively. The two entry-point CLIs compose the libraries they need.
 
 Each project and the `ProjectReference` edges it declares (the `Vice.Generators`
 analyzer reference is noted separately below, not as a runtime edge):
@@ -33,10 +34,11 @@ Vice.Jobs        -> Vice.Foundation
 Vice             -> Vice.Foundation, Vice.Jobs, Vice.Parser
 Vice.Host        -> Vice, Vice.Jobs, Vice.Foundation
 Vice.Net         -> Vice, Vice.Jobs, Vice.Foundation
+Vice.Research    -> Vice.Net
 Vice.Files       -> Vice, Vice.Foundation
 Vice.Build       -> Vice, Vice.Foundation
 Vice.Mux         -> Vice, Vice.Foundation
-Vice.Cli         -> Vice, Vice.Host, Vice.Net, Vice.Files, Vice.Build, Vice.Mux
+Vice.Cli         -> Vice, Vice.Host, Vice.Net, Vice.Research, Vice.Files, Vice.Build, Vice.Mux
 Vice.Mux.Cli     -> Vice, Vice.Host, Vice.Mux
 ```
 
@@ -115,9 +117,11 @@ the type graph still spans.
 
 ## Rule for new feature work
 
-A feature module (`Vice.Net`, `Vice.Files`, `Vice.Build`, `Vice.Mux`) references
-`Vice` and `Vice.Foundation`, reaching parsing or execution only through the
-public surface those layers expose; it does not reach into `Vice.Host`. When a
+A feature module (`Vice.Net`, `Vice.Research`, `Vice.Files`, `Vice.Build`,
+`Vice.Mux`) references `Vice` and `Vice.Foundation`, reaching parsing or
+execution only through the public surface those layers expose; it does not reach
+into `Vice.Host`. `Vice.Research` reaches `Vice` and `Vice.Foundation` through
+`Vice.Net` rather than referencing them directly. When a
 feature needs a capability that today lives deep in a lower assembly, surface it
 on the owning layer rather than reaching across layers — that keeps the acyclic
 assembly graph and the internal layering both intact.

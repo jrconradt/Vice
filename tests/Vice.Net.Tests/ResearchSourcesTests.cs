@@ -223,6 +223,62 @@ public sealed class ResearchSourcesTests
     }
 
     [Fact]
+    public async Task Gutenberg_Search_NonZeroOffset_SlicesByAbsoluteIndexWithinFixedPage()
+    {
+        var books = string.Join(",",
+            Enumerable.Range(1, 32).Select(i => $"{{\"id\":{i},\"title\":\"Book {i}\",\"authors\":[{{\"name\":\"Author {i}\"}}]}}"));
+        var pageOne = $"{{\"results\":[{books}]}}";
+        var requestedPages = new List<string>();
+
+        var gutenberg = new GutenbergSource();
+        var http = Client(req =>
+        {
+            var query = req.RequestUri!.Query;
+            var marker = "page=";
+            var start = query.IndexOf(marker, StringComparison.Ordinal);
+            requestedPages.Add(start < 0 ? string.Empty : query[(start + marker.Length)..].TrimStart('&'));
+            return ResearchSourcesTests.Json(pageOne);
+        });
+
+        var hits = await gutenberg.SearchAsync(http, "q", 10, 10, CancellationToken.None);
+
+        Assert.Equal(new[] { "1" }, requestedPages);
+        Assert.Equal(10, hits.Count);
+        Assert.Equal("11", hits[0].Id);
+        Assert.Equal("Book 11", hits[0].Title);
+        Assert.Equal("Author 11", hits[0].Summary);
+        Assert.Equal("20", hits[^1].Id);
+    }
+
+    [Fact]
+    public async Task Gutenberg_Search_OffsetSpanningPages_FetchesEachAndSlices()
+    {
+        var first = string.Join(",",
+            Enumerable.Range(1, 32).Select(i => $"{{\"id\":{i},\"title\":\"Book {i}\",\"authors\":[]}}"));
+        var second = string.Join(",",
+            Enumerable.Range(33, 32).Select(i => $"{{\"id\":{i},\"title\":\"Book {i}\",\"authors\":[]}}"));
+        var requestedPages = new List<string>();
+
+        var gutenberg = new GutenbergSource();
+        var http = Client(req =>
+        {
+            var query = req.RequestUri!.Query;
+            var marker = "page=";
+            var start = query.IndexOf(marker, StringComparison.Ordinal);
+            var page = start < 0 ? string.Empty : query[(start + marker.Length)..].TrimStart('&');
+            requestedPages.Add(page);
+            return ResearchSourcesTests.Json(page == "2" ? $"{{\"results\":[{second}]}}" : $"{{\"results\":[{first}]}}");
+        });
+
+        var hits = await gutenberg.SearchAsync(http, "q", 6, 30, CancellationToken.None);
+
+        Assert.Equal(new[] { "1", "2" }, requestedPages);
+        Assert.Equal(6, hits.Count);
+        Assert.Equal("31", hits[0].Id);
+        Assert.Equal("36", hits[^1].Id);
+    }
+
+    [Fact]
     public async Task Gutenberg_Search_MissingResults_ReturnsEmpty()
     {
         const string Json = """{"count":0}""";

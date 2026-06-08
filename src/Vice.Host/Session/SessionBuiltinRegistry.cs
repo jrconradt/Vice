@@ -7,11 +7,11 @@ namespace Vice.Session;
 internal sealed class SessionBuiltinRegistry
 {
     private readonly Dictionary<string, Func<CommandContext, CancellationToken, Task<int>>> _handlers;
-    private readonly JobManager _jobManager;
+    private readonly IJobManager _jobManager;
     private readonly InputHistory _history;
 
     public SessionBuiltinRegistry(
-        JobManager jobManager,
+        IJobManager jobManager,
         InputHistory history)
     {
         _jobManager = jobManager;
@@ -57,8 +57,7 @@ internal sealed class SessionBuiltinRegistry
 
         foreach (var job in jobs)
         {
-            var view = JobView.From(job);
-            ctx.Console.WriteLine($"  #{view.Id}  {view.Kind,-10} {view.Label,-30} {view.Status,-10} {view.Progress}");
+            ctx.Console.WriteLine($"  #{job.Id}  {job.Kind.Name,-10} {JobLabel(job),-30} {job.Status,-10} {JobProgressText(job)}");
         }
         return Task.FromResult(0);
     }
@@ -117,5 +116,26 @@ internal sealed class SessionBuiltinRegistry
     {
         ctx.Console.Write("\x1b[2J\x1b[H");
         return Task.FromResult(0);
+    }
+
+    private static string JobLabel(JobState job)
+    {
+        return string.IsNullOrEmpty(job.Label) ? job.Kind.Name : job.Label;
+    }
+
+    private static string JobProgressText(JobState job)
+    {
+        if (job.ProgressTotal is { } total
+            && total > 0)
+        {
+            return $"{job.ProgressCurrent * 100 / total}%";
+        }
+
+        if (job.ProgressCurrent > 0)
+        {
+            return $"{job.ProgressCurrent}";
+        }
+
+        return "";
     }
 }

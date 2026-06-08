@@ -9,7 +9,7 @@ namespace Vice.Session;
 internal sealed class SessionLoop : ISessionLoop, IDisposable
 {
     private readonly CommandExecutor _executor;
-    private readonly JobManager _jobManager;
+    private readonly IJobManager _jobManager;
     private readonly InputHistory _history;
     private readonly IConsoleWriter _console;
     private readonly TextReader _reader;
@@ -33,7 +33,7 @@ internal sealed class SessionLoop : ISessionLoop, IDisposable
 
     public SessionLoop(
         CommandExecutor executor,
-        JobManager jobManager,
+        IJobManager jobManager,
         InputHistory history,
         IConsoleWriter console,
         TextReader reader,
@@ -170,8 +170,7 @@ internal sealed class SessionLoop : ISessionLoop, IDisposable
             return;
         }
 
-        var view = JobView.From(job);
-        Publish($"  Job #{view.Id} completed: {view.Label}");
+        Publish($"  Job #{job.Id} completed: {JobLabel(job)}");
     }
 
     private void OnJobFailed(JobState job, string error)
@@ -181,8 +180,12 @@ internal sealed class SessionLoop : ISessionLoop, IDisposable
             return;
         }
 
-        var view = JobView.From(job);
-        Publish($"  Job #{view.Id} failed: {view.Label} -- {error}");
+        Publish($"  Job #{job.Id} failed: {JobLabel(job)} -- {error}");
+    }
+
+    private static string JobLabel(JobState job)
+    {
+        return string.IsNullOrEmpty(job.Label) ? job.Kind.Name : job.Label;
     }
 
     public void Dispose()

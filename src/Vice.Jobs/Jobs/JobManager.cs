@@ -3,7 +3,7 @@ using Vice.Logging;
 
 namespace Vice.Jobs;
 
-internal sealed class JobManager : IJobManager
+public sealed class JobManager : IJobManager
 {
     public const int MAX_RETAINED_JOBS = 1000;
     public const int MAX_LIVE_JOBS = 4096;
@@ -22,13 +22,21 @@ internal sealed class JobManager : IJobManager
     private readonly CancellationTokenSource _shutdownCts;
     private readonly JobWorkerPool _workerPool;
 
-    internal event Action<JobState>? JobCompleted;
+    public event Action<JobState>? JobCompleted;
 
-    internal event Action<JobState, string>? JobFailed;
+    public event Action<JobState, string>? JobFailed;
 
     internal event Action<JobState, JobProgress>? JobProgressChanged;
 
-    public JobManager(
+    public static IJobManager Create(
+        IReadOnlyList<IJobRunner> runners,
+        int maxConcurrency,
+        IViceLogger? logger,
+        CancellationToken shutdownLinkedToken,
+        TimeSpan shutdownTimeout)
+        => new JobManager(runners, maxConcurrency, logger, shutdownLinkedToken, shutdownTimeout);
+
+    internal JobManager(
         IReadOnlyList<IJobRunner> runners,
         int maxConcurrency,
         IViceLogger? logger,
@@ -37,7 +45,7 @@ internal sealed class JobManager : IJobManager
     {
     }
 
-    public JobManager(
+    internal JobManager(
         IReadOnlyList<IJobRunner> runners,
         int maxConcurrency,
         IViceLogger? logger,
@@ -62,7 +70,7 @@ internal sealed class JobManager : IJobManager
             _logger);
     }
 
-    public JobManager(IReadOnlyList<IJobRunner> runners, int maxConcurrency = 3)
+    internal JobManager(IReadOnlyList<IJobRunner> runners, int maxConcurrency = 3)
         : this(runners, maxConcurrency, null, CancellationToken.None)
     {
     }
@@ -278,12 +286,8 @@ internal sealed class JobManager : IJobManager
         {
             Id = id,
             Kind = descriptor.Kind,
-            Source = descriptor.Source ?? string.Empty,
-            ResourceId = descriptor.ResourceId ?? string.Empty,
-            DestinationPath = descriptor.DestinationPath ?? string.Empty,
-            Format = descriptor.Format,
-            Endpoint = descriptor.Endpoint,
-            Method = descriptor.Method,
+            Label = descriptor.Label,
+            Options = descriptor.Options,
             CreatedAt = DateTime.UtcNow,
         };
 
@@ -312,30 +316,26 @@ internal sealed class JobManager : IJobManager
 
             if (_jobs.TryRemove(stale.Id, out var evicted))
             {
-                SweepAbandonedPartial(evicted.Read());
+                NotifyEvicted(evicted.Read());
             }
         }
     }
 
-    private void SweepAbandonedPartial(JobState job)
+    private void NotifyEvicted(JobState job)
     {
-        if (job.Kind != JobKind.Download
-            || string.IsNullOrEmpty(job.DestinationPath))
+        var runner = FindRunner(job.Kind);
+        if (runner is null)
         {
             return;
         }
 
-        var partial = $"{Path.GetFullPath(job.DestinationPath)}.partial";
         try
         {
-            if (File.Exists(partial))
-            {
-                File.Delete(partial);
-            }
+            runner.OnEvicted(job);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex)
         {
-            _logger.Log(ViceLogLevel.Debug, $"abandoned partial cleanup failed: '{partial}'", ex);
+            _logger.Log(ViceLogLevel.Debug, $"job {job.Id} eviction cleanup threw", ex);
         }
     }
 
@@ -401,9 +401,10 @@ internal sealed class JobManager : IJobManager
         {
             var updated = holder.Update(s => s with
             {
-                BytesDownloaded = p.BytesDownloaded ?? s.BytesDownloaded,
-                TotalBytes = p.TotalBytes ?? s.TotalBytes,
-                MessagesReceived = p.MessagesReceived ?? s.MessagesReceived,
+                ProgressCurrent = p.Current ?? s.ProgressCurrent,
+                ProgressTotal = p.Total ?? s.ProgressTotal,
+                Label = p.Label ?? s.Label,
+                LastProgressAt = DateTime.UtcNow,
             });
 
             JobProgressChanged?.Invoke(updated, p);
@@ -536,11 +537,11 @@ internal sealed class JobManager : IJobManager
 
     private void EmitCompletedTelemetry(JobState job)
         => _logger.Log(ViceLogLevel.Info,
-                       $"job terminal id={job.Id} kind={job.Kind} status=Completed source={job.Source}");
+                       $"job terminal id={job.Id} kind={job.Kind} status=Completed label={job.Label}");
 
     private void EmitFailedTelemetry(JobState job, string reason)
         => _logger.Log(ViceLogLevel.Warn,
-                       $"job terminal id={job.Id} kind={job.Kind} status=Failed source={job.Source} error={reason}");
+                       $"job terminal id={job.Id} kind={job.Kind} status=Failed label={job.Label} error={reason}");
 
     private void FailJob(JobStateHolder holder, string reason)
     {

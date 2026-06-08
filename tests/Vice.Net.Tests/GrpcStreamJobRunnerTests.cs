@@ -69,6 +69,24 @@ public class GrpcStreamJobRunnerTests : IAsyncLifetime, IDisposable
 
     private static IProgress<JobProgress> NoopProgress() => new Progress<JobProgress>(_ => { });
 
+    private static JobState StreamJob(int id,
+                                      string endpoint,
+                                      string method,
+                                      string requestData,
+                                      string destinationPath)
+        => new()
+        {
+            Id = id,
+            Kind = GrpcStreamJobRunner.StreamKind,
+            Options = new Dictionary<string, string?>(StringComparer.Ordinal)
+            {
+                [GrpcStreamJobRunner.ENDPOINT_KEY] = endpoint,
+                [GrpcStreamJobRunner.METHOD_KEY] = method,
+                [GrpcStreamJobRunner.REQUEST_DATA_KEY] = requestData,
+                [GrpcStreamJobRunner.DESTINATION_PATH_KEY] = destinationPath,
+            },
+        };
+
     [Fact]
     public async Task Happy_path_streams_messages_and_writes_to_destination()
     {
@@ -81,15 +99,11 @@ public class GrpcStreamJobRunnerTests : IAsyncLifetime, IDisposable
         var runner = new GrpcStreamJobRunner(conn);
         var dest = Path.Combine(_tempDir, "stream.jsonl");
 
-        var job = new JobState
-        {
-            Id = 1,
-            Kind = JobKind.GrpcStream,
-            Endpoint = _endpoint,
-            Method = "vice.test.Streamer/Stream",
-            ResourceId = "{\"hello\":\"world\"}",
-            DestinationPath = dest,
-        };
+        var job = StreamJob(1,
+                            _endpoint,
+                            "vice.test.Streamer/Stream",
+                            "{\"hello\":\"world\"}",
+                            dest);
 
         await runner.RunAsync(job, NoopProgress(), CancellationToken.None);
 
@@ -112,15 +126,11 @@ public class GrpcStreamJobRunnerTests : IAsyncLifetime, IDisposable
         var runner = new GrpcStreamJobRunner(conn);
         var dest = Path.Combine(_tempDir, "abort.jsonl");
 
-        var job = new JobState
-        {
-            Id = 2,
-            Kind = JobKind.GrpcStream,
-            Endpoint = _endpoint,
-            Method = "vice.test.Streamer/Stream",
-            ResourceId = "{}",
-            DestinationPath = dest,
-        };
+        var job = StreamJob(2,
+                            _endpoint,
+                            "vice.test.Streamer/Stream",
+                            "{}",
+                            dest);
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             runner.RunAsync(job, NoopProgress(), CancellationToken.None));
@@ -141,15 +151,11 @@ public class GrpcStreamJobRunnerTests : IAsyncLifetime, IDisposable
         var runner = new GrpcStreamJobRunner(conn);
         var dest = Path.Combine(_tempDir, "cancel.jsonl");
 
-        var job = new JobState
-        {
-            Id = 3,
-            Kind = JobKind.GrpcStream,
-            Endpoint = _endpoint,
-            Method = "vice.test.Streamer/Stream",
-            ResourceId = "{}",
-            DestinationPath = dest,
-        };
+        var job = StreamJob(3,
+                            _endpoint,
+                            "vice.test.Streamer/Stream",
+                            "{}",
+                            dest);
 
         using var cts = new CancellationTokenSource();
         var task = runner.RunAsync(job, NoopProgress(), cts.Token);
@@ -169,15 +175,11 @@ public class GrpcStreamJobRunnerTests : IAsyncLifetime, IDisposable
         conn.Connect(_endpoint, plaintext: true);
 
         var runner = new GrpcStreamJobRunner(conn);
-        var job = new JobState
-        {
-            Id = 4,
-            Kind = JobKind.GrpcStream,
-            Endpoint = _endpoint,
-            Method = "no-slash-here",
-            ResourceId = "{}",
-            DestinationPath = Path.Combine(_tempDir, "noslash.jsonl"),
-        };
+        var job = StreamJob(4,
+                            _endpoint,
+                            "no-slash-here",
+                            "{}",
+                            Path.Combine(_tempDir, "noslash.jsonl"));
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             runner.RunAsync(job, NoopProgress(), CancellationToken.None));
@@ -193,15 +195,11 @@ public class GrpcStreamJobRunnerTests : IAsyncLifetime, IDisposable
         conn.Connect(_endpoint, plaintext: true);
 
         var runner = new GrpcStreamJobRunner(conn);
-        var job = new JobState
-        {
-            Id = 5,
-            Kind = JobKind.GrpcStream,
-            Endpoint = _endpoint,
-            Method = "vice.test.Streamer/DoesNotExist",
-            ResourceId = "{}",
-            DestinationPath = Path.Combine(_tempDir, "missing.jsonl"),
-        };
+        var job = StreamJob(5,
+                            _endpoint,
+                            "vice.test.Streamer/DoesNotExist",
+                            "{}",
+                            Path.Combine(_tempDir, "missing.jsonl"));
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             runner.RunAsync(job, NoopProgress(), CancellationToken.None));
@@ -211,8 +209,8 @@ public class GrpcStreamJobRunnerTests : IAsyncLifetime, IDisposable
     public void CanHandle_returns_true_only_for_GrpcStream()
     {
         var runner = new GrpcStreamJobRunner(new GrpcConnectionManager(NullViceLogger.Instance));
-        Assert.True(runner.CanHandle(JobKind.GrpcStream));
-        Assert.False(runner.CanHandle(JobKind.Download));
+        Assert.True(runner.CanHandle(GrpcStreamJobRunner.StreamKind));
+        Assert.False(runner.CanHandle(JobKind.Custom("Download")));
     }
 
     internal sealed class ServiceConfig

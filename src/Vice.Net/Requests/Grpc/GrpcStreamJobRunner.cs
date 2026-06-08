@@ -9,6 +9,13 @@ namespace Vice.Net.Requests.Grpc;
 
 internal sealed class GrpcStreamJobRunner : IJobRunner
 {
+    internal static readonly JobKind StreamKind = JobKind.Custom("GrpcStream");
+
+    internal const string ENDPOINT_KEY = "endpoint";
+    internal const string METHOD_KEY = "method";
+    internal const string REQUEST_DATA_KEY = "requestData";
+    internal const string DESTINATION_PATH_KEY = "destinationPath";
+
     internal const int DefaultMaxRetries = 5;
     internal static readonly TimeSpan DefaultBaseRetryBackoff = TimeSpan.FromMilliseconds(500);
     internal static readonly TimeSpan DefaultMaxRetryBackoff = TimeSpan.FromSeconds(30);
@@ -65,11 +72,22 @@ internal sealed class GrpcStreamJobRunner : IJobRunner
         _logger = logger ?? NullViceLogger.Instance;
     }
 
-    public bool CanHandle(JobKind kind) => kind == JobKind.GrpcStream;
+    public bool CanHandle(JobKind kind) => kind == StreamKind;
+
+    public void OnEvicted(JobState job)
+    {
+        var destinationPath = Option(job, DESTINATION_PATH_KEY);
+        if (string.IsNullOrEmpty(destinationPath))
+        {
+            return;
+        }
+
+        SafeFile.TryDelete($"{destinationPath}.partial");
+    }
 
     public async Task RunAsync(JobState job, IProgress<JobProgress> progress, CancellationToken ct)
     {
-        var method = job.Method!;
+        var method = Option(job, METHOD_KEY);
         if (!GrpcMethodPath.TryParse(method, out var path))
         {
             throw new InvalidOperationException(
@@ -90,11 +108,13 @@ internal sealed class GrpcStreamJobRunner : IJobRunner
             MethodType.ServerStreaming, serviceName, methodName,
             requestMarshaller, responseMarshaller);
 
-        var requestData = !string.IsNullOrWhiteSpace(job.ResourceId) ? job.ResourceId : "{}";
+        var configuredRequest = Option(job, REQUEST_DATA_KEY);
+        var requestData = !string.IsNullOrWhiteSpace(configuredRequest) ? configuredRequest : "{}";
         var requestBytes = Encoding.UTF8.GetBytes(requestData);
 
-        var outputPath = !string.IsNullOrWhiteSpace(job.DestinationPath)
-            ? job.DestinationPath
+        var configuredDestination = Option(job, DESTINATION_PATH_KEY);
+        var outputPath = !string.IsNullOrWhiteSpace(configuredDestination)
+            ? configuredDestination
             : Path.Combine(Path.GetTempPath(), $"vice-grpc-stream-{job.Id}.jsonl");
 
         var fullOutputPath = Path.GetFullPath(outputPath);
@@ -111,7 +131,7 @@ internal sealed class GrpcStreamJobRunner : IJobRunner
         }
 
         var partialPath = outputPath + ".partial";
-        var label = $"Streaming {job.Method} -> {outputPath}";
+        var label = $"Streaming {method} -> {outputPath}";
 
         long messagesReceived = 0;
         var attempt = 0;
@@ -130,7 +150,7 @@ internal sealed class GrpcStreamJobRunner : IJobRunner
                     ct).ConfigureAwait(false);
 
                 progress.Report(new JobProgress(
-                    MessagesReceived: messagesReceived,
+                    Current: messagesReceived,
                     Label: label));
 
                 File.Move(partialPath, outputPath, overwrite: true);
@@ -150,10 +170,10 @@ internal sealed class GrpcStreamJobRunner : IJobRunner
                     attempt++;
                     var backoff = ComputeBackoff(attempt);
                     _logger.Log(ViceLogLevel.Warn,
-                                $"gRPC stream {job.Method} -> {outputPath} transient failure {ex.StatusCode} (retry {attempt}/{_maxRetries} after {backoff.TotalMilliseconds:0}ms)",
+                                $"gRPC stream {method} -> {outputPath} transient failure {ex.StatusCode} (retry {attempt}/{_maxRetries} after {backoff.TotalMilliseconds:0}ms)",
                                 ex);
                     progress.Report(new JobProgress(
-                        MessagesReceived: messagesReceived,
+                        Current: messagesReceived,
                         Label: $"{label} (retry {attempt}/{_maxRetries} after {ex.StatusCode})"));
 
                     try
@@ -175,7 +195,7 @@ internal sealed class GrpcStreamJobRunner : IJobRunner
                 }
 
                 _logger.Log(ViceLogLevel.Error,
-                            $"gRPC stream {job.Method} -> {outputPath} failed after {attempt} retr{(attempt == 1 ? "y" : "ies")}: {ex.StatusCode} {ex.Status.Detail}",
+                            $"gRPC stream {method} -> {outputPath} failed after {attempt} retr{(attempt == 1 ? "y" : "ies")}: {ex.StatusCode} {ex.Status.Detail}",
                             ex);
                 throw new InvalidOperationException(
                     $"gRPC error ({ex.StatusCode}): {ex.Status.Detail}", ex);
@@ -184,7 +204,7 @@ internal sealed class GrpcStreamJobRunner : IJobRunner
             {
                 SafeFile.TryDelete(partialPath);
                 _logger.Log(ViceLogLevel.Error,
-                            $"gRPC stream {job.Method} -> {outputPath} failed unexpectedly",
+                            $"gRPC stream {method} -> {outputPath} failed unexpectedly",
                             ex);
                 throw;
             }
@@ -201,7 +221,7 @@ internal sealed class GrpcStreamJobRunner : IJobRunner
         IProgress<JobProgress> progress,
         CancellationToken ct)
     {
-        var invoker = _connectionManager.GetChannel(job.Endpoint!).CreateCallInvoker();
+        var invoker = _connectionManager.GetChannel(Option(job, ENDPOINT_KEY)).CreateCallInvoker();
 
         var callOptions = new CallOptions(cancellationToken: ct)
             .WithDeadline(DateTime.UtcNow.Add(_callDeadline));
@@ -229,7 +249,7 @@ internal sealed class GrpcStreamJobRunner : IJobRunner
                 if (elapsed >= HttpStreamHelper.ProgressThrottle)
                 {
                     progress.Report(new JobProgress(
-                        MessagesReceived: messagesReceived,
+                        Current: messagesReceived,
                         Label: label));
                     lastReport = Stopwatch.GetTimestamp();
                 }
@@ -276,4 +296,10 @@ internal sealed class GrpcStreamJobRunner : IJobRunner
             || status == StatusCode.DeadlineExceeded;
     }
 
+    private static string Option(JobState job, string key)
+    {
+        return job.Options.TryGetValue(key, out var value) && value is not null
+            ? value
+            : string.Empty;
+    }
 }

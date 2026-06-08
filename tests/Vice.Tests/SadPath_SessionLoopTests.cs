@@ -14,9 +14,19 @@ namespace Vice.Tests;
 
 public class SadPath_SessionLoopTests
 {
+    private static readonly JobKind TestKind = JobKind.Custom("test");
+
+    private static JobDescriptor Descriptor()
+        => new(TestKind,
+               "test-label",
+               new Dictionary<string, string?>(StringComparer.Ordinal));
+
     private sealed class StaleRunner : IJobRunner
     {
         public bool CanHandle(JobKind kind) => true;
+        public void OnEvicted(JobState job)
+        {
+        }
         public Task RunAsync(JobState job, IProgress<JobProgress> progress, CancellationToken ct)
             => Task.Delay(Timeout.Infinite, ct);
     }
@@ -37,7 +47,7 @@ public class SadPath_SessionLoopTests
             NullStatusDisplay.Instance, TerminalCapabilities.None, NullOutputSink.Instance,
             builtins: builtins);
 
-        await jobs.SubmitAsync(JobDescriptor.ForDownload("s", "r", "/d", ".x"), default);
+        await jobs.SubmitAsync(Descriptor(), default);
         await Task.Delay(50);
 
         var loop = new SessionLoop(executor, jobs, history, console,

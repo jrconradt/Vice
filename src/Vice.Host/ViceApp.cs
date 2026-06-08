@@ -257,7 +257,7 @@ public sealed class ViceApp : IViceApp, IAsyncDisposable
     public async Task<int> RunSessionAsync(CancellationToken ct = default)
     {
         var state = SessionState.For(_name);
-        await using var jobManager = new JobManager(_jobRunners, _concurrency, _logger, ct, _shutdownTimeout);
+        await using var jobManager = JobManager.Create(_jobRunners, _concurrency, _logger, ct, _shutdownTimeout);
 
         var sessionCtx = new SessionContext(jobManager, state, _sessionServices, _logger);
         await using var history = new InputHistory();
@@ -286,7 +286,7 @@ public sealed class ViceApp : IViceApp, IAsyncDisposable
 
     internal async Task<int> RunDaemonAsync(SessionState state, CancellationToken ct = default)
     {
-        await using var jobManager = new JobManager(_jobRunners, _concurrency, _logger, ct, _shutdownTimeout);
+        await using var jobManager = JobManager.Create(_jobRunners, _concurrency, _logger, ct, _shutdownTimeout);
 
         var sessionCtx = new SessionContext(jobManager, state, _sessionServices, _logger, isInteractive: false);
 
@@ -294,7 +294,7 @@ public sealed class ViceApp : IViceApp, IAsyncDisposable
     }
 
     private async Task<int> RunDaemonInternalAsync(
-        JobManager jobManager, SessionState state,
+        IJobManager jobManager, SessionState state,
         SessionContext sessionCtx,
         CancellationToken ct)
     {
@@ -348,9 +348,13 @@ public sealed class ViceApp : IViceApp, IAsyncDisposable
         return await SuperviseAcceptLoopAsync(server, jobManager, _logger, ct).ConfigureAwait(false);
     }
 
-    private static async Task<int> SuperviseAcceptLoopAsync(PipeServer server, JobManager jobManager, IViceLogger logger, CancellationToken ct)
+    private static async Task<int> SuperviseAcceptLoopAsync(PipeServer server, IJobManager jobManager, IViceLogger logger, CancellationToken ct)
     {
         var poolWasDegraded = false;
+        var watchdogInterval = Host.Core.SystemdNotify.WatchdogInterval();
+        var nextWatchdogPing = watchdogInterval is { } interval
+            ? DateTime.UtcNow + interval
+            : (DateTime?)null;
         var tcs = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
         await using (ct.Register(() => tcs.TrySetResult(ViceExitCode.SUCCESS)))
         {
@@ -371,6 +375,23 @@ public sealed class ViceApp : IViceApp, IAsyncDisposable
                 }
 
                 poolWasDegraded = poolHealth.IsDegraded;
+
+                if (watchdogInterval is { } cadence
+                    && nextWatchdogPing is { } due
+                    && DateTime.UtcNow >= due)
+                {
+                    var alive = server.IsListening
+                        && poolHealth.LiveWorkerCount > 0;
+                    if (alive)
+                    {
+                        Host.Core.SystemdNotify.Watchdog();
+                        nextWatchdogPing = DateTime.UtcNow + cadence;
+                    }
+                    else
+                    {
+                        logger.Log(ViceLogLevel.Error, $"daemon liveness probe failed (listening={server.IsListening} live-workers={poolHealth.LiveWorkerCount}); withholding systemd watchdog ping so the supervisor restarts");
+                    }
+                }
 
                 var poll = Task.Delay(TimeSpan.FromMilliseconds(250), CancellationToken.None);
                 var completed = await Task.WhenAny(tcs.Task, poll).ConfigureAwait(false);

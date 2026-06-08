@@ -116,7 +116,7 @@ Reference the framework directly from a checkout of this repo — add a `Project
 Define a group of commands. Each command is a grammar (verb, optional nouns, bound targets) plus a handler. Register them by hand when wiring a single app:
 
 ```csharp
-using static Vice.Dsl;
+using static Vice.Core.Dsl;
 
 internal static class GreetCommands
 {
@@ -129,7 +129,7 @@ internal static class GreetCommands
             "Greet someone by name",
             async (ctx, ct) =>
             {
-                Vice.Output.Line($"Hello, {ctx["name"]}!");
+                Vice.Core.Output.Line($"Hello, {ctx["name"]}!");
                 return 0;
             });
     }
@@ -139,7 +139,7 @@ internal static class GreetCommands
 Build the app and run it:
 
 ```csharp
-using Vice;
+using Vice.Host;
 
 await using var app = ViceApp.Create("mytool", "0.1.0")
     .WithDescription("An example CLI")

@@ -19,6 +19,9 @@ jobs:
       - name: Build
         run: dotnet build Vice.slnx -c Release
 
+      - name: Format
+        run: dotnet format Vice.slnx --verify-no-changes --no-restore
+
       - name: Pack
         run: |
           dotnet pack src/Vice/Vice.csproj -c Release --no-build -o artifacts
@@ -30,8 +33,33 @@ jobs:
           path: |
             artifacts/*.nupkg
 
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Test
+        run: scripts/test.sh
+
+  benchmark-gate:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Benchmark regression gate
+        run: scripts/bench.sh --gate
+
   publish:
-    needs: build-pack
+    needs: [build-pack, test]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: nuget

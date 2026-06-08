@@ -30,14 +30,14 @@ public static class TeeCommands
         }
 
         var sinks = new List<ISink>(specs.Count + 1);
+        var opens = new Task<ISink>[specs.Count];
+        for (int i = 0; i < specs.Count; i++)
+        {
+            opens[i] = SinkFactory.OpenAsync(specs[i], ct, ctx.Logger, connectTcp).AsTask();
+        }
+
         try
         {
-            var opens = new Task<ISink>[specs.Count];
-            for (int i = 0; i < specs.Count; i++)
-            {
-                opens[i] = SinkFactory.OpenAsync(specs[i], ct, ctx.Logger, connectTcp).AsTask();
-            }
-
             sinks.AddRange(await Task.WhenAll(opens));
             sinks.Add(new StreamSink(Console.OpenStandardOutput(), "stdout", ctx.Logger));
         }
@@ -46,6 +46,14 @@ public static class TeeCommands
             foreach (var s in sinks)
             {
                 await s.DisposeAsync();
+            }
+
+            foreach (var open in opens)
+            {
+                if (open.Status == TaskStatus.RanToCompletion)
+                {
+                    await open.Result.DisposeAsync();
+                }
             }
 
             throw;

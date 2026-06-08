@@ -13,10 +13,10 @@ public sealed class SessionContext : ISessionContext
     public SessionState State { get; }
     public IViceLogger Logger { get; }
 
-    internal JobManager? JobManagerImpl { get; }
+    internal IJobManager? JobManagerImpl { get; }
 
     internal SessionContext(
-        JobManager jobManager,
+        IJobManager jobManager,
         SessionState state,
         IReadOnlyDictionary<Type, object>? services = null,
         IViceLogger? logger = null,

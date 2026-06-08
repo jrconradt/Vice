@@ -20,6 +20,10 @@ public class DaemonHealthLivenessTests
     {
         public bool CanHandle(JobKind kind) => true;
 
+        public void OnEvicted(JobState job)
+        {
+        }
+
         public Task RunAsync(JobState job, IProgress<JobProgress> progress, CancellationToken ct)
             => Task.CompletedTask;
     }

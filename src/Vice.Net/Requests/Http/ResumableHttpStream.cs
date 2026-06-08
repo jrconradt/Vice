@@ -32,17 +32,31 @@ public sealed class ResumableHttpStream
         }
     }
 
-    private Task<ProbeResult> GetProbeAsync(CancellationToken ct)
+    private async Task<ProbeResult> GetProbeAsync(CancellationToken ct)
     {
         var existing = Volatile.Read(ref _probe);
-        if (existing is not null)
+        if (existing is not null && existing.IsValueCreated
+            && (existing.Value.IsFaulted || existing.Value.IsCanceled))
         {
-            return existing.Value;
+            Interlocked.CompareExchange(ref _probe, null, existing);
+            existing = null;
         }
 
-        var created = new Lazy<Task<ProbeResult>>(() => ProbeAsync(ct));
-        var winner = Interlocked.CompareExchange(ref _probe, created, null) ?? created;
-        return winner.Value;
+        if (existing is null)
+        {
+            var created = new Lazy<Task<ProbeResult>>(() => ProbeAsync(ct));
+            existing = Interlocked.CompareExchange(ref _probe, created, null) ?? created;
+        }
+
+        try
+        {
+            return await existing.Value.ConfigureAwait(false);
+        }
+        catch
+        {
+            Interlocked.CompareExchange(ref _probe, null, existing);
+            throw;
+        }
     }
 
     private async Task<ProbeResult> ProbeAsync(CancellationToken ct)

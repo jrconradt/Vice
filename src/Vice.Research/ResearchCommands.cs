@@ -442,12 +442,12 @@ public static class ResearchCommands
             [TimeoutOptionKey] = ((long)timeout.TotalMilliseconds).ToString(System.Globalization.CultureInfo.InvariantCulture),
         };
 
-        var descriptor = JobDescriptor.ForDownload(source,
-                                                   id,
-                                                   destination,
-                                                   extension,
-                                                   format,
-                                                   options);
+        var descriptor = ResearchDownloadJobRunner.DescriptorFor(source,
+                                                                 id,
+                                                                 destination,
+                                                                 extension,
+                                                                 format,
+                                                                 options);
         jobTask = session.Jobs.SubmitAsync(descriptor, ct);
         return true;
     }

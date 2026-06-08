@@ -7,11 +7,21 @@ namespace Vice.Tests;
 
 public class SadPath_JobManagerTests
 {
+    private static readonly JobKind TestKind = JobKind.Custom("test");
+
+    private static JobDescriptor Descriptor()
+        => new(TestKind,
+               "test-label",
+               new Dictionary<string, string?>(StringComparer.Ordinal));
+
     private sealed class DelegatingRunner : IJobRunner
     {
         private readonly Func<JobState, IProgress<JobProgress>, CancellationToken, Task> _run;
         public DelegatingRunner(Func<JobState, IProgress<JobProgress>, CancellationToken, Task> run) => _run = run;
         public bool CanHandle(JobKind kind) => true;
+        public void OnEvicted(JobState job)
+        {
+        }
         public Task RunAsync(JobState job, IProgress<JobProgress> progress, CancellationToken ct) => _run(job, progress, ct);
     }
 
@@ -24,7 +34,7 @@ public class SadPath_JobManagerTests
         var failed = new TaskCompletionSource<(JobState, string)>(TaskCreationOptions.RunContinuationsAsynchronously);
         mgr.JobFailed += (job, msg) => failed.TrySetResult((job, msg));
 
-        await mgr.SubmitAsync(JobDescriptor.ForDownload("src", "rid", "/dest", ".txt"), default);
+        await mgr.SubmitAsync(Descriptor(), default);
         var (job, msg) = await failed.Task.WaitAsync(TimeSpan.FromSeconds(3));
 
         Assert.Equal(JobStatus.Failed, job.Status);
@@ -53,7 +63,7 @@ public class SadPath_JobManagerTests
         });
 
         await using var mgr = new JobManager(new[] { (IJobRunner)runner });
-        var id = await mgr.SubmitAsync(JobDescriptor.ForDownload("s", "r", "/d", ".x"), default);
+        var id = await mgr.SubmitAsync(Descriptor(), default);
 
         await startedFirstTime.Task.WaitAsync(TimeSpan.FromSeconds(5));
         await mgr.PauseAsync(id, default);
@@ -75,10 +85,10 @@ public class SadPath_JobManagerTests
         });
 
         await using var mgr = new JobManager(new[] { (IJobRunner)runner }, maxConcurrency: 1);
-        await mgr.SubmitAsync(JobDescriptor.ForDownload("a", "a", "/a", ".x"), default);
+        await mgr.SubmitAsync(Descriptor(), default);
         await firstRunnerStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
-        var queuedId = await mgr.SubmitAsync(JobDescriptor.ForDownload("b", "b", "/b", ".x"), default);
+        var queuedId = await mgr.SubmitAsync(Descriptor(), default);
 
         await mgr.CancelAsync(queuedId, default);
 
@@ -106,7 +116,7 @@ public class SadPath_JobManagerTests
         });
 
         var mgr = new JobManager(new[] { (IJobRunner)runner });
-        await mgr.SubmitAsync(JobDescriptor.ForDownload("s", "r", "/d", ".x"), default);
+        await mgr.SubmitAsync(Descriptor(), default);
         await runnerStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
         await mgr.DisposeAsync();

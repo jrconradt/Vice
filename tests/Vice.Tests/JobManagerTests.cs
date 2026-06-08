@@ -7,6 +7,13 @@ namespace Vice.Tests;
 
 public class JobManagerTests
 {
+    private static readonly JobKind TestKind = JobKind.Custom("test");
+
+    private static JobDescriptor Descriptor(JobKind kind)
+        => new(kind,
+               "test-label",
+               new Dictionary<string, string?>(StringComparer.Ordinal));
+
     private sealed class CountingRunner : IJobRunner
     {
         private readonly JobKind _kind;
@@ -22,6 +29,10 @@ public class JobManagerTests
 
         public bool CanHandle(JobKind kind) => kind == _kind;
 
+        public void OnEvicted(JobState job)
+        {
+        }
+
         public Task RunAsync(JobState job, IProgress<JobProgress> progress, CancellationToken ct)
         {
             Interlocked.Increment(ref CallCount);
@@ -34,7 +45,7 @@ public class JobManagerTests
     {
         var completions = new System.Collections.Concurrent.ConcurrentBag<int>();
         var bothCompleted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var runner = new CountingRunner(JobKind.Download);
+        var runner = new CountingRunner(TestKind);
         await using var mgr = new JobManager(new[] { (IJobRunner)runner });
 
         mgr.JobCompleted += s =>
@@ -46,8 +57,8 @@ public class JobManagerTests
             }
         };
 
-        var id1 = await mgr.SubmitAsync(JobDescriptor.ForDownload("src", "rid", "/dest", ".txt"), default);
-        var id2 = await mgr.SubmitAsync(JobDescriptor.ForDownload("src", "rid", "/dest", ".txt"), default);
+        var id1 = await mgr.SubmitAsync(Descriptor(TestKind), default);
+        var id2 = await mgr.SubmitAsync(Descriptor(TestKind), default);
 
         Assert.Equal(1, id1);
         Assert.Equal(2, id2);
@@ -63,7 +74,7 @@ public class JobManagerTests
         await using var mgr = new JobManager(Array.Empty<IJobRunner>());
 
         var ex = await Assert.ThrowsAsync<ArgumentException>(() =>
-            mgr.SubmitAsync(JobDescriptor.ForDownload("src", "rid", "/dest", ".txt"), default));
+            mgr.SubmitAsync(Descriptor(TestKind), default));
 
         Assert.Contains("No runner", ex.Message);
     }
@@ -71,13 +82,13 @@ public class JobManagerTests
     [Fact]
     public async Task Runner_RunsAndCompletes_FiresCompletedEvent()
     {
-        var runner = new CountingRunner(JobKind.Download);
+        var runner = new CountingRunner(TestKind);
         await using var mgr = new JobManager(new[] { (IJobRunner)runner });
 
         var completed = new TaskCompletionSource<JobState>(TaskCreationOptions.RunContinuationsAsynchronously);
         mgr.JobCompleted += s => completed.TrySetResult(s);
 
-        await mgr.SubmitAsync(JobDescriptor.ForDownload("src", "rid", "/dest", ".txt"), default);
+        await mgr.SubmitAsync(Descriptor(TestKind), default);
         var job = await completed.Task.WaitAsync(TimeSpan.FromSeconds(3));
 
         Assert.Equal(JobStatus.Completed, job.Status);
@@ -88,7 +99,7 @@ public class JobManagerTests
     public async Task Cancel_RunningJob_TransitionsToFailed_WithCancelledMessage()
     {
         var runnerStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var runner = new CountingRunner(JobKind.Download,
+        var runner = new CountingRunner(TestKind,
             (job, prog, ct) =>
             {
                 runnerStarted.TrySetResult();
@@ -100,7 +111,7 @@ public class JobManagerTests
         var failedSignal = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
         mgr.JobFailed += (job, msg) => failedSignal.TrySetResult(msg);
 
-        var id = await mgr.SubmitAsync(JobDescriptor.ForDownload("src", "rid", "/dest", ".txt"), default);
+        var id = await mgr.SubmitAsync(Descriptor(TestKind), default);
         await runnerStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
         await mgr.CancelAsync(id, default);
 

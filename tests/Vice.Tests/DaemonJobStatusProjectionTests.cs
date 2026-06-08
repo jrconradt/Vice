@@ -15,6 +15,8 @@ namespace Vice.Tests;
 
 public class DaemonJobStatusProjectionTests
 {
+    private static readonly JobKind TestKind = JobKind.Custom("Download");
+
     private sealed class BlockingRunner : IJobRunner
     {
         private readonly TaskCompletionSource _started =
@@ -22,7 +24,11 @@ public class DaemonJobStatusProjectionTests
 
         public Task Started => _started.Task;
 
-        public bool CanHandle(JobKind kind) => kind == JobKind.Download;
+        public bool CanHandle(JobKind kind) => kind == TestKind;
+
+        public void OnEvicted(JobState job)
+        {
+        }
 
         public async Task RunAsync(JobState job, IProgress<JobProgress> progress, CancellationToken ct)
         {
@@ -51,7 +57,10 @@ public class DaemonJobStatusProjectionTests
 
         app.Register(verb("start"), "start a blocking job", async (ctx, ct) =>
         {
-            var descriptor = JobDescriptor.ForDownload("acme-source", "rid-7", "/dest/file", ".bin");
+            var descriptor = new JobDescriptor(
+                TestKind,
+                "acme-source",
+                new Dictionary<string, string?>(StringComparer.Ordinal));
             var id = await ctx.Session!.Jobs.SubmitAsync(descriptor, ct);
             ctx.Console.Write(id.ToString());
             return 0;

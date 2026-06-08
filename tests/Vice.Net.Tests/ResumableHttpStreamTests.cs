@@ -297,4 +297,47 @@ public class ResumableHttpStreamTests
 
         Assert.Equal(0, dest.Length);
     }
+
+    [Fact]
+    public async Task SupportsResumeAsync_TransientHeadFault_DoesNotPoisonReprobe()
+    {
+        var payload = Encoding.UTF8.GetBytes("0123456789");
+        var headCount = 0;
+
+        await using var server = new HttpTestServer(async ctx =>
+        {
+            if (ctx.Request.HttpMethod == "HEAD")
+            {
+                var attempt = Interlocked.Increment(ref headCount);
+                if (attempt == 1)
+                {
+                    ctx.Response.StatusCode = 503;
+                    ctx.Response.Close();
+                    return;
+                }
+
+                ctx.Response.Headers["Accept-Ranges"] = "bytes";
+                ctx.Response.Headers["ETag"] = ETAG;
+                ctx.Response.StatusCode = 200;
+                ctx.Response.ContentLength64 = payload.Length;
+                ctx.Response.Close();
+                return;
+            }
+
+            ctx.Response.Headers["Accept-Ranges"] = "bytes";
+            ctx.Response.StatusCode = 200;
+            ctx.Response.ContentLength64 = payload.Length;
+            await ctx.Response.OutputStream.WriteAsync(payload);
+            ctx.Response.Close();
+        });
+
+        using var http = new HttpClient();
+        var rs = new ResumableHttpStream(http, new Uri(server.BaseUrl + "x"));
+
+        await Assert.ThrowsAsync<HttpRequestException>(
+            () => rs.SupportsResumeAsync(CancellationToken.None));
+
+        Assert.True(await rs.SupportsResumeAsync(CancellationToken.None));
+        Assert.Equal(2, Volatile.Read(ref headCount));
+    }
 }

@@ -12,10 +12,6 @@
     <ProjectReference Include="../Vice.Foundation/Vice.Foundation.csproj" />
   </ItemGroup>
   <ItemGroup>
-    <InternalsVisibleTo Include="Vice" />
-    <InternalsVisibleTo Include="Vice.Host" />
-    <InternalsVisibleTo Include="Vice.Net" />
-    <InternalsVisibleTo Include="Vice.Files" />
     <InternalsVisibleTo Include="Vice.Benchmarks" />
     <InternalsVisibleTo Include="Vice.Tests" />
     <InternalsVisibleTo Include="Vice.Net.Tests" />

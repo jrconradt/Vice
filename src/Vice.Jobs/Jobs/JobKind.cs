@@ -13,10 +13,6 @@ public readonly struct JobKind : IEquatable<JobKind>
         _name = name;
     }
 
-    public static JobKind Download { get; } = new JobKind("Download");
-
-    public static JobKind GrpcStream { get; } = new JobKind("GrpcStream");
-
     public string Name => _name ?? "Unknown";
 
     public static JobKind Custom(string name)
@@ -53,16 +49,6 @@ internal sealed class JobKindJsonConverter : JsonConverter<JobKind>
         if (string.IsNullOrWhiteSpace(name))
         {
             throw new JsonException("Job kind name must be non-empty.");
-        }
-
-        if (string.Equals(name, JobKind.Download.Name, StringComparison.Ordinal))
-        {
-            return JobKind.Download;
-        }
-
-        if (string.Equals(name, JobKind.GrpcStream.Name, StringComparison.Ordinal))
-        {
-            return JobKind.GrpcStream;
         }
 
         return JobKind.Custom(name);

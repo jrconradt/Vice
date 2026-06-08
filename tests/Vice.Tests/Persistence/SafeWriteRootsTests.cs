@@ -44,6 +44,15 @@ public class SafeWriteRootsTests
     }
 
     [Fact]
+    public void CurrentDirectory_IsAllowedByDefault()
+    {
+        var cwd = Directory.GetCurrentDirectory();
+        var target = Path.Combine(cwd, $"vice-cwd-write-{Guid.NewGuid():N}.bin");
+        var allowed = SafeWriteRoots.IsAllowed(target, out var reason);
+        Assert.True(allowed, reason);
+    }
+
+    [Fact]
     public void ClearlyOutsidePath_IsRejectedWithReason()
     {
         var root = SyntheticRoot();

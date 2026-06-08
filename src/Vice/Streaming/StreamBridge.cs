@@ -4,14 +4,29 @@ namespace Vice.Streaming;
 
 internal static class StreamBridge
 {
+    private const int MAX_DRAINED_CHARS = 16 * 1024 * 1024;
+
     public static async Task<string> DrainToStringAsync<T>(IStreamInput<T> input, CancellationToken ct)
     {
-        var result = "";
+        var segments = new List<string>();
+        var totalChars = 0;
         await foreach (var item in input.ReadAllAsync(ct))
         {
-            result += $"{item?.ToString()}{Environment.NewLine}";
+            if (totalChars >= MAX_DRAINED_CHARS)
+            {
+                continue;
+            }
+
+            var segment = $"{item?.ToString()}{Environment.NewLine}";
+            if (segment.Length > MAX_DRAINED_CHARS - totalChars)
+            {
+                segment = segment[..(MAX_DRAINED_CHARS - totalChars)];
+            }
+
+            segments.Add(segment);
+            totalChars += segment.Length;
         }
-        return result;
+        return string.Concat(segments);
     }
 
     public static async Task PushStringAsStreamAsync(

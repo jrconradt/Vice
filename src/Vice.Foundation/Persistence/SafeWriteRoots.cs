@@ -47,6 +47,7 @@ public static class SafeWriteRoots
 
     private static IEnumerable<string?> RootSources()
     {
+        yield return Directory.GetCurrentDirectory();
         yield return Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         yield return Environment.GetEnvironmentVariable("XDG_DATA_HOME");
         yield return Environment.GetEnvironmentVariable("XDG_CACHE_HOME");

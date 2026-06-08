@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Net.Sockets;
 using Vice.Logging;
 using Vice.Persistence;
 
@@ -99,6 +100,33 @@ public static class SinkFactory
         }
 
         return (host, port);
+    }
+
+    public static async ValueTask<ISink> ConnectTcpAsync(string hostPort, CancellationToken ct, IViceLogger logger)
+    {
+        var (host, port) = ParseTcpEndpoint(hostPort);
+        var client = new TcpClient();
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(TimeSpan.FromSeconds(5));
+        try
+        {
+            await client.ConnectAsync(host,
+                                      port,
+                                      timeout.Token);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            client.Dispose();
+            throw new TimeoutException($"tcp sink connect to {host}:{port} timed out");
+        }
+        catch
+        {
+            client.Dispose();
+            throw;
+        }
+
+        client.NoDelay = true;
+        return new StreamSink(client.GetStream(), $"tcp:{host}:{port}", logger, client);
     }
 
     private static ISink OpenExec(string commandLine, IViceLogger logger)

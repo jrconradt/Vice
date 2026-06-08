@@ -14,7 +14,7 @@ namespace Vice.Host.Core;
 internal sealed class DaemonMessageHandler
 {
     private readonly ViceApp _app;
-    private readonly JobManager _jobManager;
+    private readonly IJobManager _jobManager;
     private readonly SessionContext _sessionCtx;
     private readonly IConsoleWriter _nullWriter;
     private readonly IViceLogger _logger;
@@ -36,7 +36,7 @@ internal sealed class DaemonMessageHandler
 
     public DaemonMessageHandler(
         ViceApp app,
-        JobManager jobManager,
+        IJobManager jobManager,
         SessionContext sessionCtx,
         IConsoleWriter nullWriter,
         IReadOnlySet<string>? verbAllowlist = null)
@@ -95,7 +95,7 @@ internal sealed class DaemonMessageHandler
                 j.Kind.ToString(),
                 j.Status.ToString(),
                 ComputeProgress(j),
-                j.Source ?? j.Method ?? "")).ToList();
+                j.Label)).ToList();
             return new JobStatusResponse { Jobs = statuses };
         }
 
@@ -217,11 +217,10 @@ internal sealed class DaemonMessageHandler
 
     private static double? ComputeProgress(JobState job)
     {
-        if (job.Kind == JobKind.Download
-            && job.TotalBytes is { } total
+        if (job.ProgressTotal is { } total
             && total > 0)
         {
-            return (double)job.BytesDownloaded / total;
+            return (double)job.ProgressCurrent / total;
         }
 
         return null;

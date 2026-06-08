@@ -61,11 +61,7 @@ internal static class AtomicDownload
 
             return written;
         }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch
+        catch (InvalidDataException)
         {
             SafeFile.TryDelete(partial);
             throw;
