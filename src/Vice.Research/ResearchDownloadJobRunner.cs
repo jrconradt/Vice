@@ -166,9 +166,9 @@ public static class ResearchJobFactory
     public static ResearchSourceRegistry Sources() => DefaultRegistry;
 
     [Vice.Composition.ViceJobRunner]
-    public static ResearchDownloadJobRunner ResearchDownload()
+    public static ResearchDownloadJobRunner ResearchDownload(ResearchHttpService http)
     {
         return new ResearchDownloadJobRunner(DefaultRegistry,
-                                             () => ResearchHttp.Create(NullViceLogger.Instance));
+                                             () => http.Client);
     }
 }

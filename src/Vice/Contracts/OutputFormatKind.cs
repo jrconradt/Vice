@@ -1,5 +1,3 @@
-using System.Collections.Concurrent;
-
 namespace Vice.Contracts;
 
 public enum OutputFormatKind
@@ -14,29 +12,6 @@ public enum OutputFormatKind
 
 public static class OutputFormatKindParser
 {
-    private static readonly ConcurrentDictionary<string, OutputFormatKind> _byName =
-        new(StringComparer.OrdinalIgnoreCase);
-
-    static OutputFormatKindParser()
-    {
-        Register("auto", OutputFormatKind.Auto);
-        Register("text", OutputFormatKind.Text);
-        Register("hex", OutputFormatKind.Hex);
-        Register("json", OutputFormatKind.Json);
-        Register("jsonl", OutputFormatKind.Jsonl);
-        Register("ndjson", OutputFormatKind.Ndjson);
-    }
-
-    public static void Register(string name, OutputFormatKind kind)
-    {
-        if (string.IsNullOrWhiteSpace(name))
-        {
-            throw new ArgumentException("Format name must be non-empty.", nameof(name));
-        }
-
-        _byName[name.Trim()] = kind;
-    }
-
     public static OutputFormatKind Parse(string? raw)
     {
         return TryParse(raw, out var kind) ? kind : OutputFormatKind.Auto;
@@ -51,6 +26,43 @@ public static class OutputFormatKindParser
             return true;
         }
 
-        return _byName.TryGetValue(normalized, out kind);
+        switch (normalized.ToLowerInvariant())
+        {
+            case "auto":
+                {
+                    kind = OutputFormatKind.Auto;
+                    return true;
+                }
+            case "text":
+                {
+                    kind = OutputFormatKind.Text;
+                    return true;
+                }
+            case "hex":
+                {
+                    kind = OutputFormatKind.Hex;
+                    return true;
+                }
+            case "json":
+                {
+                    kind = OutputFormatKind.Json;
+                    return true;
+                }
+            case "jsonl":
+                {
+                    kind = OutputFormatKind.Jsonl;
+                    return true;
+                }
+            case "ndjson":
+                {
+                    kind = OutputFormatKind.Ndjson;
+                    return true;
+                }
+            default:
+                {
+                    kind = OutputFormatKind.Auto;
+                    return false;
+                }
+        }
     }
 }

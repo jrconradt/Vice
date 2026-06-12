@@ -15,6 +15,7 @@ await using var logger = new ConsoleViceLogger(logLevel, logSink);
 
 var connections = new GrpcConnectionManager(logger);
 var buildQueue = new DotnetBuildQueue(logger);
+var researchHttp = new Vice.Research.ResearchHttpService(logger);
 
 using var cts = Vice.Core.Signals.HookGracefulShutdown();
 
@@ -22,6 +23,7 @@ var host = new ViceHostServices
 {
     Grpc = connections,
     Build = buildQueue,
+    ResearchHttp = researchHttp,
     ConnectTcpSink = SinkFactory.ConnectTcpAsync,
 };
 

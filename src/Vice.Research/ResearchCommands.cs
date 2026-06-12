@@ -24,15 +24,15 @@ public static class ResearchCommands
         return registry.Resolve(name);
     }
 
-    private static readonly ConcurrentDictionary<IViceLogger, HttpClient> HttpByLogger =
-        new(ReferenceEqualityComparer.Instance);
-
     private static readonly ConcurrentDictionary<string, Lazy<Task<IReadOnlyList<SearchHit>>>> InFlightSearches =
         new(StringComparer.Ordinal);
 
     private static HttpClient HttpFor(ICommandContext ctx)
     {
-        return HttpByLogger.GetOrAdd(ctx.Logger, ResearchHttp.Create);
+        var service = ctx.Session?.GetService<ResearchHttpService>()
+            ?? throw new InvalidOperationException(
+                $"Research commands require a {nameof(ResearchHttpService)} session service; register one on the host.");
+        return service.Client;
     }
 
     public static void Register(IViceApp app)

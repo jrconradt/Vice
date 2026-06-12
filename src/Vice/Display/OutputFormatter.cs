@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json;
 using Vice.Contracts;
@@ -6,44 +5,36 @@ using Vice.Display.Rendering;
 
 namespace Vice.Display;
 
-public delegate void OutputRenderer(byte[] data, Encoding encoding, IConsoleWriter writer);
-
 public static class OutputFormatter
 {
-    private static readonly ConcurrentDictionary<OutputFormatKind, OutputRenderer> _renderers = new();
-
-    static OutputFormatter()
-    {
-        Register(OutputFormatKind.Auto, WriteText);
-        Register(OutputFormatKind.Text, WriteText);
-        Register(OutputFormatKind.Hex, static (data, _, writer) => WriteHexDump(data, writer));
-        Register(OutputFormatKind.Json, WriteJson);
-        Register(OutputFormatKind.Jsonl, WriteJson);
-        Register(OutputFormatKind.Ndjson, WriteJson);
-    }
-
-    public static void Register(OutputFormatKind format, OutputRenderer renderer)
-    {
-        if (renderer is null)
-        {
-            throw new ArgumentNullException(nameof(renderer));
-        }
-
-        _renderers[format] = renderer;
-    }
-
     public static void WriteResponse(
         byte[] data,
         OutputFormatKind format,
         Encoding encoding,
         IConsoleWriter writer)
     {
-        if (!_renderers.TryGetValue(format, out var render))
+        switch (format)
         {
-            render = WriteText;
+            case OutputFormatKind.Hex:
+                {
+                    WriteHexDump(data, writer);
+                    break;
+                }
+            case OutputFormatKind.Json:
+            case OutputFormatKind.Jsonl:
+            case OutputFormatKind.Ndjson:
+                {
+                    WriteJson(data, encoding, writer);
+                    break;
+                }
+            case OutputFormatKind.Auto:
+            case OutputFormatKind.Text:
+            default:
+                {
+                    WriteText(data, encoding, writer);
+                    break;
+                }
         }
-
-        render(data, encoding, writer);
     }
 
     private static void WriteText(byte[] data, Encoding encoding, IConsoleWriter writer)
