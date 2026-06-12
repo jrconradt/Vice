@@ -14,75 +14,67 @@ namespace Vice.Tests;
 
 public class SessionLoopTests
 {
-    private static (SessionLoop Loop, JobManager Jobs, RecordingConsole Console, InputHistory History)
+    private static (SessionLoop Loop, RecordingConsole Console, InputHistory History)
         Build(string input, Action<CommandRegistry>? configure = null)
     {
         var registry = new CommandRegistry();
         configure?.Invoke(registry);
 
+        var appName = $"vice-test-{Guid.NewGuid():N}";
         var console = new RecordingConsole();
-        var jobs = new JobManager(Array.Empty<IJobRunner>());
         var history = new InputHistory();
 
-        SessionBuiltins.RegisterChains(registry);
-        var builtins = new SessionBuiltinRegistry(jobs, history);
+        SessionBuiltins.RegisterChains(registry,
+                                       appName,
+                                       Array.Empty<IJobRunner>(),
+                                       NullViceLogger.Instance);
+        var builtins = new SessionBuiltinRegistry(history);
 
         var executor = new CommandExecutor(
             registry, TestOptions.All, console,
             NullStatusDisplay.Instance, TerminalCapabilities.None, NullOutputSink.Instance,
             builtins: builtins);
 
-        var loop = new SessionLoop(executor, jobs, history, console,
-            new StringReader(input), prompt: "vice> ");
+        var loop = new SessionLoop(executor,
+                                   JobLedger.RootFor(appName),
+                                   history,
+                                   console,
+                                   new StringReader(input),
+                                   prompt: "vice> ");
 
-        return (loop, jobs, console, history);
+        return (loop, console, history);
     }
 
     [Fact]
     public async Task Eof_ExitsCleanly()
     {
-        var (loop, jobs, _, _) = Build("");
-        await using (jobs)
-        {
-            var transitionToDaemon = await loop.RunAsync(CancellationToken.None);
-            Assert.False(transitionToDaemon);
-        }
+        var (loop, _, _) = Build("");
+        await loop.RunAsync(CancellationToken.None);
     }
 
     [Fact]
     public async Task ExitCommand_StopsLoop()
     {
-        var (loop, jobs, console, _) = Build("exit\n");
-        await using (jobs)
-        {
-            var transitionToDaemon = await loop.RunAsync(CancellationToken.None);
-            Assert.False(transitionToDaemon);
-            Assert.Contains("vice>", console.Output);
-        }
+        var (loop, console, _) = Build("exit\n");
+        await loop.RunAsync(CancellationToken.None);
+        Assert.Contains("vice>", console.Output);
     }
 
     [Fact]
     public async Task QuitSynonym_AlsoExits()
     {
-        var (loop, jobs, console, _) = Build("quit\n");
-        await using (jobs)
-        {
-            var transitionToDaemon = await loop.RunAsync(CancellationToken.None);
-            Assert.False(transitionToDaemon);
+        var (loop, console, _) = Build("quit\n");
+        await loop.RunAsync(CancellationToken.None);
 
-            var promptCount = console.Output.Split("vice>").Length - 1;
-            Assert.Equal(1, promptCount);
-        }
+        var promptCount = console.Output.Split("vice>").Length - 1;
+        Assert.Equal(1, promptCount);
     }
 
     [Fact]
     public async Task BlankLine_IsSkipped_AndPromptReprints()
     {
-        var (loop, jobs, console, history) = Build("\n\nexit\n");
-        await using (jobs)
-        {
-            await loop.RunAsync(CancellationToken.None);
-        }
+        var (loop, console, history) = Build("\n\nexit\n");
+        await loop.RunAsync(CancellationToken.None);
 
         var promptCount = console.Output.Split("vice>").Length - 1;
         Assert.Equal(3, promptCount);
@@ -94,14 +86,11 @@ public class SessionLoopTests
     [Fact]
     public async Task UserCommand_IsHistoryAppended()
     {
-        var (loop, jobs, _, history) = Build("ping\nexit\n",
+        var (loop, _, history) = Build("ping\nexit\n",
             registry => registry.Register(verb("ping"), "ping",
                 (ctx, ct) => Task.FromResult(0)));
 
-        await using (jobs)
-        {
-            await loop.RunAsync(CancellationToken.None);
-        }
+        await loop.RunAsync(CancellationToken.None);
         Assert.Equal(new[] { "ping", "exit" }, history.GetHistory());
     }
 }

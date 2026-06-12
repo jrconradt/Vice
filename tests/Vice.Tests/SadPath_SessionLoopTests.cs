@@ -14,107 +14,112 @@ namespace Vice.Tests;
 
 public class SadPath_SessionLoopTests
 {
-    private static readonly JobKind TestKind = JobKind.Custom("test");
-
-    private static JobDescriptor Descriptor()
-        => new(TestKind,
-               "test-label",
-               new Dictionary<string, string?>(StringComparer.Ordinal));
-
-    private sealed class StaleRunner : IJobRunner
-    {
-        public bool CanHandle(JobKind kind) => true;
-        public void OnEvicted(JobState job)
-        {
-        }
-        public Task RunAsync(JobState job, IProgress<JobProgress> progress, CancellationToken ct)
-            => Task.Delay(Timeout.Infinite, ct);
-    }
-
-    [Fact]
-    public async Task ShouldDaemonize_True_WhenActiveJobsRemainOnExit()
+    private static (SessionLoop Loop, RecordingConsole Console, InputHistory History, string JobsRoot)
+        Build(string input,
+              Action<CommandRegistry>? configure = null,
+              string? jobsRootOverride = null)
     {
         var registry = new CommandRegistry();
+        configure?.Invoke(registry);
+
+        var appName = $"vice-test-{Guid.NewGuid():N}";
         var console = new RecordingConsole();
-        await using var jobs = new JobManager(new[] { (IJobRunner)new StaleRunner() });
         var history = new InputHistory();
 
-        SessionBuiltins.RegisterChains(registry);
-        var builtins = new SessionBuiltinRegistry(jobs, history);
-
+        SessionBuiltins.RegisterChains(registry,
+                                       appName,
+                                       Array.Empty<IJobRunner>(),
+                                       NullViceLogger.Instance);
+        var builtins = new SessionBuiltinRegistry(history);
         var executor = new CommandExecutor(
             registry, TestOptions.All, console,
             NullStatusDisplay.Instance, TerminalCapabilities.None, NullOutputSink.Instance,
             builtins: builtins);
 
-        await jobs.SubmitAsync(Descriptor(), default);
-        await Task.Delay(50);
+        var jobsRoot = jobsRootOverride ?? Path.Combine(Path.GetTempPath(), appName);
+        var loop = new SessionLoop(executor,
+                                   jobsRoot,
+                                   history,
+                                   console,
+                                   new StringReader(input),
+                                   prompt: "vice> ");
 
-        var loop = new SessionLoop(executor, jobs, history, console,
-            new StringReader("exit\n"), prompt: "vice> ");
+        return (loop, console, history, jobsRoot);
+    }
 
-        var daemonize = await loop.RunAsync(CancellationToken.None);
+    [Fact]
+    public async Task TerminalJobRecord_IsAnnouncedAtNextPrompt()
+    {
+        var jobsRoot = Path.Combine(Path.GetTempPath(), $"vice-test-{Guid.NewGuid():N}");
+        try
+        {
+            var (loop, console, _, _) = Build("seed\nexit\n",
+                registry => registry.Register(verb("seed"), "seed a failed record",
+                    async (ctx, ct) =>
+                    {
+                        var record = new JobState
+                        {
+                            Id = 4242,
+                            Kind = JobKind.Custom("Download"),
+                            Label = "acme/thing",
+                            Status = JobStatus.Failed,
+                            ErrorMessage = "boom",
+                            CompletedAt = DateTime.UtcNow,
+                        };
+                        await JobLedger.WriteAsync(jobsRoot, record, ct);
+                        return 0;
+                    }),
+                jobsRootOverride: jobsRoot);
 
-        Assert.True(daemonize);
-        Assert.Contains("active job(s)", console.Output);
+            await loop.RunAsync(CancellationToken.None);
+
+            Assert.Contains("Job #4242 failed: acme/thing -- boom", console.Output);
+        }
+        finally
+        {
+            if (Directory.Exists(jobsRoot))
+            {
+                Directory.Delete(jobsRoot, recursive: true);
+            }
+        }
     }
 
     [Fact]
     public async Task HandlerException_IsContained_LoopSurvivesAndPrintsError()
     {
-        var registry = new CommandRegistry();
-        registry.Register(verb("kaboom"), "boom",
-            (ctx, ct) => throw new InvalidOperationException("handler-said-no"));
+        var (loop, console, history, _) = Build("kaboom\nexit\n",
+            registry => registry.Register(verb("kaboom"), "boom",
+                (ctx, ct) => throw new InvalidOperationException("handler-said-no")));
 
-        var console = new RecordingConsole();
-        await using var jobs = new JobManager(Array.Empty<IJobRunner>());
-        var history = new InputHistory();
+        await loop.RunAsync(CancellationToken.None);
 
-        SessionBuiltins.RegisterChains(registry);
-        var builtins = new SessionBuiltinRegistry(jobs, history);
-        var executor = new CommandExecutor(
-            registry, TestOptions.All, console,
-            NullStatusDisplay.Instance, TerminalCapabilities.None, NullOutputSink.Instance,
-            builtins: builtins);
-
-        var loop = new SessionLoop(executor, jobs, history, console,
-            new StringReader("kaboom\nexit\n"), prompt: "vice> ");
-
-        var daemonize = await loop.RunAsync(CancellationToken.None);
-
-        Assert.False(daemonize);
         Assert.Contains("handler-said-no", console.Error);
-
         Assert.Equal(new[] { "kaboom", "exit" }, history.GetHistory());
     }
 
     [Fact]
     public async Task ExternalCancellation_StillEscapesLoop()
     {
-        var registry = new CommandRegistry();
-        registry.Register(verb("slow"), "slow", async (ctx, ct) =>
-        {
-            await Task.Delay(Timeout.Infinite, ct);
-            return 0;
-        });
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var (loop, _, _, _) = Build("slow\n",
+            registry => registry.Register(verb("slow"), "slow", async (ctx, ct) =>
+            {
+                started.TrySetResult();
+                var forever = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                using (ct.Register(() => forever.TrySetResult()))
+                {
+                    await forever.Task.ConfigureAwait(false);
+                }
 
-        var console = new RecordingConsole();
-        await using var jobs = new JobManager(Array.Empty<IJobRunner>());
-        var history = new InputHistory();
+                ct.ThrowIfCancellationRequested();
+                return 0;
+            }));
 
-        SessionBuiltins.RegisterChains(registry);
-        var builtins = new SessionBuiltinRegistry(jobs, history);
-        var executor = new CommandExecutor(
-            registry, TestOptions.All, console,
-            NullStatusDisplay.Instance, TerminalCapabilities.None, NullOutputSink.Instance,
-            builtins: builtins);
+        using var cts = new CancellationTokenSource();
+        var loopTask = loop.RunAsync(cts.Token);
+        await started.Task;
+        cts.Cancel();
 
-        var loop = new SessionLoop(executor, jobs, history, console,
-            new StringReader("slow\n"), prompt: "vice> ");
-
-        using var cts = new CancellationTokenSource(80);
-
-        var transitionToDaemon = await loop.RunAsync(cts.Token);
-        Assert.False(transitionToDaemon);
+        await loopTask;
     }
 }

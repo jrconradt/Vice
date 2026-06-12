@@ -30,8 +30,7 @@ public static class Verbs
     public static ChainNode Completions() => verb("completions");
     public static ChainNode Exit() => verb("exit", "quit");
     public static ChainNode Jobs() => verb("jobs");
-    public static ChainNode Pause() => verb("pause");
-    public static ChainNode Resume() => verb("resume");
+    public static ChainNode Job() => verb("job");
     public static ChainNode Cancel() => verb("cancel");
     public static ChainNode History() => verb("history");
     public static ChainNode Clear() => verb("clear");

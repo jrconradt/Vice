@@ -13,42 +13,26 @@ public sealed class SessionContext : ISessionContext
     public SessionState State { get; }
     public IViceLogger Logger { get; }
 
-    internal IJobManager? JobManagerImpl { get; }
-
     internal SessionContext(
-        IJobManager jobManager,
+        IJobSubmitter jobs,
         SessionState state,
         IReadOnlyDictionary<Type, object>? services = null,
         IViceLogger? logger = null,
         bool isInteractive = true)
     {
-        Jobs = jobManager;
-        JobManagerImpl = jobManager;
+        Jobs = jobs;
         State = state;
         IsInteractive = isInteractive;
         Logger = logger ?? NullViceLogger.Instance;
         _services = services ?? new Dictionary<Type, object>();
     }
 
-    private SessionContext(
+    internal static SessionContext OneShot(
         IJobSubmitter jobs,
         SessionState state,
         IReadOnlyDictionary<Type, object>? services,
-        IViceLogger? logger)
-    {
-        Jobs = jobs;
-        JobManagerImpl = null;
-        State = state;
-        IsInteractive = false;
-        Logger = logger ?? NullViceLogger.Instance;
-        _services = services ?? new Dictionary<Type, object>();
-    }
-
-    internal static SessionContext OneShot(
-        SessionState state,
-        IReadOnlyDictionary<Type, object>? services,
         IViceLogger logger)
-        => new(NoJobsSubmitter.Instance, state, services, logger);
+        => new(jobs, state, services, logger, isInteractive: false);
 
     public T? GetService<T>() where T : class
     {
@@ -59,16 +43,5 @@ public sealed class SessionContext : ISessionContext
 
         Logger.Log(ViceLogLevel.Debug, $"unresolved service request: {typeof(T).FullName}");
         return null;
-    }
-
-    private sealed class NoJobsSubmitter : IJobSubmitter
-    {
-        public static readonly NoJobsSubmitter Instance = new();
-        private NoJobsSubmitter() { }
-
-        public Task<int> SubmitAsync(JobDescriptor descriptor, CancellationToken ct)
-            => throw new InvalidOperationException(
-                "Job submission requires an interactive session. " +
-                "Run 'vice' with no args to enter the REPL.");
     }
 }

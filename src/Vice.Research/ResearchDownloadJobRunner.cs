@@ -59,28 +59,6 @@ public sealed class ResearchDownloadJobRunner : IJobRunner
 
     public bool CanHandle(JobKind kind) => kind == DownloadKind;
 
-    public void OnEvicted(JobState job)
-    {
-        var destinationPath = Option(job, DESTINATION_PATH_KEY);
-        if (string.IsNullOrEmpty(destinationPath))
-        {
-            return;
-        }
-
-        var partial = $"{Path.GetFullPath(destinationPath)}.partial";
-        try
-        {
-            if (File.Exists(partial))
-            {
-                File.Delete(partial);
-            }
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            _logger.Log(ViceLogLevel.Debug, $"abandoned partial cleanup failed: '{partial}'", ex);
-        }
-    }
-
     public async Task RunAsync(JobState job,
                                IProgress<JobProgress> progress,
                                CancellationToken ct)

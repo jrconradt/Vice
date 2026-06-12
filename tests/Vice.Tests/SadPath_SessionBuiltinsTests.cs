@@ -13,79 +13,87 @@ namespace Vice.Tests;
 
 public class SadPath_SessionBuiltinsTests
 {
-    private const int UnknownId = 9999;
+    private const int UNKNOWN_ID = 999999;
 
-    private static async Task<(CommandExecutor, JobManager, RecordingConsole)> Build()
+    private static (CommandExecutor Exec, RecordingConsole Con) Build()
     {
         var registry = new CommandRegistry();
         var console = new RecordingConsole();
-        var jobs = new JobManager(Array.Empty<IJobRunner>());
         var history = new InputHistory();
+        var appName = $"vice-test-{Guid.NewGuid():N}";
 
-        SessionBuiltins.RegisterChains(registry);
-        var builtins = new SessionBuiltinRegistry(jobs, history);
+        SessionBuiltins.RegisterChains(registry,
+                                       appName,
+                                       Array.Empty<IJobRunner>(),
+                                       NullViceLogger.Instance);
+        var builtins = new SessionBuiltinRegistry(history);
         var executor = new CommandExecutor(
             registry, TestOptions.All, console,
             NullStatusDisplay.Instance, TerminalCapabilities.None, NullOutputSink.Instance,
             builtins: builtins);
 
-        return await Task.FromResult((executor, jobs, console));
+        return (executor, console);
     }
 
     [Fact]
-    public async Task Pause_UnknownId_NoStateChange_ReportsSuccess()
+    public async Task Cancel_UnknownId_ReportsNoSuchJob()
     {
-        var (exec, jobs, console) = await Build();
-        await using (jobs)
+        var (exec, console) = Build();
+
+        var exit = await exec.ExecuteAsync($"cancel {UNKNOWN_ID}");
+
+        Assert.Equal(ViceExitCode.FAILURE, exit);
+        Assert.Contains($"No such job: #{UNKNOWN_ID}.", console.Error);
+    }
+
+    [Fact]
+    public async Task JobRun_InvalidDescriptor_ReturnsUsageError()
+    {
+        var (exec, console) = Build();
+
+        var exit = await exec.ExecuteAsync(new[] { "job", "run", "not-json" });
+
+        Assert.Equal(ViceExitCode.USAGE_ERROR, exit);
+        Assert.Equal("", console.Output);
+    }
+
+    [Fact]
+    public async Task JobRun_UnknownKind_WritesFailedRecordAndReturnsFailure()
+    {
+        var registry = new CommandRegistry();
+        var console = new RecordingConsole();
+        var history = new InputHistory();
+        var appName = $"vice-test-{Guid.NewGuid():N}";
+
+        SessionBuiltins.RegisterChains(registry,
+                                       appName,
+                                       Array.Empty<IJobRunner>(),
+                                       NullViceLogger.Instance);
+        var executor = new CommandExecutor(
+            registry, TestOptions.All, console,
+            NullStatusDisplay.Instance, TerminalCapabilities.None, NullOutputSink.Instance,
+            builtins: new SessionBuiltinRegistry(history));
+
+        var root = JobLedger.RootFor(appName);
+        try
         {
-            Assert.Empty(jobs.GetJobs());
+            var exit = await executor.ExecuteAsync(new[] { "job", "run", "\"{\"Kind\":\"Ghost\",\"Label\":\"x\",\"Options\":{}}\"" });
 
-            var exit = await exec.ExecuteAsync($"pause {UnknownId}");
-
-            Assert.Equal(ViceExitCode.SUCCESS, exit);
-            Assert.Contains($"Job #{UnknownId} paused.", console.Output);
-            Assert.Empty(jobs.GetJobs());
-            Assert.Null(jobs.GetJob(UnknownId));
-            Assert.Equal("", console.Error);
-            Assert.DoesNotContain("Exception", console.Error);
+            Assert.Equal(ViceExitCode.FAILURE, exit);
+            var record = await JobLedger.ReadAsync(root,
+                                                   Environment.ProcessId,
+                                                   NullViceLogger.Instance,
+                                                   CancellationToken.None);
+            Assert.NotNull(record);
+            Assert.Equal(JobStatus.Failed, record!.Status);
+            Assert.Contains("No runner registered", record.ErrorMessage);
         }
-    }
-
-    [Fact]
-    public async Task Resume_UnknownId_NoStateChange_ReportsSuccess()
-    {
-        var (exec, jobs, console) = await Build();
-        await using (jobs)
+        finally
         {
-            Assert.Empty(jobs.GetJobs());
-
-            var exit = await exec.ExecuteAsync($"resume {UnknownId}");
-
-            Assert.Equal(ViceExitCode.SUCCESS, exit);
-            Assert.Contains($"Job #{UnknownId} resumed.", console.Output);
-            Assert.Empty(jobs.GetJobs());
-            Assert.Null(jobs.GetJob(UnknownId));
-            Assert.Equal("", console.Error);
-            Assert.DoesNotContain("Exception", console.Error);
-        }
-    }
-
-    [Fact]
-    public async Task Cancel_UnknownId_NoStateChange_ReportsSuccess()
-    {
-        var (exec, jobs, console) = await Build();
-        await using (jobs)
-        {
-            Assert.Empty(jobs.GetJobs());
-
-            var exit = await exec.ExecuteAsync($"cancel {UnknownId}");
-
-            Assert.Equal(ViceExitCode.SUCCESS, exit);
-            Assert.Contains($"Job #{UnknownId} cancelled.", console.Output);
-            Assert.Empty(jobs.GetJobs());
-            Assert.Null(jobs.GetJob(UnknownId));
-            Assert.Equal("", console.Error);
-            Assert.DoesNotContain("Exception", console.Error);
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
         }
     }
 }

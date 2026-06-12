@@ -49,7 +49,7 @@ vice> search "transformer" on source arxiv --limit 5
 vice> exit
 ```
 
-In a session, long-running work (downloads, server-streaming gRPC calls) runs as a background **job**; `jobs`, `pause`, `resume`, and `cancel` manage them. Closing the REPL with jobs still running keeps them running in the same process while the terminal stays open; closing the terminal sends `SIGHUP` and stops them. For terminal-independent persistence, run under `nohup`/`systemd`/`supervisord` or start `vice daemon`.
+In a session, long-running work (downloads) runs as a background **job** — a detached child process whose id is its pid and whose state lives in a per-job record under the state directory. `jobs` lists them and `cancel` kills them, from any `vice` invocation. Jobs ignore `SIGHUP`, so they survive REPL exit and terminal close; cancelling or killing a download mid-flight leaves its `.partial` file for byte-offset resume on the next run.
 
 ---
 

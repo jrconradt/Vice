@@ -14,7 +14,7 @@ public sealed record JobState
 
     [JsonInclude]
     [JsonPropertyName("status")]
-    public JobStatus Status { get; init; } = JobStatus.Queued;
+    public JobStatus Status { get; init; } = JobStatus.Running;
 
     [JsonInclude]
     [JsonPropertyName("label")]
@@ -29,8 +29,8 @@ public sealed record JobState
     public long? ProgressTotal { get; init; }
 
     [JsonInclude]
-    [JsonPropertyName("attempt")]
-    public int Attempt { get; init; }
+    [JsonPropertyName("processStartTimeUtc")]
+    public DateTime? ProcessStartTimeUtc { get; init; }
 
     [JsonInclude]
     [JsonPropertyName("errorMessage")]

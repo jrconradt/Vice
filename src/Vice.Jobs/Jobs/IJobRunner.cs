@@ -5,6 +5,4 @@ public interface IJobRunner
     Task RunAsync(JobState job, IProgress<JobProgress> progress, CancellationToken ct);
 
     bool CanHandle(JobKind kind);
-
-    void OnEvicted(JobState job);
 }

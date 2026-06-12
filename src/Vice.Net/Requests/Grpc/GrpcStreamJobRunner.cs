@@ -74,12 +74,6 @@ internal sealed class GrpcStreamJobRunner : IJobRunner
 
     public bool CanHandle(JobKind kind) => kind == StreamKind;
 
-    public void OnEvicted(JobState job)
-    {
-        var outputPath = ResolveOutputPath(job);
-        SafeFile.TryDelete(outputPath + ".partial");
-    }
-
     private static string ResolveOutputPath(JobState job)
     {
         var configuredDestination = Option(job, DESTINATION_PATH_KEY);

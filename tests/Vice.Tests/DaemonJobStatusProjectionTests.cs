@@ -1,111 +1,128 @@
-using System.Linq;
+using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 using Vice.Contracts;
-using Vice.Core;
 using Vice.Display;
 using Vice.Host;
+using Vice.Host.Core;
 using Vice.Ipc;
 using Vice.Jobs;
+using Vice.Logging;
 using Vice.Session;
 using Xunit;
-using static Vice.Core.Dsl;
 
 namespace Vice.Tests;
 
 public class DaemonJobStatusProjectionTests
 {
-    private static readonly JobKind TestKind = JobKind.Custom("Download");
-
-    private sealed class BlockingRunner : IJobRunner
+    [Fact]
+    public async Task JobStatusRequest_ProjectsLedgerRecords_IntoJobStatusEntries()
     {
-        private readonly TaskCompletionSource _started =
-            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        var appName = "vice-test-daemon-" + Guid.NewGuid().ToString("N");
+        var root = JobLedger.RootFor(appName);
 
-        public Task Started => _started.Task;
+        var app = new ViceApp(appName,
+                              "1.0.0",
+                              description: null,
+                              console: new RecordingConsole(),
+                              status: NullStatusDisplay.Instance);
 
-        public bool CanHandle(JobKind kind) => kind == TestKind;
+        var state = new SessionState(appName, $"{appName}-pipe");
+        var sessionCtx = new SessionContext(new JobSpawner(appName, NullViceLogger.Instance, executablePath: "/bin/false"),
+                                            state,
+                                            null,
+                                            NullViceLogger.Instance,
+                                            isInteractive: false);
 
-        public void OnEvicted(JobState job)
+        var handler = new DaemonMessageHandler(
+            app,
+            sessionCtx,
+            NullConsoleWriter.Instance,
+            DaemonMessageHandler.DaemonControlVerbs);
+
+        try
         {
-        }
-
-        public async Task RunAsync(JobState job, IProgress<JobProgress> progress, CancellationToken ct)
-        {
-            _started.TrySetResult();
-            var forever = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            using (ct.Register(() => forever.TrySetResult()))
+            using var self = Process.GetCurrentProcess();
+            var record = new JobState
             {
-                await forever.Task.ConfigureAwait(false);
+                Id = Environment.ProcessId,
+                Kind = JobKind.Custom("Download"),
+                Label = "acme-source",
+                Status = JobStatus.Running,
+                ProgressCurrent = 50,
+                ProgressTotal = 100,
+                ProcessStartTimeUtc = self.StartTime.ToUniversalTime(),
+            };
+            await JobLedger.WriteAsync(root, record, CancellationToken.None);
+
+            var response = await handler.HandleAsync(new JobStatusRequest(), CancellationToken.None);
+            var jr = Assert.IsType<JobStatusResponse>(response);
+
+            var entry = Assert.Single(jr.Jobs);
+            Assert.Equal(Environment.ProcessId, entry.Id);
+            Assert.Equal("Download", entry.Kind);
+            Assert.Equal("acme-source", entry.Label);
+            Assert.Equal("Running", entry.Status);
+            Assert.Equal(0.5, entry.Progress);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
             }
         }
     }
 
     [Fact]
-    public async Task RunDaemonAsync_ProjectsSubmittedJob_IntoJobStatusEntry()
+    public async Task JobStatusRequest_DeadPidRunningRecord_ProjectsAsFailed()
     {
-        var pipeName = "vice-test-daemon-" + Guid.NewGuid().ToString("N");
-        var state = new SessionState("vice-test", pipeName);
+        var appName = "vice-test-daemon-" + Guid.NewGuid().ToString("N");
+        var root = JobLedger.RootFor(appName);
 
-        var runner = new BlockingRunner();
-        var app = new ViceApp("vice",
+        var app = new ViceApp(appName,
                               "1.0.0",
                               description: null,
                               console: new RecordingConsole(),
-                              status: NullStatusDisplay.Instance,
-                              jobRunners: new[] { (IJobRunner)runner });
+                              status: NullStatusDisplay.Instance);
 
-        app.Register(verb("start"), "start a blocking job", async (ctx, ct) =>
+        var state = new SessionState(appName, $"{appName}-pipe");
+        var sessionCtx = new SessionContext(new JobSpawner(appName, NullViceLogger.Instance, executablePath: "/bin/false"),
+                                            state,
+                                            null,
+                                            NullViceLogger.Instance,
+                                            isInteractive: false);
+
+        var handler = new DaemonMessageHandler(
+            app,
+            sessionCtx,
+            NullConsoleWriter.Instance,
+            DaemonMessageHandler.DaemonControlVerbs);
+
+        try
         {
-            var descriptor = new JobDescriptor(
-                TestKind,
-                "acme-source",
-                new Dictionary<string, string?>(StringComparer.Ordinal));
-            var id = await ctx.Session!.Jobs.SubmitAsync(descriptor, ct);
-            ctx.Console.Write(id.ToString());
-            return 0;
-        });
-
-        using var daemonCts = new CancellationTokenSource();
-        var daemonTask = app.RunDaemonAsync(state, daemonCts.Token);
-
-        await using var client = await WaitForClient(pipeName, TimeSpan.FromSeconds(3));
-        Assert.NotNull(client);
-
-        var submitResp = await client!.SendAsync(new CommandMessage { CommandLine = "start" }, CancellationToken.None);
-        var submitCr = Assert.IsType<CommandResponse>(submitResp);
-        Assert.Equal(0, submitCr.ExitCode);
-        var submittedId = int.Parse(submitCr.Output);
-
-        await runner.Started.WaitAsync(TimeSpan.FromSeconds(5));
-
-        var statusResp = await client.SendAsync(new JobStatusRequest(), CancellationToken.None);
-        var jr = Assert.IsType<JobStatusResponse>(statusResp);
-
-        var entry = Assert.Single(jr.Jobs);
-        Assert.Equal(submittedId, entry.Id);
-        Assert.Equal("Download", entry.Kind);
-        Assert.Equal("acme-source", entry.Label);
-        Assert.Contains(entry.Status, new[] { "Queued", "Running" });
-
-        daemonCts.Cancel();
-        await daemonTask.WaitAsync(TimeSpan.FromSeconds(5));
-    }
-
-    private static async Task<PipeClient?> WaitForClient(string pipeName, TimeSpan budget)
-    {
-        var sw = System.Diagnostics.Stopwatch.StartNew();
-        while (sw.Elapsed < budget)
-        {
-            var c = await PipeClient.TryConnectAsync(pipeName, timeoutMs: 200);
-            if (c is not null)
+            var record = new JobState
             {
-                return c;
-            }
+                Id = int.MaxValue - 17,
+                Kind = JobKind.Custom("Download"),
+                Label = "acme-source",
+                Status = JobStatus.Running,
+                ProcessStartTimeUtc = DateTime.UtcNow,
+            };
+            await JobLedger.WriteAsync(root, record, CancellationToken.None);
 
-            await Task.Delay(50);
+            var response = await handler.HandleAsync(new JobStatusRequest(), CancellationToken.None);
+            var jr = Assert.IsType<JobStatusResponse>(response);
+
+            var entry = Assert.Single(jr.Jobs);
+            Assert.Equal("Failed", entry.Status);
         }
-
-        return null;
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
     }
 }

@@ -88,7 +88,7 @@ internal static class BuiltinCommands
 
         registry.Register(
             Verbs.Daemon(),
-            "Run as a background daemon to keep async jobs alive.",
+            "Run as a background daemon serving the IPC control channel.",
             async (ctx, ct) => await app.RunDaemonAsync(ct).ConfigureAwait(false),
             isBuiltin: true);
 
@@ -122,14 +122,11 @@ internal static class BuiltinCommands
                         return ViceExitCode.FAILURE;
                     }
 
-                    var poolDegraded = health.WorkerPoolDegraded || health.LiveWorkers < health.ConfiguredWorkers;
-                    var healthy = health.Listening && !health.AcceptLoopCrashed
-                        && !poolDegraded;
+                    var healthy = health.Listening && !health.AcceptLoopCrashed;
                     ctx.Console.WriteLine($"{app.Name} daemon v{health.Version} — {(healthy ? "healthy" : "unhealthy")}");
                     ctx.Console.WriteLine($"  listening: {(health.Listening ? "yes" : "no")}");
                     ctx.Console.WriteLine($"  accept loop: {(health.AcceptLoopCrashed ? $"crashed ({health.FaultSummary ?? "unknown fault"})" : "running")}");
                     ctx.Console.WriteLine($"  uptime: {health.UptimeSeconds:0.0}s");
-                    ctx.Console.WriteLine($"  workers: {health.LiveWorkers}/{health.ConfiguredWorkers}{(health.WorkerPoolDegraded ? " (degraded)" : "")}");
                     ctx.Console.WriteLine($"  jobs: {health.JobCount}");
 
                     var jobsResponse = await client.SendAsync(new JobStatusRequest(), ct).ConfigureAwait(false);

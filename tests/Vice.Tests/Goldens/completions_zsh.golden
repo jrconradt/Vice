@@ -55,14 +55,14 @@ _vice() {
             "root:gamma") state="root__gamma"; ;;
             "root:help") state="root__help"; skip=1; ;;
             "root:history") state="root__history"; ;;
+            "root:job") state="root__job"; ;;
             "root:jobs") state="root__jobs"; ;;
             "root:list") state="root__list"; ;;
             "root:manpage") state="root__manpage"; ;;
-            "root:pause") state="root__pause"; skip=1; ;;
-            "root:resume") state="root__resume"; skip=1; ;;
             "root:status") state="root__status"; ;;
             "root:version") state="root__version"; ;;
             "root__beta:things") state="root__beta__things"; skip=1; ;;
+            "root__job:run") state="root__job__run"; skip=1; ;;
             "root__list:commands") state="root__list__commands"; ;;
             *) state="unknown" ;;
         esac
@@ -84,17 +84,16 @@ _vice() {
                 'cancel:Cancel a background job'
                 'clear:Clear the screen'
                 'completions:Emit a shell completion script (bash | zsh) to stdout.'
-                'daemon:Run as a background daemon to keep async jobs alive.'
+                'daemon:Run as a background daemon serving the IPC control channel.'
                 'exit:Exit the session'
                 'quit:Exit the session'
                 'gamma:gamma description'
                 'help:Show help'
                 'history:Show command history'
+                'job:Run a JSON job descriptor in the foreground; background submissions spawn this command detached.'
                 'jobs:List background jobs'
                 'list:List all commands'
                 'manpage:Emit a groff(7) man page for this tool to stdout.'
-                'pause:Pause a background job'
-                'resume:Resume a paused job'
                 'status:Query a running daemon for job status (if any).'
                 'version:Show version'
             )
@@ -104,6 +103,13 @@ _vice() {
             local -a candidates
             candidates=(
                 'things:beta description'
+            )
+            _describe -t subcommand 'subcommand' candidates
+            ;;
+        "root__job")
+            local -a candidates
+            candidates=(
+                'run:Run a JSON job descriptor in the foreground; background submissions spawn this command detached.'
             )
             _describe -t subcommand 'subcommand' candidates
             ;;

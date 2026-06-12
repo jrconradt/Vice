@@ -14,7 +14,7 @@ namespace Vice.Host.Core;
 internal sealed class DaemonMessageHandler
 {
     private readonly ViceApp _app;
-    private readonly IJobManager _jobManager;
+    private readonly string _jobsRoot;
     private readonly SessionContext _sessionCtx;
     private readonly IConsoleWriter _nullWriter;
     private readonly IViceLogger _logger;
@@ -27,8 +27,6 @@ internal sealed class DaemonMessageHandler
         {
             "jobs",
             "status",
-            "pause",
-            "resume",
             "cancel",
             "history",
             "clear",
@@ -36,13 +34,12 @@ internal sealed class DaemonMessageHandler
 
     public DaemonMessageHandler(
         ViceApp app,
-        IJobManager jobManager,
         SessionContext sessionCtx,
         IConsoleWriter nullWriter,
         IReadOnlySet<string>? verbAllowlist = null)
     {
         _app = app;
-        _jobManager = jobManager;
+        _jobsRoot = JobLedger.RootFor(app.Name);
         _sessionCtx = sessionCtx;
         _nullWriter = nullWriter;
         _logger = app.Logger;
@@ -89,7 +86,7 @@ internal sealed class DaemonMessageHandler
 
         if (message is JobStatusRequest)
         {
-            var jobs = _jobManager.GetJobs();
+            var jobs = await JobLedger.ReadAllAsync(_jobsRoot, _logger, ct).ConfigureAwait(false);
             var statuses = jobs.Select(j => new JobStatusEntry(
                 j.Id,
                 j.Kind.ToString(),
@@ -101,10 +98,10 @@ internal sealed class DaemonMessageHandler
 
         if (message is HealthRequest)
         {
-            var poolHealth = _jobManager.GetWorkerPoolHealth();
             var liveness = _livenessProbe?.Invoke() ?? new DaemonLiveness(true,
                                                                           false,
                                                                           null);
+            var jobs = await JobLedger.ReadAllAsync(_jobsRoot, _logger, ct).ConfigureAwait(false);
             return new HealthResponse
             {
                 Version = _app.Version,
@@ -112,10 +109,7 @@ internal sealed class DaemonMessageHandler
                 AcceptLoopCrashed = liveness.AcceptLoopCrashed,
                 FaultSummary = liveness.FaultSummary,
                 UptimeSeconds = (DateTime.UtcNow - _startedUtc).TotalSeconds,
-                ConfiguredWorkers = poolHealth.ConfiguredConcurrency,
-                LiveWorkers = poolHealth.LiveWorkerCount,
-                WorkerPoolDegraded = poolHealth.IsDegraded,
-                JobCount = _jobManager.GetJobs().Count
+                JobCount = jobs.Count
             };
         }
 

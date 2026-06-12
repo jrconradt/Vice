@@ -2,7 +2,7 @@ namespace Vice.Contracts;
 
 public sealed class SessionState
 {
-    public const int ProtocolVersion = 1;
+    public const int ProtocolVersion = 2;
 
     public string AppName { get; }
     public string PipeName { get; }
