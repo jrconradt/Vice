@@ -4,23 +4,21 @@ using Vice.Contracts;
 using Vice.Core;
 using Vice.Execution;
 using Vice.Foundation.Execution;
-using Vice.Jobs;
 using Vice.Lexicon;
 using Vice.Logging;
 using Vice.Net.Requests.Http;
-using Vice.Streaming;
 
 namespace Vice.Research;
 
 [ViceCommandPack]
 public static class ResearchCommands
 {
-    private static readonly ResearchSourceRegistry DefaultSources = new();
-
     private static IResearchSource ResolveSource(ICommandContext ctx,
                                                  string name)
     {
-        var registry = ctx.Session?.GetService<ResearchSourceRegistry>() ?? DefaultSources;
+        var registry = ctx.Session?.GetService<ResearchSourceRegistry>()
+            ?? throw new InvalidOperationException(
+                $"Research commands require a {nameof(ResearchSourceRegistry)} session service; register one on the host.");
         return registry.Resolve(name);
     }
 
