@@ -4,14 +4,12 @@ using Xunit;
 
 namespace Vice.Net.Tests;
 
-public sealed class ResearchSourceRegistryTests
+public sealed class ResearchSourceResolutionTests
 {
     [Fact]
     public void Resolve_ByPrimaryName_ReturnsSource()
     {
-        var registry = new ResearchSourceRegistry();
-
-        var source = registry.Resolve("arxiv");
+        var source = ResearchSources.Resolve("arxiv");
 
         Assert.Equal("arxiv", source.Name);
     }
@@ -19,10 +17,8 @@ public sealed class ResearchSourceRegistryTests
     [Fact]
     public void Resolve_ByAlias_ReturnsSameSource()
     {
-        var registry = new ResearchSourceRegistry();
-
-        var byName = registry.Resolve("pubmed");
-        var byAlias = registry.Resolve("pmc");
+        var byName = ResearchSources.Resolve("pubmed");
+        var byAlias = ResearchSources.Resolve("pmc");
 
         Assert.Same(byName, byAlias);
     }
@@ -30,9 +26,7 @@ public sealed class ResearchSourceRegistryTests
     [Fact]
     public void Resolve_IsCaseInsensitive()
     {
-        var registry = new ResearchSourceRegistry();
-
-        var source = registry.Resolve("ArXiV");
+        var source = ResearchSources.Resolve("ArXiV");
 
         Assert.Equal("arxiv", source.Name);
     }
@@ -40,9 +34,7 @@ public sealed class ResearchSourceRegistryTests
     [Fact]
     public void Resolve_UnknownSource_ThrowsBadArgument()
     {
-        var registry = new ResearchSourceRegistry();
-
-        var ex = Assert.Throws<BadArgument>(() => registry.Resolve("nonexistent"));
+        var ex = Assert.Throws<BadArgument>(() => ResearchSources.Resolve("nonexistent"));
         Assert.Contains("Unknown research source", ex.Detail);
         Assert.Contains("arxiv", ex.Detail);
     }

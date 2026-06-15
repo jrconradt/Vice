@@ -107,16 +107,12 @@ public sealed class ResearchHttpIntegrationTests : IAsyncLifetime, IDisposable
     }
 
     [Fact]
-    public async Task Registry_Resolves_RegisteredSource_AndRoundTrips_MetadataThenDownload()
+    public async Task Source_RoundTrips_MetadataThenDownload()
     {
         var source = new LoopbackResearchSource(_server!.BaseUrl);
-        var registry = new ResearchSourceRegistry(new IResearchSource[] { source });
-
-        var resolved = registry.Resolve("loopback");
-        Assert.Same(source, resolved);
 
         using var http = new HttpClient();
-        var target = await resolved.ResolveDownloadAsync(http, "doc-7", null, CancellationToken.None, NullViceLogger.Instance);
+        var target = await source.ResolveDownloadAsync(http, "doc-7", null, CancellationToken.None, NullViceLogger.Instance);
 
         Assert.Equal("txt", target.Extension);
         Assert.Equal($"{_server.BaseUrl}blob/doc-7.txt", target.Uri.AbsoluteUri);
@@ -135,18 +131,6 @@ public sealed class ResearchHttpIntegrationTests : IAsyncLifetime, IDisposable
     }
 
     [Fact]
-    public void Registry_ResolveByAlias_ReturnsSameSource()
-    {
-        var source = new LoopbackResearchSource(_server!.BaseUrl);
-        var registry = new ResearchSourceRegistry(new IResearchSource[] { source });
-
-        var byName = registry.Resolve("loopback");
-        var byAlias = registry.Resolve("lb");
-
-        Assert.Same(byName, byAlias);
-    }
-
-    [Fact]
     public async Task Downloader_FetchAsync_ParsesMetadataFromLiveServer()
     {
         var source = new LoopbackResearchSource(_server!.BaseUrl);
@@ -162,11 +146,8 @@ public sealed class ResearchHttpIntegrationTests : IAsyncLifetime, IDisposable
     [Fact]
     public void JobRunner_CanHandle_OnlyDownloadKind()
     {
-        var registry = new ResearchSourceRegistry(new IResearchSource[]
-                                                  {
-                                                      new LoopbackResearchSource(_server!.BaseUrl),
-                                                  });
-        var runner = new ResearchDownloadJobRunner(registry, () => new HttpClient());
+        var source = new LoopbackResearchSource(_server!.BaseUrl);
+        var runner = new ResearchDownloadJobRunner(_ => source, () => new HttpClient());
 
         Assert.True(runner.CanHandle(ResearchDownloadJobRunner.DownloadKind));
         Assert.False(runner.CanHandle(JobKind.Custom("GrpcStream")));
@@ -175,11 +156,8 @@ public sealed class ResearchHttpIntegrationTests : IAsyncLifetime, IDisposable
     [Fact]
     public async Task JobRunner_HappyPath_ResolvesAndWritesDestination()
     {
-        var registry = new ResearchSourceRegistry(new IResearchSource[]
-                                                  {
-                                                      new LoopbackResearchSource(_server!.BaseUrl),
-                                                  });
-        var runner = new ResearchDownloadJobRunner(registry, () => new HttpClient());
+        var source = new LoopbackResearchSource(_server!.BaseUrl);
+        var runner = new ResearchDownloadJobRunner(_ => source, () => new HttpClient());
         var destination = Path.Combine(_tempDir, "job-output.txt");
 
         var job = DownloadJob(11,
@@ -197,11 +175,8 @@ public sealed class ResearchHttpIntegrationTests : IAsyncLifetime, IDisposable
     [Fact]
     public async Task JobRunner_FailedDownload_DoesNotPromotePartial()
     {
-        var registry = new ResearchSourceRegistry(new IResearchSource[]
-                                                  {
-                                                      new LoopbackResearchSource(_server!.BaseUrl, downloadHostOverride: "no-such-host.invalid"),
-                                                  });
-        var runner = new ResearchDownloadJobRunner(registry, () => new HttpClient());
+        var source = new LoopbackResearchSource(_server!.BaseUrl, downloadHostOverride: "no-such-host.invalid");
+        var runner = new ResearchDownloadJobRunner(_ => source, () => new HttpClient());
         var destination = Path.Combine(_tempDir, "job-fail.txt");
 
         var job = DownloadJob(12,
@@ -220,8 +195,7 @@ public sealed class ResearchHttpIntegrationTests : IAsyncLifetime, IDisposable
     public async Task JobRunner_PrefersCarriedFormat_OverExtensionDerived()
     {
         var recorder = new FormatRecordingResearchSource(_server!.BaseUrl);
-        var registry = new ResearchSourceRegistry(new IResearchSource[] { recorder });
-        var runner = new ResearchDownloadJobRunner(registry, () => new HttpClient());
+        var runner = new ResearchDownloadJobRunner(_ => recorder, () => new HttpClient());
         var destination = Path.Combine(_tempDir, "carried.xml");
 
         var job = DownloadJob(21,
@@ -239,8 +213,7 @@ public sealed class ResearchHttpIntegrationTests : IAsyncLifetime, IDisposable
     public async Task JobRunner_NoCarriedFormat_FallsBackToExtension()
     {
         var recorder = new FormatRecordingResearchSource(_server!.BaseUrl);
-        var registry = new ResearchSourceRegistry(new IResearchSource[] { recorder });
-        var runner = new ResearchDownloadJobRunner(registry, () => new HttpClient());
+        var runner = new ResearchDownloadJobRunner(_ => recorder, () => new HttpClient());
         var destination = Path.Combine(_tempDir, "fallback.xml");
 
         var job = DownloadJob(22,

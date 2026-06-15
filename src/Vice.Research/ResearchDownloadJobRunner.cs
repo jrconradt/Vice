@@ -14,15 +14,15 @@ public sealed class ResearchDownloadJobRunner : IJobRunner
     public const string FORMAT_KEY = "format";
     public const string EXTENSION_KEY = "extension";
 
-    private readonly ResearchSourceRegistry _registry;
+    private readonly Func<string, IResearchSource> _resolveSource;
     private readonly Lazy<HttpClient> _http;
     private readonly IViceLogger _logger;
 
-    public ResearchDownloadJobRunner(ResearchSourceRegistry registry,
+    public ResearchDownloadJobRunner(Func<string, IResearchSource> resolveSource,
                                      Func<HttpClient> httpFactory,
                                      IViceLogger? logger = null)
     {
-        _registry = registry ?? throw new ArgumentNullException(nameof(registry));
+        _resolveSource = resolveSource ?? throw new ArgumentNullException(nameof(resolveSource));
         ArgumentNullException.ThrowIfNull(httpFactory);
         _http = new Lazy<HttpClient>(httpFactory, LazyThreadSafetyMode.ExecutionAndPublication);
         _logger = logger ?? NullViceLogger.Instance;
@@ -68,7 +68,7 @@ public sealed class ResearchDownloadJobRunner : IJobRunner
         var destinationPath = Option(job, DESTINATION_PATH_KEY);
         var carriedFormat = NullableOption(job, FORMAT_KEY);
 
-        var source = _registry.Resolve(sourceName);
+        var source = _resolveSource(sourceName);
         var format = carriedFormat ?? ExtensionToFormat(Path.GetExtension(destinationPath));
 
         var http = _http.Value;
@@ -160,15 +160,10 @@ public sealed class ResearchDownloadJobRunner : IJobRunner
 
 public static class ResearchJobFactory
 {
-    private static readonly ResearchSourceRegistry DefaultRegistry = new();
-
-    [Vice.Composition.ViceSessionService]
-    public static ResearchSourceRegistry Sources() => DefaultRegistry;
-
     [Vice.Composition.ViceJobRunner]
     public static ResearchDownloadJobRunner ResearchDownload(ResearchHttpService http)
     {
-        return new ResearchDownloadJobRunner(DefaultRegistry,
+        return new ResearchDownloadJobRunner(ResearchSources.Resolve,
                                              () => http.Client);
     }
 }

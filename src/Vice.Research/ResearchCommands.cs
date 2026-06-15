@@ -13,15 +13,6 @@ namespace Vice.Research;
 [ViceCommandPack]
 public static class ResearchCommands
 {
-    private static IResearchSource ResolveSource(ICommandContext ctx,
-                                                 string name)
-    {
-        var registry = ctx.Session?.GetService<ResearchSourceRegistry>()
-            ?? throw new InvalidOperationException(
-                $"Research commands require a {nameof(ResearchSourceRegistry)} session service; register one on the host.");
-        return registry.Resolve(name);
-    }
-
     private static readonly ConcurrentDictionary<string, Lazy<Task<IReadOnlyList<SearchHit>>>> InFlightSearches =
         new(StringComparer.Ordinal);
 
@@ -183,7 +174,7 @@ public static class ResearchCommands
     {
         return RunGuarded(ctx, ct, async () =>
         {
-            var source = ResolveSource(ctx, Require(ctx, "source"));
+            var source = ResearchSources.Resolve(Require(ctx, "source"));
             var id = Require(ctx, "id");
             using var cts = LinkTimeout(ctx, ct);
 
@@ -209,7 +200,7 @@ public static class ResearchCommands
     {
         return RunGuarded(ctx, ct, async () =>
         {
-            var source = ResolveSource(ctx, Require(ctx, "source"));
+            var source = ResearchSources.Resolve(Require(ctx, "source"));
             var id = Require(ctx, "id");
             var format = ResearchOptions.GetFormat(ctx);
             var timeout = ResearchOptions.GetTimeout(ctx);
@@ -237,7 +228,7 @@ public static class ResearchCommands
     {
         return RunGuarded(ctx, ct, async () =>
         {
-            var source = ResolveSource(ctx, Require(ctx, "source"));
+            var source = ResearchSources.Resolve(Require(ctx, "source"));
             if (!source.Searchable)
             {
                 throw new BadArgument($"Source '{source.Name}' is not searchable and cannot be archived; use 'fetch' or 'download' with an id.");
@@ -411,7 +402,7 @@ public static class ResearchCommands
 
     private static (IResearchSource source, string query) ResolveSearch(ICommandContext ctx)
     {
-        var source = ResolveSource(ctx, Require(ctx, "source"));
+        var source = ResearchSources.Resolve(Require(ctx, "source"));
         var query = Require(ctx, "query");
         return (source, query);
     }
