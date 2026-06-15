@@ -10,16 +10,6 @@ public static class SafeOutboundConnection
 
     private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(10);
 
-    private static SafeNetPolicy? _override;
-
-    public static SafeNetPolicy Policy
-    {
-        get => Volatile.Read(ref _override) ?? DefaultPolicy.Value;
-        set => Volatile.Write(ref _override, value);
-    }
-
-    public static void ResetPolicy() => Volatile.Write(ref _override, null);
-
     public static ValueTask<Stream> ConnectAsync(SocketsHttpConnectionContext context, CancellationToken ct)
     {
         return ConnectAsync(context, ct, null);
@@ -51,11 +41,12 @@ public static class SafeOutboundConnection
     public static async ValueTask<IPAddress[]> CheckEndpointAsync(
         string host,
         CancellationToken ct,
-        Vice.Logging.IViceLogger? logger = null)
+        Vice.Logging.IViceLogger? logger = null,
+        SafeNetPolicy? policy = null)
     {
         var sink = logger ?? Vice.Logging.NullViceLogger.Instance;
-        var policy = Policy;
-        var hostDecision = policy.EvaluateHost(host);
+        var effectivePolicy = policy ?? DefaultPolicy.Value;
+        var hostDecision = effectivePolicy.EvaluateHost(host);
         if (hostDecision == SafeNetDecision.Refuse)
         {
             sink.Log(
@@ -73,7 +64,7 @@ public static class SafeOutboundConnection
 
         foreach (var addr in addresses)
         {
-            var ipDecision = policy.EvaluateAddress(addr);
+            var ipDecision = effectivePolicy.EvaluateAddress(addr);
             if (ipDecision == SafeNetDecision.Refuse)
             {
                 sink.Log(
