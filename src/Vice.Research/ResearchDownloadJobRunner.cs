@@ -99,13 +99,13 @@ public sealed class ResearchDownloadJobRunner : IJobRunner
 
         try
         {
-            var written = await ResearchDownloader.DownloadToFileAsync(http,
-                                                                       target.Uri,
-                                                                       destinationPath,
-                                                                       job.ProgressCurrent,
-                                                                       reporter,
-                                                                       _logger,
-                                                                       ct).ConfigureAwait(false);
+            var written = await ResumableHttpDownload.ToFileAsync(http,
+                                                                  target.Uri,
+                                                                  destinationPath,
+                                                                  job.ProgressCurrent,
+                                                                  reporter,
+                                                                  _logger,
+                                                                  ct).ConfigureAwait(false);
             _logger.Log(ViceLogLevel.Debug,
                         $"research download completed {sourceName}/{resourceId} from {target.Uri}: wrote {written} bytes to {destinationPath}");
         }

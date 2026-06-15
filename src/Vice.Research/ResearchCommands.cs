@@ -217,7 +217,7 @@ public static class ResearchCommands
 
             var http = HttpFor(ctx);
             var target = await source.ResolveDownloadAsync(http, id, format, cts.Token, ctx.Logger).ConfigureAwait(false);
-            var destination = ResearchDownloader.BuildDestinationPath(ctx["path"], source.Name, id, target.Extension);
+            var destination = ResearchDownloadPaths.BuildDestinationPath(ctx["path"], source.Name, id, target.Extension);
 
             if (TrySubmitJob(ctx, source.Name, id, destination, target.Extension, format, timeout, ct, out var jobTask))
             {
@@ -226,7 +226,7 @@ public static class ResearchCommands
             }
 
             var reporter = ctx.Quiet ? null : ProgressLine(ctx, $"{source.Name}/{id}");
-            await ResearchDownloader.DownloadToFileAsync(http, target.Uri, destination, reporter, ctx.Logger, cts.Token).ConfigureAwait(false);
+            await ResumableHttpDownload.ToFileAsync(http, target.Uri, destination, reporter, ctx.Logger, cts.Token).ConfigureAwait(false);
             ctx.Console.WriteLine($"Saved {source.Name}/{id} -> {destination}.");
             return ViceExitCode.SUCCESS;
         });
@@ -263,7 +263,7 @@ public static class ResearchCommands
                 try
                 {
                     var target = await source.ResolveDownloadAsync(HttpFor(ctx), hit.Id, format, cts.Token, ctx.Logger).ConfigureAwait(false);
-                    var destination = ResearchDownloader.BuildDestinationPath(directory, source.Name, hit.Id, target.Extension);
+                    var destination = ResearchDownloadPaths.BuildDestinationPath(directory, source.Name, hit.Id, target.Extension);
 
                     if (TrySubmitJob(ctx, source.Name, hit.Id, destination, target.Extension, format, timeout, ct, out var jobTask))
                     {
@@ -279,7 +279,7 @@ public static class ResearchCommands
                     }
 
                     var reporter = ctx.Quiet ? null : ProgressLine(ctx, $"{source.Name}/{hit.Id}");
-                    await ResearchDownloader.DownloadToFileAsync(HttpFor(ctx), target.Uri, destination, reporter, ctx.Logger, cts.Token).ConfigureAwait(false);
+                    await ResumableHttpDownload.ToFileAsync(HttpFor(ctx), target.Uri, destination, reporter, ctx.Logger, cts.Token).ConfigureAwait(false);
                     ctx.Console.WriteLine($"Saved {source.Name}/{hit.Id} -> {destination}.");
                 }
                 catch (OperationCanceledException) when (!ct.IsCancellationRequested)
@@ -322,10 +322,10 @@ public static class ResearchCommands
             using var cts = LinkTimeout(ctx, ct);
 
             var fileName = RawDownloadFileName(uri);
-            var destination = ResearchDownloader.BuildUrlDestinationPath(ctx["path"], fileName);
+            var destination = ResearchDownloadPaths.BuildUrlDestinationPath(ctx["path"], fileName);
 
             var reporter = ctx.Quiet ? null : ProgressLine(ctx, uri.Host);
-            await ResearchDownloader.DownloadToFileAsync(HttpFor(ctx), uri, destination, reporter, ctx.Logger, cts.Token).ConfigureAwait(false);
+            await ResumableHttpDownload.ToFileAsync(HttpFor(ctx), uri, destination, reporter, ctx.Logger, cts.Token).ConfigureAwait(false);
             ctx.Console.WriteLine($"Saved {uri} -> {destination}.");
             return ViceExitCode.SUCCESS;
         });

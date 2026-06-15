@@ -48,12 +48,12 @@ public sealed class ResearchSourceRegistryTests
     }
 }
 
-public sealed class ResearchDownloaderPathTests
+public sealed class ResearchDownloadPathsTests
 {
     [Fact]
     public void BuildDestinationPath_NullToPath_UsesCurrentDirectoryAndSanitizesId()
     {
-        var path = ResearchDownloader.BuildDestinationPath(null, "arxiv", "10.1000/abc:def", "pdf");
+        var path = ResearchDownloadPaths.BuildDestinationPath(null, "arxiv", "10.1000/abc:def", "pdf");
 
         Assert.Equal(Path.Combine(Environment.CurrentDirectory, "10.1000_abc_def.pdf"), path);
     }
@@ -61,7 +61,7 @@ public sealed class ResearchDownloaderPathTests
     [Fact]
     public void BuildDestinationPath_WhitespaceToPath_UsesCurrentDirectory()
     {
-        var path = ResearchDownloader.BuildDestinationPath("   ", "arxiv", "id1", "txt");
+        var path = ResearchDownloadPaths.BuildDestinationPath("   ", "arxiv", "id1", "txt");
 
         Assert.Equal(Path.Combine(Environment.CurrentDirectory, "id1.txt"), path);
     }
@@ -71,7 +71,7 @@ public sealed class ResearchDownloaderPathTests
     {
         using var dir = new TempDir();
 
-        var path = ResearchDownloader.BuildDestinationPath(dir.Path, "arxiv", "id2", "xml");
+        var path = ResearchDownloadPaths.BuildDestinationPath(dir.Path, "arxiv", "id2", "xml");
 
         Assert.Equal(Path.Combine(Path.GetFullPath(dir.Path), "id2.xml"), path);
     }
@@ -81,7 +81,7 @@ public sealed class ResearchDownloaderPathTests
     {
         var toPath = "/tmp/does-not-exist-dir" + Path.DirectorySeparatorChar;
 
-        var path = ResearchDownloader.BuildDestinationPath(toPath, "arxiv", "id3", "fasta");
+        var path = ResearchDownloadPaths.BuildDestinationPath(toPath, "arxiv", "id3", "fasta");
 
         Assert.Equal(Path.Combine(Path.GetFullPath(toPath), "id3.fasta"), path);
     }
@@ -91,7 +91,7 @@ public sealed class ResearchDownloaderPathTests
     {
         var toPath = Path.Combine(Path.GetTempPath(), $"vice-explicit-{Guid.NewGuid():N}.pdb");
 
-        var path = ResearchDownloader.BuildDestinationPath(toPath, "alphafold", "id4", "pdb");
+        var path = ResearchDownloadPaths.BuildDestinationPath(toPath, "alphafold", "id4", "pdb");
 
         Assert.Equal(Path.GetFullPath(toPath), path);
     }
@@ -99,7 +99,7 @@ public sealed class ResearchDownloaderPathTests
     [Fact]
     public void BuildUrlDestinationPath_NullToPath_UsesCurrentDirectoryWithSanitizedName()
     {
-        var path = ResearchDownloader.BuildUrlDestinationPath(null, "weird name?.bin");
+        var path = ResearchDownloadPaths.BuildUrlDestinationPath(null, "weird name?.bin");
 
         Assert.Equal(Path.Combine(Environment.CurrentDirectory, "weird_name_.bin"), path);
     }

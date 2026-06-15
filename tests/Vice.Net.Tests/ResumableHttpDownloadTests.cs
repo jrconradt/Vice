@@ -1,18 +1,18 @@
 using System.Net;
 using System.Text;
 using Vice.Logging;
-using Vice.Research;
+using Vice.Net.Requests.Http;
 using Xunit;
 
 namespace Vice.Net.Tests;
 
-public sealed class ResearchDownloadResumeTests : IDisposable
+public sealed class ResumableHttpDownloadTests : IDisposable
 {
     private const string ETAG = "\"resume-v1\"";
 
     private readonly string _tempDir;
 
-    public ResearchDownloadResumeTests()
+    public ResumableHttpDownloadTests()
     {
         _tempDir = Path.Combine(Path.GetTempPath(), $"vice-research-resume-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_tempDir);
@@ -48,7 +48,7 @@ public sealed class ResearchDownloadResumeTests : IDisposable
     }
 
     [Fact]
-    public async Task DownloadToFileAsync_TransientMidBodyDrop_KeepsPartial_ThenCompletes()
+    public async Task ToFileAsync_TransientMidBodyDrop_KeepsPartial_ThenCompletes()
     {
         var payload = Encoding.UTF8.GetBytes("the quick brown fox jumps over the lazy dog 0123456789");
         var prefixLength = 20;
@@ -105,7 +105,7 @@ public sealed class ResearchDownloadResumeTests : IDisposable
         });
 
         using var http = new HttpClient();
-        var written = await ResearchDownloader.DownloadToFileAsync(http,
+        var written = await ResumableHttpDownload.ToFileAsync(http,
                                                                   new Uri(server.BaseUrl + "x"),
                                                                   destination,
                                                                   progress: null,
@@ -121,7 +121,7 @@ public sealed class ResearchDownloadResumeTests : IDisposable
     }
 
     [Fact]
-    public async Task DownloadToFileAsync_RecordedOffset_SendsRangeFromPartialLength_AndCompletes()
+    public async Task ToFileAsync_RecordedOffset_SendsRangeFromPartialLength_AndCompletes()
     {
         var payload = Encoding.UTF8.GetBytes("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ");
         var prefixLength = 10;
@@ -163,7 +163,7 @@ public sealed class ResearchDownloadResumeTests : IDisposable
         });
 
         using var http = new HttpClient();
-        var written = await ResearchDownloader.DownloadToFileAsync(http,
+        var written = await ResumableHttpDownload.ToFileAsync(http,
                                                                   new Uri(server.BaseUrl + "x"),
                                                                   destination,
                                                                   recordedOffset: prefixLength,
@@ -179,7 +179,7 @@ public sealed class ResearchDownloadResumeTests : IDisposable
     }
 
     [Fact]
-    public async Task DownloadToFileAsync_FreshCall_FirstAttemptFromZero_RetryResumesViaRange()
+    public async Task ToFileAsync_FreshCall_FirstAttemptFromZero_RetryResumesViaRange()
     {
         var payload = Encoding.UTF8.GetBytes("abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJ");
         var prefixLength = 16;
@@ -234,7 +234,7 @@ public sealed class ResearchDownloadResumeTests : IDisposable
         });
 
         using var http = new HttpClient();
-        var written = await ResearchDownloader.DownloadToFileAsync(http,
+        var written = await ResumableHttpDownload.ToFileAsync(http,
                                                                   new Uri(server.BaseUrl + "x"),
                                                                   destination,
                                                                   progress: null,

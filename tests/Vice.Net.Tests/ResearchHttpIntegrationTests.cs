@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using Vice.Jobs;
 using Vice.Logging;
+using Vice.Net.Requests.Http;
 using Vice.Research;
 using Xunit;
 
@@ -121,7 +122,7 @@ public sealed class ResearchHttpIntegrationTests : IAsyncLifetime, IDisposable
         Assert.Equal($"{_server.BaseUrl}blob/doc-7.txt", target.Uri.AbsoluteUri);
 
         var destination = Path.Combine(_tempDir, "doc-7.txt");
-        var written = await ResearchDownloader.DownloadToFileAsync(http,
+        var written = await ResumableHttpDownload.ToFileAsync(http,
                                                                   target.Uri,
                                                                   destination,
                                                                   progress: null,
@@ -208,9 +209,8 @@ public sealed class ResearchHttpIntegrationTests : IAsyncLifetime, IDisposable
                               "doc-1",
                               destination);
 
-        var exhausted = await Assert.ThrowsAsync<NonRetryableJobException>(() =>
+        await Assert.ThrowsAsync<HttpRequestException>(() =>
             runner.RunAsync(job, new Progress<JobProgress>(_ => { }), CancellationToken.None));
-        Assert.IsType<HttpRequestException>(exhausted.InnerException);
 
         Assert.False(File.Exists(destination));
         Assert.False(File.Exists($"{destination}.partial"));
