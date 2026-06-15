@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using Vice.Composition;
 using Vice.Contracts;
 using Vice.Core;
@@ -13,9 +12,6 @@ namespace Vice.Research;
 [ViceCommandPack]
 public static class ResearchCommands
 {
-    private static readonly ConcurrentDictionary<string, Lazy<Task<IReadOnlyList<SearchHit>>>> InFlightSearches =
-        new(StringComparer.Ordinal);
-
     private static HttpClient HttpFor(ICommandContext ctx)
     {
         var service = ctx.Session?.GetService<ResearchHttpService>()
@@ -360,32 +356,7 @@ public static class ResearchCommands
         var http = HttpFor(ctx);
         var paging = ResearchOptions.GetPaging(ctx);
         var timeout = ResearchOptions.GetTimeout(ctx);
-        var inflightKey = $"{source.Name}|{query}|{paging.Limit}|{paging.Offset}";
-        var lazy = InFlightSearches.GetOrAdd(inflightKey, k => new Lazy<Task<IReadOnlyList<SearchHit>>>(
-            () => CoalescedFetchAsync(http, source, query, paging, timeout, k),
-            LazyThreadSafetyMode.ExecutionAndPublication));
-
-        return await lazy.Value.WaitAsync(ct).ConfigureAwait(false);
-    }
-
-    private static async Task<IReadOnlyList<SearchHit>> CoalescedFetchAsync(HttpClient http,
-                                                                            IResearchSource source,
-                                                                            string query,
-                                                                            ResearchPaging paging,
-                                                                            TimeSpan timeout,
-                                                                            string inflightKey)
-    {
-        try
-        {
-            return await FetchSearchAsync(http, source, query, paging, timeout, CancellationToken.None).ConfigureAwait(false);
-        }
-        finally
-        {
-            if (InFlightSearches.TryGetValue(inflightKey, out var stored))
-            {
-                InFlightSearches.TryRemove(new KeyValuePair<string, Lazy<Task<IReadOnlyList<SearchHit>>>>(inflightKey, stored));
-            }
-        }
+        return await FetchSearchAsync(http, source, query, paging, timeout, ct).ConfigureAwait(false);
     }
 
     private static async Task<IReadOnlyList<SearchHit>> FetchSearchAsync(HttpClient http,
