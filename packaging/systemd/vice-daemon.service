@@ -1,5 +1,5 @@
 [Unit]
-Description=Vice background daemon (IPC control channel and job manager)
+Description=Vice background daemon (IPC control channel)
 After=network.target
 
 [Service]
