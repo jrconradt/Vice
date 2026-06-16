@@ -14,11 +14,11 @@ public sealed class ResearchDownloadJobRunner : IJobRunner
     public const string FORMAT_KEY = "format";
     public const string EXTENSION_KEY = "extension";
 
-    private readonly Func<string, IResearchSource> _resolveSource;
+    private readonly ResearchSourceResolver _resolveSource;
     private readonly Lazy<HttpClient> _http;
     private readonly IViceLogger _logger;
 
-    public ResearchDownloadJobRunner(Func<string, IResearchSource> resolveSource,
+    public ResearchDownloadJobRunner(ResearchSourceResolver resolveSource,
                                      Func<HttpClient> httpFactory,
                                      IViceLogger? logger = null)
     {

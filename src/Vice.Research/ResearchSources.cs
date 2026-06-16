@@ -2,6 +2,8 @@ using Vice.Logging;
 
 namespace Vice.Research;
 
+public delegate IResearchSource ResearchSourceResolver(string name);
+
 public static class ResearchSources
 {
     private static readonly IResearchSource[] All =
