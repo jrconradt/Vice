@@ -19,9 +19,9 @@ producing no runtime assembly reference). `Vice.Jobs` sits just above
 `Vice.Jobs`, and `Vice.Parser`. `Vice.Host` adds the session REPL on top of
 `Vice` and `Vice.Jobs`. Feature libraries (`Vice.Net`, `Vice.Research`,
 `Vice.Files`, `Vice.Build`, `Vice.Mux`) build on `Vice` and `Vice.Foundation` —
-`Vice.Net` also reaches `Vice.Jobs` for background work, and `Vice.Research`
-builds on `Vice.Net`, reaching `Vice`, `Vice.Foundation`, and `Vice.Jobs`
-transitively. The two entry-point CLIs compose the libraries they need.
+`Vice.Research` also references `Vice.Jobs` directly for background download
+work, building on `Vice.Net` for the rest. The two entry-point CLIs compose
+the libraries they need.
 
 Each project and the `ProjectReference` edges it declares (the `Vice.Generators`
 analyzer reference is noted separately below, not as a runtime edge):
@@ -93,7 +93,7 @@ use any lower folder. Listed lowest first.
 | Assembly | Folders | Role |
 | --- | --- | --- |
 | `Vice.Foundation` | `Concurrency`, `Execution`, `Logging`, `Persistence`, `Sinks` | BCL-only primitives: wait-free helpers, low-level execution scaffolding, structured logging and log sinks, and path-gating + atomic-file write primitives (`SafeWriteRoots`, `AtomicFile`, `FileAccessControl`) consumed by every assembly above. |
-| `Vice.Jobs` | `Jobs` | The background-job model — each job is a detached child process re-executing the host binary as `job run <descriptor>`; the job id is the child pid. `JobLedger` reads and writes per-job JSON records under the state directory, `JobSpawner` (`IJobSubmitter`) launches children, and `JobHarness` runs inside the child, dispatching to the registered `IJobRunner` and serializing record writes through a `SerialQueue`. References `Vice.Foundation` only. |
+| `Vice.Jobs` | `Jobs` | The detached job model — each job is a child process re-executing the host binary as `job run <descriptor>`; the job id is the child pid. `JobSpawner` (`IJobSubmitter`) launches the detached child and `JobHarness` runs inside it, dispatching to the registered `IJobRunner` and returning an exit code. Nothing is tracked: the job's output on disk is the only result. References `Vice.Foundation` only. |
 | `Vice` | `Lexicon`, `Options`, `Core`, `Nodes`, `Composition`, `Display`, `Commands`, `Execution`, `Streaming`, `Help`, `Completions`, `Manpages`, `Contracts`, `Sinks` | The framework. The parsing surface (`Lexicon`, `Options`, `Core`'s `Dsl` / `TargetDef`) over `Vice.Parser`; the DSL node tree and expression composition (`Nodes`, `Composition`); terminal rendering (`Display`); the command registry and pipeline execution (`Commands`, `Execution`, `Streaming`); and help, shell-completion, and man-page generation (`Help`, `Completions`, `Manpages`). |
 | `Vice.Host` | `Core`, `Ipc`, `Plugins`, `Session`, `ViceApp` / `ViceAppBuilder` | Daemon liveness and message handling (`Core`), pipe-server IPC, external-plugin dispatch, the session REPL, and the `ViceApp` / `ViceAppBuilder` surface that wires everything into a runnable interactive application. |
 

@@ -24,8 +24,8 @@ If a `build` call appears to hang, run `VICE_LOG_LEVEL=debug vice build <path>` 
 
 | Press | Effect |
 |---|---|
-| First Ctrl+C | Cancels the global `CancellationToken`. In-flight commands see cancellation and shut down gracefully. Vice prints `Shutting down — press Ctrl+C again to force exit.` to stderr. |
-| Second Ctrl+C | Default runtime behavior takes over and the process exits immediately; in-memory job state is dropped. |
+| First Ctrl+C | Cancels the global `CancellationToken`. In-flight commands see cancellation and shut down gracefully. |
+| Second Ctrl+C | Default runtime behavior takes over and the process exits immediately. |
 
 In session mode, an `OperationCanceledException` raised during a REPL command is caught and the REPL keeps running for the next prompt; the second Ctrl+C is the only way to force-quit.
 
@@ -34,11 +34,11 @@ In session mode, an `OperationCanceledException` raised during a REPL command is
 | | Session mode | One-shot mode |
 |---|---|---|
 | Triggered by | `vice` with no args | `vice <args>` |
-| Background jobs | Downloads are spawned as detached `vice job run` child processes and reported via `jobs`. Each job writes its own record under the state directory (`$XDG_STATE_HOME/vice/<app>-jobs/`, falling back to the local application data directory); the record's id is the job's pid. Jobs ignore `SIGHUP`, so they survive both REPL exit and terminal close. | Operations run synchronously to completion in the foreground. |
-| `jobs` / `cancel` / `history` / `clear` | Built-in. `jobs` and `cancel` read the job ledger and work in every mode, including against jobs started from other sessions. | `jobs` and `cancel` work identically; `history` is empty outside a REPL. |
-| Daemon | `vice daemon` (or `vice --daemon <command>` under systemd/supervisord) serves the IPC control channel; inspect it with `vice status`. Jobs are independent of the daemon: each is its own process, and a daemon crash loses nothing. A killed job process leaves its `.partial` download intact; re-running the same download resumes from the recorded byte offset. | `vice daemon`, `vice --daemon`, and `vice status` all apply. |
+| Background work | Downloads are spawned as detached `vice job run` child processes; each runs to completion and exits, leaving its output file at the destination (the job id is the child's pid). They ignore `SIGHUP`, so they survive both REPL exit and terminal close. | Operations run synchronously to completion in the foreground. |
+| `history` / `clear` | Built-in. | `history` is empty outside a REPL. |
+| Daemon | `vice daemon` (or `vice --daemon <command>` under systemd/supervisord) serves the IPC control channel; inspect it with `vice status`. Background processes are independent of the daemon: each is its own process, and a daemon crash loses nothing. A killed download leaves its `.partial` intact; re-running the same download resumes from it. | `vice daemon`, `vice --daemon`, and `vice status` all apply. |
 
-A side-effect to be aware of: a `download` issued from a one-shot invocation runs to completion in-line and blocks the caller; the same command in session mode returns immediately with `Queued download as job #N`, where `N` is the spawned process's pid.
+A side-effect to be aware of: a `download` issued from a one-shot invocation runs to completion in-line and blocks the caller; the same command in session mode returns immediately with `Queued download … (#N)`, where `N` is the spawned process's pid.
 
 ## "Command output exceeds the 16 MiB daemon IPC frame limit"
 

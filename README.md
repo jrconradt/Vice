@@ -10,12 +10,12 @@ vice tcp send "PING" to endpoint localhost:6379
 vice search files by type csharp in ./src then write to file ./inventory.txt
 ```
 
-A lexer and parser turn them into typed commands that pipe into one another through backpressured streaming channels, run as background jobs, and share a session REPL, provided by the framework.
+A lexer and parser turn them into typed commands that pipe into one another through backpressured streaming channels, run as detached background processes, and share a session REPL, provided by the framework.
 
 Vice is two things:
 
 - **`vice` — a CLI tool** for network probes, scientific-literature search, filesystem work, and `dotnet` build orchestration. Commands use the natural-language grammar and pipe into each other.
-- **Vice — the framework** underneath it. Define your own commands as a composable grammar, and inherit the parser, the pipelines, the REPL, jobs, history, plugins, and configuration without implementing them.
+- **Vice — the framework** underneath it. Define your own commands as a composable grammar, and inherit the parser, the pipelines, the REPL, history, plugins, and configuration without implementing them.
 
 Apache-2.0 · targets .NET 10.
 
@@ -49,7 +49,7 @@ vice> search "transformer" on source arxiv --limit 5
 vice> exit
 ```
 
-In a session, long-running work (downloads) runs as a background **job** — a detached child process whose id is its pid and whose state lives in a per-job record under the state directory. `jobs` lists them and `cancel` kills them, from any `vice` invocation. Jobs ignore `SIGHUP`, so they survive REPL exit and terminal close; cancelling or killing a download mid-flight leaves its `.partial` file for byte-offset resume on the next run.
+In a session, long-running work (downloads) runs as a detached child process — the host binary re-executed as `vice job run <descriptor>`, with the child's pid as its id. The process does its work and exits; the file at its destination is the only result, so `ls` is the status command. It ignores `SIGHUP`, so it survives REPL exit and terminal close; stop a runaway with `kill <pid>`. Killing a download mid-flight leaves its `.partial` file, and re-running the same download resumes from it.
 
 ---
 
@@ -167,7 +167,7 @@ What you inherit by building on Vice:
 
 - Natural-language lexer and parser with synonyms and aliases
 - Typed, backpressured streaming channels between piped stages
-- A session REPL with job management, history, and a `daemon` mode for terminal-independent runs
+- A session REPL with history and a `daemon` mode for terminal-independent runs
 - Git-style external plugins: any executable named `<app>-<verb>` on the trusted plugin path dispatches as a verb
 - Pluggable, opt-in framework services (`IViceLogger`) with safe `Null` defaults
 - POSIX exit codes, pager wrapping, `--json`/`--format` conventions, and an SSRF-guarded `HttpClient`
@@ -183,7 +183,7 @@ The framework API is summarized in [src/Vice/README.md](src/Vice/README.md); the
 | `src/Vice.Foundation` | BCL-only primitives shared across the tree — concurrency helpers, terminal rendering, the DSL node tree, expression composition, and path-gated atomic file writes. A leaf with no inbound `Vice.*` dependency. |
 | `src/Vice.Parser` | The command-line lexer and resolver. BCL-only, no dependency on the rest of the framework; `Vice` references it. |
 | `src/Vice.Generators` | Roslyn source generators that wire `[ViceCommandPack]` classes into the host at compile time. Consumed in-tree as an analyzer, never shipped — `IsPackable=false`. |
-| `src/Vice.Jobs` | The background-job model — job state, scheduling, and lifecycle. References `Vice.Foundation` only. |
+| `src/Vice.Jobs` | The detached job model — spawn a child process that runs to completion and exits. No tracking, no state. References `Vice.Foundation` only. |
 | `src/Vice` | The framework. The command DSL, streaming channels, configuration, plugins; references `Vice.Foundation`, `Vice.Jobs`, and `Vice.Parser`. |
 | `src/Vice.Host` | The session REPL host that wires the framework into a runnable interactive application. References `Vice`, `Vice.Jobs`, and `Vice.Foundation`. |
 | `src/Vice.Net` | Network command library (TCP, UDP, gRPC) for the `vice` tool. A library, not a tool — `IsPackable=false`. |
