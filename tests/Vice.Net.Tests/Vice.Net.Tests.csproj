@@ -22,6 +22,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Vice.Net\Vice.Net.csproj" />
     <ProjectReference Include="..\..\src\Vice.Research\Vice.Research.csproj" />
+    <ProjectReference Include="..\..\src\Vice.Parser\Vice.Parser.csproj" />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="..\Vice.Tests\Helpers\RecordingConsole.cs" Link="Helpers\RecordingConsole.cs" />

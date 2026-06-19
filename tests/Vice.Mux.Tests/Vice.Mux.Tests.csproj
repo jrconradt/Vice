@@ -15,5 +15,6 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\Vice.Mux\Vice.Mux.csproj" />
+    <ProjectReference Include="..\..\src\Vice.Parser\Vice.Parser.csproj" />
   </ItemGroup>
 </Project>
