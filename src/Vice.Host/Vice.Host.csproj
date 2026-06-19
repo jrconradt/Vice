@@ -12,6 +12,7 @@
     <ProjectReference Include="../Vice/Vice.csproj" />
     <ProjectReference Include="../Vice.Jobs/Vice.Jobs.csproj" />
     <ProjectReference Include="../Vice.Foundation/Vice.Foundation.csproj" />
+    <ProjectReference Include="../Vice.Parser/Vice.Parser.csproj" />
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Vice.Net" />

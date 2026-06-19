@@ -28,7 +28,8 @@
                       PrivateAssets="all" />
     <ProjectReference Include="../Vice.Jobs/Vice.Jobs.csproj"
                       PrivateAssets="all" />
-    <ProjectReference Include="../Vice.Parser/Vice.Parser.csproj" />
+    <ProjectReference Include="../Vice.Parser/Vice.Parser.csproj"
+                      PrivateAssets="all" />
     <ProjectReference Include="../Vice.Generators/Vice.Generators.csproj"
                       OutputItemType="Analyzer"
                       ReferenceOutputAssembly="false"
@@ -71,6 +72,11 @@
       <Output TaskParameter="TargetOutputs"
               PropertyName="_ViceJobsTargetPath" />
     </MSBuild>
+    <MSBuild Projects="../Vice.Parser/Vice.Parser.csproj"
+             Targets="GetTargetPath">
+      <Output TaskParameter="TargetOutputs"
+              PropertyName="_ViceParserTargetPath" />
+    </MSBuild>
     <MSBuild Projects="../Vice.Host/Vice.Host.csproj"
              Targets="GetTargetPath">
       <Output TaskParameter="TargetOutputs"
@@ -80,11 +86,14 @@
            Text="Vice.Foundation must be built before packing Vice: assembly not found at '$(_ViceFoundationTargetPath)'." />
     <Error Condition="'$(_ViceJobsTargetPath)' == '' Or !Exists('$(_ViceJobsTargetPath)')"
            Text="Vice.Jobs must be built before packing Vice: assembly not found at '$(_ViceJobsTargetPath)'." />
+    <Error Condition="'$(_ViceParserTargetPath)' == '' Or !Exists('$(_ViceParserTargetPath)')"
+           Text="Vice.Parser must be built before packing Vice: assembly not found at '$(_ViceParserTargetPath)'." />
     <Error Condition="'$(_ViceHostTargetPath)' == '' Or !Exists('$(_ViceHostTargetPath)')"
            Text="Vice.Host must be built before packing Vice: assembly not found at '$(_ViceHostTargetPath)'." />
     <ItemGroup>
       <BuildOutputInPackage Include="$(_ViceFoundationTargetPath)" />
       <BuildOutputInPackage Include="$(_ViceJobsTargetPath)" />
+      <BuildOutputInPackage Include="$(_ViceParserTargetPath)" />
       <BuildOutputInPackage Include="$(_ViceHostTargetPath)" />
     </ItemGroup>
   </Target>

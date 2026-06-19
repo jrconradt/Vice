@@ -18,6 +18,7 @@
     <ProjectReference Include="..\..\src\Vice.Host\Vice.Host.csproj" />
     <ProjectReference Include="..\..\src\Vice.Jobs\Vice.Jobs.csproj" />
     <ProjectReference Include="..\..\src\Vice.Foundation\Vice.Foundation.csproj" />
+    <ProjectReference Include="..\..\src\Vice.Parser\Vice.Parser.csproj" />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="..\Shared\GoldenFile.cs" Link="Helpers\GoldenFile.cs" />

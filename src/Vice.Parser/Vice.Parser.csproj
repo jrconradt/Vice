@@ -4,19 +4,8 @@
     <RootNamespace>Vice.Parser</RootNamespace>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <PackageId>Vice.Parser</PackageId>
-    <Description>Vice.Parser — the BCL-only command-line lexer and resolver used by the Vice framework.</Description>
+    <IsPackable>false</IsPackable>
     <IsAotCompatible>true</IsAotCompatible>
     <IsTrimmable>true</IsTrimmable>
   </PropertyGroup>
-  <ItemGroup>
-    <None Include="$(MSBuildThisFileDirectory)../../THIRD_PARTY_NOTICE"
-          Pack="true"
-          PackagePath="\"
-          Visible="false" />
-    <None Include="$(MSBuildThisFileDirectory)../../LICENSE"
-          Pack="true"
-          PackagePath="\"
-          Visible="false" />
-  </ItemGroup>
 </Project>
