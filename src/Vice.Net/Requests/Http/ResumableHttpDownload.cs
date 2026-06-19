@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using Vice.Concurrency;
 using Vice.Logging;
 using Vice.Persistence;
 
@@ -89,7 +90,7 @@ public static class ResumableHttpDownload
                 }
 
                 attempt++;
-                var backoff = ComputeBackoff(attempt);
+                var backoff = RetryBackoff.Exponential(BaseResumeBackoff, MaxResumeBackoff, attempt);
                 logger.Log(ViceLogLevel.Warn,
                            $"resumable download mid-stream failure for {uri} (resume {attempt}/{MAX_RESUME_ATTEMPTS} after {backoff.TotalMilliseconds:0}ms)",
                            ex);
@@ -114,6 +115,7 @@ public static class ResumableHttpDownload
     {
         long written;
         var observed = new ExpectedLengthObserver(progress);
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         await using (var file = new FileStream(partial,
                                                FileMode.OpenOrCreate,
                                                FileAccess.ReadWrite,
@@ -122,7 +124,7 @@ public static class ResumableHttpDownload
             file.SetLength(startOffset);
             file.Seek(startOffset, SeekOrigin.Begin);
 
-            await resumable.DownloadAsync(file, startOffset, observed, ct).ConfigureAwait(false);
+            await resumable.DownloadAsync(file, startOffset, observed, ct, hash).ConfigureAwait(false);
             await file.FlushAsync(ct).ConfigureAwait(false);
             SafeFile.FlushToDisk(file.SafeFileHandle);
             written = file.Length;
@@ -140,7 +142,7 @@ public static class ResumableHttpDownload
                 $"Download of '{uri}' is incomplete: wrote {written} bytes but the server advertised {expected}; refusing to promote a truncated file.");
         }
 
-        var digest = await ComputeSha256Async(partial, ct).ConfigureAwait(false);
+        var digest = Convert.ToHexStringLower(hash.GetHashAndReset());
 
         File.Move(partial, fullPath, overwrite: true);
         var promotedDir = Path.GetDirectoryName(fullPath);
@@ -198,25 +200,6 @@ public static class ResumableHttpDownload
         }
 
         return Math.Max(0, info.Length);
-    }
-
-    private static TimeSpan ComputeBackoff(int attempt)
-    {
-        var scaled = BaseResumeBackoff.TotalMilliseconds * Math.Pow(2, attempt - 1);
-        var capped = Math.Min(scaled, MaxResumeBackoff.TotalMilliseconds);
-        var jittered = capped * (0.5 + Random.Shared.NextDouble() * 0.5);
-        return TimeSpan.FromMilliseconds(jittered);
-    }
-
-    private static async Task<string> ComputeSha256Async(string path,
-                                                         CancellationToken ct)
-    {
-        await using var stream = new FileStream(path,
-                                                FileMode.Open,
-                                                FileAccess.Read,
-                                                FileShare.Read);
-        var hash = await SHA256.HashDataAsync(stream, ct).ConfigureAwait(false);
-        return Convert.ToHexStringLower(hash);
     }
 
     private sealed class ExpectedLengthObserver : IProgress<DownloadProgress>

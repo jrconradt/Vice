@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
+using System.Security.Cryptography;
 
 namespace Vice.Net.Requests.Http;
 
@@ -90,7 +91,8 @@ public sealed class ResumableHttpStream
 
     public async Task DownloadAsync(
         Stream destination, long startOffset,
-        IProgress<DownloadProgress>? progress, CancellationToken ct)
+        IProgress<DownloadProgress>? progress, CancellationToken ct,
+        IncrementalHash? hash = null)
     {
         var probe = await GetProbeAsync(ct).ConfigureAwait(false);
         var supportsRange = probe.SupportsRange;
@@ -183,7 +185,35 @@ public sealed class ResumableHttpStream
                 $"Response total bytes {totalBytes.Value} exceeds cap {_maxBytes}.");
         }
 
-        await CopyToStreamAsync(response, destination, effectiveOffset, totalBytes, _maxBytes, progress, ct);
+        if (hash is not null
+            && effectiveOffset > 0)
+        {
+            await SeedHashAsync(destination, effectiveOffset, hash, ct).ConfigureAwait(false);
+        }
+
+        await CopyToStreamAsync(response, destination, effectiveOffset, totalBytes, _maxBytes, progress, ct, hash);
+    }
+
+    private static async Task SeedHashAsync(Stream source,
+                                            long count,
+                                            IncrementalHash hash,
+                                            CancellationToken ct)
+    {
+        source.Seek(0, SeekOrigin.Begin);
+        var buffer = new byte[HttpStreamHelper.BUFFER_SIZE];
+        var remaining = count;
+        while (remaining > 0)
+        {
+            var toRead = (int)Math.Min(buffer.Length, remaining);
+            var read = await source.ReadAsync(buffer.AsMemory(0, toRead), ct).ConfigureAwait(false);
+            if (read <= 0)
+            {
+                break;
+            }
+
+            hash.AppendData(buffer.AsSpan(0, read));
+            remaining -= read;
+        }
     }
 
     private static bool RangeStartsAt(ContentRangeHeaderValue? contentRange, long startOffset)
@@ -206,7 +236,8 @@ public sealed class ResumableHttpStream
     private static async Task CopyToStreamAsync(
         HttpResponseMessage response, Stream destination,
         long offset, long? totalBytes, long cap,
-        IProgress<DownloadProgress>? progress, CancellationToken ct)
+        IProgress<DownloadProgress>? progress, CancellationToken ct,
+        IncrementalHash? hash)
     {
         using var source = await response.Content.ReadAsStreamAsync(ct);
 
@@ -251,6 +282,7 @@ public sealed class ResumableHttpStream
                     $"Download exceeded cap {cap} bytes mid-stream.");
             }
 
+            hash?.AppendData(buffer.AsSpan(0, bytesRead));
             await destination.WriteAsync(buffer.AsMemory(0, bytesRead), ct);
 
             if (progress is not null)
