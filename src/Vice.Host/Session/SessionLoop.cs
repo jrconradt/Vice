@@ -1,6 +1,5 @@
 using Vice.Display;
 using Vice.Display.Rendering;
-using Vice.Jobs;
 using Vice.Logging;
 
 namespace Vice.Session;
@@ -8,14 +7,11 @@ namespace Vice.Session;
 internal sealed class SessionLoop : ISessionLoop
 {
     private readonly CommandExecutor _executor;
-    private readonly string _jobsRoot;
     private readonly InputHistory _history;
     private readonly IConsoleWriter _console;
     private readonly TextReader _reader;
     private readonly IViceLogger _logger;
     private readonly string _prompt;
-    private readonly HashSet<int> _announcedTerminal = new();
-    private bool _seeded;
 
     internal const int EXIT_SENTINEL = int.MinValue + 1;
 
@@ -23,7 +19,6 @@ internal sealed class SessionLoop : ISessionLoop
 
     public SessionLoop(
         CommandExecutor executor,
-        string jobsRoot,
         InputHistory history,
         IConsoleWriter console,
         TextReader reader,
@@ -31,7 +26,6 @@ internal sealed class SessionLoop : ISessionLoop
         string prompt = "vice> ")
     {
         _executor = executor;
-        _jobsRoot = jobsRoot;
         _history = history;
         _console = console;
         _reader = reader;
@@ -43,8 +37,6 @@ internal sealed class SessionLoop : ISessionLoop
     {
         while (!ct.IsCancellationRequested)
         {
-            await AnnounceTerminalJobsAsync(ct).ConfigureAwait(false);
-
             _console.Write(_prompt);
 
             string? line;
@@ -94,56 +86,5 @@ internal sealed class SessionLoop : ISessionLoop
                 return;
             }
         }
-    }
-
-    private async Task AnnounceTerminalJobsAsync(CancellationToken ct)
-    {
-        IReadOnlyList<JobState> records;
-        try
-        {
-            records = await JobLedger.ReadAllAsync(_jobsRoot, _logger, ct).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            _logger.Log(ViceLogLevel.Debug, "job ledger scan failed", ex);
-            return;
-        }
-
-        if (!_seeded)
-        {
-            foreach (var record in records)
-            {
-                if (record.Status != JobStatus.Running)
-                {
-                    _announcedTerminal.Add(record.Id);
-                }
-            }
-
-            _seeded = true;
-            return;
-        }
-
-        foreach (var record in records)
-        {
-            if (record.Status == JobStatus.Running
-                || !_announcedTerminal.Add(record.Id))
-            {
-                continue;
-            }
-
-            if (record.Status == JobStatus.Completed)
-            {
-                _console.WriteLine($"  Job #{record.Id} completed: {JobLabel(record)}");
-            }
-            else
-            {
-                _console.WriteLine($"  Job #{record.Id} failed: {JobLabel(record)} -- {record.ErrorMessage ?? "unknown error"}");
-            }
-        }
-    }
-
-    private static string JobLabel(JobState job)
-    {
-        return string.IsNullOrEmpty(job.Label) ? job.Kind.Name : job.Label;
     }
 }

@@ -208,8 +208,9 @@ public static class ResearchCommands
 
             if (TrySubmitJob(ctx, source.Name, id, destination, target.Extension, format, timeout, ct, out var jobTask))
             {
-                ctx.Console.WriteLine($"Queued download {source.Name}/{id} -> {destination}.");
-                return await jobTask.ConfigureAwait(false);
+                var jobId = await jobTask.ConfigureAwait(false);
+                ctx.Console.WriteLine($"Queued download {source.Name}/{id} -> {destination} (#{jobId}).");
+                return ViceExitCode.SUCCESS;
             }
 
             var reporter = ctx.Quiet ? null : ProgressLine(ctx, $"{source.Name}/{id}");
@@ -254,14 +255,8 @@ public static class ResearchCommands
 
                     if (TrySubmitJob(ctx, source.Name, hit.Id, destination, target.Extension, format, timeout, ct, out var jobTask))
                     {
-                        ctx.Console.WriteLine($"Queued {source.Name}/{hit.Id} -> {destination}.");
-                        var exitCode = await jobTask.ConfigureAwait(false);
-                        if (exitCode != ViceExitCode.SUCCESS)
-                        {
-                            failures++;
-                            ctx.Console.WriteError($"Failed {source.Name}/{hit.Id}: queued download exited with code {exitCode}.");
-                        }
-
+                        var jobId = await jobTask.ConfigureAwait(false);
+                        ctx.Console.WriteLine($"Queued {source.Name}/{hit.Id} -> {destination} (#{jobId}).");
                         continue;
                     }
 

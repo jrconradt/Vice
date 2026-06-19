@@ -24,7 +24,6 @@ public class DaemonCrossProcessEndToEndTests
             Assert.Contains("vice daemon", status.StdOut, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("healthy", status.StdOut, StringComparison.Ordinal);
             Assert.Contains("listening: yes", status.StdOut, StringComparison.Ordinal);
-            Assert.Contains("No jobs.", status.StdOut, StringComparison.Ordinal);
             Assert.DoesNotContain("No vice daemon running.", status.StdOut, StringComparison.Ordinal);
         }
         finally

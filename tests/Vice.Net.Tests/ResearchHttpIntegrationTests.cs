@@ -48,24 +48,19 @@ public sealed class ResearchHttpIntegrationTests : IAsyncLifetime, IDisposable
         }
     }
 
-    private static JobState DownloadJob(int id,
-                                        string source,
-                                        string resourceId,
-                                        string destinationPath,
-                                        string? format = null)
-        => new()
-        {
-            Id = id,
-            Kind = ResearchDownloadJobRunner.DownloadKind,
-            Label = $"{source}/{resourceId}",
-            Options = new Dictionary<string, string?>(StringComparer.Ordinal)
-            {
-                [ResearchDownloadJobRunner.SOURCE_KEY] = source,
-                [ResearchDownloadJobRunner.RESOURCE_ID_KEY] = resourceId,
-                [ResearchDownloadJobRunner.DESTINATION_PATH_KEY] = destinationPath,
-                [ResearchDownloadJobRunner.FORMAT_KEY] = format,
-            },
-        };
+    private static JobDescriptor DownloadJob(string source,
+                                             string resourceId,
+                                             string destinationPath,
+                                             string? format = null)
+        => new(ResearchDownloadJobRunner.DownloadKind,
+               $"{source}/{resourceId}",
+               new Dictionary<string, string?>(StringComparer.Ordinal)
+               {
+                   [ResearchDownloadJobRunner.SOURCE_KEY] = source,
+                   [ResearchDownloadJobRunner.RESOURCE_ID_KEY] = resourceId,
+                   [ResearchDownloadJobRunner.DESTINATION_PATH_KEY] = destinationPath,
+                   [ResearchDownloadJobRunner.FORMAT_KEY] = format,
+               });
 
     private async Task HandleAsync(HttpListenerContext ctx)
     {
@@ -160,12 +155,11 @@ public sealed class ResearchHttpIntegrationTests : IAsyncLifetime, IDisposable
         var runner = new ResearchDownloadJobRunner(_ => source, () => new HttpClient());
         var destination = Path.Combine(_tempDir, "job-output.txt");
 
-        var job = DownloadJob(11,
-                              "loopback",
+        var job = DownloadJob("loopback",
                               "doc-99",
                               destination);
 
-        await runner.RunAsync(job, new Progress<JobProgress>(_ => { }), CancellationToken.None);
+        await runner.RunAsync(job, CancellationToken.None);
 
         Assert.True(File.Exists(destination));
         Assert.Equal(_payload, await File.ReadAllBytesAsync(destination));
@@ -179,13 +173,12 @@ public sealed class ResearchHttpIntegrationTests : IAsyncLifetime, IDisposable
         var runner = new ResearchDownloadJobRunner(_ => source, () => new HttpClient());
         var destination = Path.Combine(_tempDir, "job-fail.txt");
 
-        var job = DownloadJob(12,
-                              "loopback",
+        var job = DownloadJob("loopback",
                               "doc-1",
                               destination);
 
         await Assert.ThrowsAsync<HttpRequestException>(() =>
-            runner.RunAsync(job, new Progress<JobProgress>(_ => { }), CancellationToken.None));
+            runner.RunAsync(job, CancellationToken.None));
 
         Assert.False(File.Exists(destination));
         Assert.False(File.Exists($"{destination}.partial"));
@@ -198,13 +191,12 @@ public sealed class ResearchHttpIntegrationTests : IAsyncLifetime, IDisposable
         var runner = new ResearchDownloadJobRunner(_ => recorder, () => new HttpClient());
         var destination = Path.Combine(_tempDir, "carried.xml");
 
-        var job = DownloadJob(21,
-                              "recorder",
+        var job = DownloadJob("recorder",
                               "doc-5",
                               destination,
                               format: "epub");
 
-        await runner.RunAsync(job, new Progress<JobProgress>(_ => { }), CancellationToken.None);
+        await runner.RunAsync(job, CancellationToken.None);
 
         Assert.Equal("epub", recorder.LastFormat);
     }
@@ -216,12 +208,11 @@ public sealed class ResearchHttpIntegrationTests : IAsyncLifetime, IDisposable
         var runner = new ResearchDownloadJobRunner(_ => recorder, () => new HttpClient());
         var destination = Path.Combine(_tempDir, "fallback.xml");
 
-        var job = DownloadJob(22,
-                              "recorder",
+        var job = DownloadJob("recorder",
                               "doc-6",
                               destination);
 
-        await runner.RunAsync(job, new Progress<JobProgress>(_ => { }), CancellationToken.None);
+        await runner.RunAsync(job, CancellationToken.None);
 
         Assert.Equal("xml", recorder.LastFormat);
     }

@@ -59,14 +59,13 @@ public sealed class ResearchDownloadJobRunner : IJobRunner
 
     public bool CanHandle(JobKind kind) => kind == DownloadKind;
 
-    public async Task RunAsync(JobState job,
-                               IProgress<JobProgress> progress,
+    public async Task RunAsync(JobDescriptor descriptor,
                                CancellationToken ct)
     {
-        var sourceName = Option(job, SOURCE_KEY);
-        var resourceId = Option(job, RESOURCE_ID_KEY);
-        var destinationPath = Option(job, DESTINATION_PATH_KEY);
-        var carriedFormat = NullableOption(job, FORMAT_KEY);
+        var sourceName = Option(descriptor, SOURCE_KEY);
+        var resourceId = Option(descriptor, RESOURCE_ID_KEY);
+        var destinationPath = Option(descriptor, DESTINATION_PATH_KEY);
+        var carriedFormat = NullableOption(descriptor, FORMAT_KEY);
 
         var source = _resolveSource(sourceName);
         var format = carriedFormat ?? ExtensionToFormat(Path.GetExtension(destinationPath));
@@ -87,23 +86,14 @@ public sealed class ResearchDownloadJobRunner : IJobRunner
         }
 
         _logger.Log(ViceLogLevel.Debug,
-                    $"research download resolved {sourceName}/{resourceId} to {target.Uri} (resume offset {job.ProgressCurrent}) -> {destinationPath}");
-
-        var reporter = new Progress<DownloadProgress>(p =>
-        {
-            progress.Report(new JobProgress(
-                Current: p.BytesDownloaded,
-                Total: p.TotalBytes,
-                Label: $"{sourceName}/{resourceId} -> {destinationPath}"));
-        });
+                    $"research download resolved {sourceName}/{resourceId} to {target.Uri} -> {destinationPath}");
 
         try
         {
             var written = await ResumableHttpDownload.ToFileAsync(http,
                                                                   target.Uri,
                                                                   destinationPath,
-                                                                  job.ProgressCurrent,
-                                                                  reporter,
+                                                                  null,
                                                                   _logger,
                                                                   ct).ConfigureAwait(false);
             _logger.Log(ViceLogLevel.Debug,
@@ -118,16 +108,16 @@ public sealed class ResearchDownloadJobRunner : IJobRunner
         }
     }
 
-    private static string Option(JobState job, string key)
+    private static string Option(JobDescriptor descriptor, string key)
     {
-        return job.Options.TryGetValue(key, out var value) && value is not null
+        return descriptor.Options.TryGetValue(key, out var value) && value is not null
             ? value
             : string.Empty;
     }
 
-    private static string? NullableOption(JobState job, string key)
+    private static string? NullableOption(JobDescriptor descriptor, string key)
     {
-        if (job.Options.TryGetValue(key, out var value)
+        if (descriptor.Options.TryGetValue(key, out var value)
             && !string.IsNullOrEmpty(value))
         {
             return value;

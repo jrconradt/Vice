@@ -45,29 +45,6 @@ public class DaemonTests
     }
 
     [Fact]
-    public async Task RunDaemonAsync_HandlesJobStatusRequest()
-    {
-        var pipeName = "vice-test-daemon-" + Guid.NewGuid().ToString("N");
-        var state = new SessionState("vice-test", pipeName);
-
-        var app = new ViceApp("vice", "1.0.0", description: null,
-            console: new RecordingConsole(), status: NullStatusDisplay.Instance);
-
-        using var daemonCts = new CancellationTokenSource();
-        var daemonTask = app.RunDaemonAsync(state, daemonCts.Token);
-
-        await using var client = await WaitForClient(pipeName, TimeSpan.FromSeconds(3));
-        Assert.NotNull(client);
-
-        var resp = await client!.SendAsync(new JobStatusRequest(), CancellationToken.None);
-        var jr = Assert.IsType<JobStatusResponse>(resp);
-        Assert.Empty(jr.Jobs);
-
-        daemonCts.Cancel();
-        await daemonTask;
-    }
-
-    [Fact]
     public async Task RunDaemonAsync_StartsPipeServer_AndShutsDownOnCancellation()
     {
         var pipeName = "vice-test-daemon-" + Guid.NewGuid().ToString("N");

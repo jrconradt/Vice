@@ -175,15 +175,15 @@ public static class ResumableHttpDownload
     private static long ResolveResumeOffset(string partial,
                                             long recordedOffset)
     {
-        if (recordedOffset <= 0)
-        {
-            return 0;
-        }
-
         var info = new FileInfo(partial);
         if (!info.Exists)
         {
             return 0;
+        }
+
+        if (recordedOffset <= 0)
+        {
+            return Math.Max(0, info.Length);
         }
 
         return Math.Min(info.Length, recordedOffset);

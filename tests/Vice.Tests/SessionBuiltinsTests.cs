@@ -17,10 +17,8 @@ public class SessionBuiltinsTests
         var registry = new CommandRegistry();
         var console = new RecordingConsole();
         var history = new InputHistory();
-        var appName = $"vice-test-{Guid.NewGuid():N}";
 
         SessionBuiltins.RegisterChains(registry,
-                                       appName,
                                        Array.Empty<IJobRunner>(),
                                        NullViceLogger.Instance);
         var builtins = new SessionBuiltinRegistry(history);
@@ -49,21 +47,12 @@ public class SessionBuiltinsTests
     }
 
     [Fact]
-    public async Task JobsBuiltin_NoJobs_PrintsNoJobs()
-    {
-        var (exec, _, console) = Build();
-        await exec.ExecuteAsync("jobs");
-        Assert.Contains("No jobs", console.Output);
-    }
-
-    [Fact]
-    public void Registers_ExitJobsAndJobRunBuiltins()
+    public void Registers_ExitAndJobRunBuiltins()
     {
         var (_, registry, _) = Build();
 
         var names = registry.Registrations.Select(r => r.Chain.Name).ToHashSet();
         Assert.Contains("exit", names);
-        Assert.Contains("jobs", names);
         Assert.Contains("job", names);
     }
 }

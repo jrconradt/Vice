@@ -122,7 +122,7 @@ public class IpcProtocolPropertyTests
                     new CommandMessage { CommandLine = line },
                     PipeMessageJsonContext.Default.PipeMessage)),
             Gen.Const(JsonSerializer.SerializeToUtf8Bytes(
-                new JobStatusRequest(),
+                new HealthRequest(),
                 PipeMessageJsonContext.Default.PipeMessage)));
     }
 

@@ -122,7 +122,6 @@ public sealed class ViceApp : IViceApp, IAsyncDisposable
 
             BuiltinCommands.Register(_registry, this);
             SessionBuiltins.RegisterChains(_registry,
-                                           _name,
                                            _jobRunners,
                                            _logger);
         }
@@ -202,7 +201,7 @@ public sealed class ViceApp : IViceApp, IAsyncDisposable
         }
 
         var state = SessionState.For(_name);
-        var session = SessionContext.OneShot(new JobSpawner(_name, _logger),
+        var session = SessionContext.OneShot(new JobSpawner(_logger),
                                              state,
                                              _sessionServices,
                                              _logger);
@@ -255,14 +254,13 @@ public sealed class ViceApp : IViceApp, IAsyncDisposable
     public async Task<int> RunSessionAsync(CancellationToken ct = default)
     {
         var state = SessionState.For(_name);
-        var sessionCtx = new SessionContext(new JobSpawner(_name, _logger), state, _sessionServices, _logger);
+        var sessionCtx = new SessionContext(new JobSpawner(_logger), state, _sessionServices, _logger);
         await using var history = new InputHistory();
 
         var builtins = new SessionBuiltinRegistry(history);
 
         var executor = CreateExecutor(sessionCtx, builtins: builtins);
         var loop = new SessionLoop(executor,
-                                   JobLedger.RootFor(_name),
                                    history,
                                    _console,
                                    System.Console.In,
@@ -280,7 +278,7 @@ public sealed class ViceApp : IViceApp, IAsyncDisposable
 
     internal async Task<int> RunDaemonAsync(SessionState state, CancellationToken ct = default)
     {
-        var sessionCtx = new SessionContext(new JobSpawner(_name, _logger),
+        var sessionCtx = new SessionContext(new JobSpawner(_logger),
                                             state,
                                             _sessionServices,
                                             _logger,

@@ -47,7 +47,6 @@ _vice() {
         case "$state:$word" in
             "root:alpha"|"root:a") state="root__alpha"; ;;
             "root:beta") state="root__beta"; ;;
-            "root:cancel") state="root__cancel"; skip=1; ;;
             "root:clear") state="root__clear"; ;;
             "root:completions") state="root__completions"; skip=1; ;;
             "root:daemon") state="root__daemon"; ;;
@@ -56,7 +55,6 @@ _vice() {
             "root:help") state="root__help"; skip=1; ;;
             "root:history") state="root__history"; ;;
             "root:job") state="root__job"; ;;
-            "root:jobs") state="root__jobs"; ;;
             "root:list") state="root__list"; ;;
             "root:manpage") state="root__manpage"; ;;
             "root:status") state="root__status"; ;;
@@ -81,7 +79,6 @@ _vice() {
                 'alpha:alpha description'
                 'a:alpha description'
                 'beta:beta description'
-                'cancel:Cancel a background job'
                 'clear:Clear the screen'
                 'completions:Emit a shell completion script (bash | zsh) to stdout.'
                 'daemon:Run as a background daemon serving the IPC control channel.'
@@ -91,10 +88,9 @@ _vice() {
                 'help:Show help'
                 'history:Show command history'
                 'job:Run a JSON job descriptor in the foreground; background submissions spawn this command detached.'
-                'jobs:List background jobs'
                 'list:List all commands'
                 'manpage:Emit a groff(7) man page for this tool to stdout.'
-                'status:Query a running daemon for job status (if any).'
+                'status:Query a running daemon for health (if any).'
                 'version:Show version'
             )
             _describe -t verb 'verb' candidates

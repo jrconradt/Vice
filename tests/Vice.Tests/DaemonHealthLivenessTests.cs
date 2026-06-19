@@ -25,7 +25,7 @@ public class DaemonHealthLivenessTests
                               status: NullStatusDisplay.Instance);
 
         var state = new SessionState(appName, $"{appName}-pipe");
-        var sessionCtx = new SessionContext(new JobSpawner(appName, NullViceLogger.Instance, executablePath: "/bin/false"),
+        var sessionCtx = new SessionContext(new JobSpawner(NullViceLogger.Instance, executablePath: "/bin/false"),
                                             state,
                                             null,
                                             NullViceLogger.Instance,
@@ -56,7 +56,6 @@ public class DaemonHealthLivenessTests
         Assert.Equal("9.9.9", health.Version);
         Assert.True(health.AcceptLoopCrashed);
         Assert.Equal("InvalidOperationException: accept loop failed", health.FaultSummary);
-        Assert.Equal(0, health.JobCount);
     }
 
     [Fact]

@@ -7,20 +7,12 @@ internal sealed class RecordingConsole : IConsoleWriter, IOutputSink, IDisposabl
 {
     private string _out = "";
     private string _err = "";
-    private readonly IOutputSink _previousSink;
-
-    public RecordingConsole()
-    {
-        _previousSink = Vice.Core.Output.Current;
-        Vice.Core.Output.Configure(this);
-    }
 
     public string Output => _out;
     public string Error => _err;
 
     public void Dispose()
     {
-        Vice.Core.Output.Configure(_previousSink);
     }
 
     public void Reset() { _out = ""; _err = ""; }

@@ -20,12 +20,10 @@ public class SessionLoopTests
         var registry = new CommandRegistry();
         configure?.Invoke(registry);
 
-        var appName = $"vice-test-{Guid.NewGuid():N}";
         var console = new RecordingConsole();
         var history = new InputHistory();
 
         SessionBuiltins.RegisterChains(registry,
-                                       appName,
                                        Array.Empty<IJobRunner>(),
                                        NullViceLogger.Instance);
         var builtins = new SessionBuiltinRegistry(history);
@@ -36,7 +34,6 @@ public class SessionLoopTests
             builtins: builtins);
 
         var loop = new SessionLoop(executor,
-                                   JobLedger.RootFor(appName),
                                    history,
                                    console,
                                    new StringReader(input),

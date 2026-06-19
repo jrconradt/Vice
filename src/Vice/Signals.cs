@@ -1,14 +1,11 @@
 using System.Runtime.InteropServices;
-using Vice.Display;
-using Vice.Display.Rendering;
 
 namespace Vice.Core;
 
 public static class Signals
 {
-    public static CancellationTokenSource HookGracefulShutdown(IConsoleWriter? console = null)
+    public static CancellationTokenSource HookGracefulShutdown()
     {
-        var writer = console ?? new ConsoleWriter(Output.Current);
         var cts = new ShutdownTokenSource();
         int count = 0;
         ConsoleCancelEventHandler handler = (_, e) =>
@@ -18,7 +15,6 @@ public static class Signals
             {
                 e.Cancel = true;
                 cts.Cancel();
-                writer.WriteError("Shutting down — press Ctrl+C again to force exit.");
             }
         };
         cts.Handler = handler;
@@ -31,7 +27,6 @@ public static class Signals
             {
                 ctx.Cancel = true;
                 cts.Cancel();
-                writer.WriteError("Shutting down.");
             }
         };
         cts.SigTerm = PosixSignalRegistration.Create(PosixSignal.SIGTERM, terminate);

@@ -14,20 +14,17 @@ namespace Vice.Tests;
 
 public class SadPath_SessionLoopTests
 {
-    private static (SessionLoop Loop, RecordingConsole Console, InputHistory History, string JobsRoot)
+    private static (SessionLoop Loop, RecordingConsole Console, InputHistory History)
         Build(string input,
-              Action<CommandRegistry>? configure = null,
-              string? jobsRootOverride = null)
+              Action<CommandRegistry>? configure = null)
     {
         var registry = new CommandRegistry();
         configure?.Invoke(registry);
 
-        var appName = $"vice-test-{Guid.NewGuid():N}";
         var console = new RecordingConsole();
         var history = new InputHistory();
 
         SessionBuiltins.RegisterChains(registry,
-                                       appName,
                                        Array.Empty<IJobRunner>(),
                                        NullViceLogger.Instance);
         var builtins = new SessionBuiltinRegistry(history);
@@ -36,58 +33,19 @@ public class SadPath_SessionLoopTests
             NullStatusDisplay.Instance, TerminalCapabilities.None, NullOutputSink.Instance,
             builtins: builtins);
 
-        var jobsRoot = jobsRootOverride ?? Path.Combine(Path.GetTempPath(), appName);
         var loop = new SessionLoop(executor,
-                                   jobsRoot,
                                    history,
                                    console,
                                    new StringReader(input),
                                    prompt: "vice> ");
 
-        return (loop, console, history, jobsRoot);
-    }
-
-    [Fact]
-    public async Task TerminalJobRecord_IsAnnouncedAtNextPrompt()
-    {
-        var jobsRoot = Path.Combine(Path.GetTempPath(), $"vice-test-{Guid.NewGuid():N}");
-        try
-        {
-            var (loop, console, _, _) = Build("seed\nexit\n",
-                registry => registry.Register(verb("seed"), "seed a failed record",
-                    async (ctx, ct) =>
-                    {
-                        var record = new JobState
-                        {
-                            Id = 4242,
-                            Kind = JobKind.Custom("Download"),
-                            Label = "acme/thing",
-                            Status = JobStatus.Failed,
-                            ErrorMessage = "boom",
-                            CompletedAt = DateTime.UtcNow,
-                        };
-                        await JobLedger.WriteAsync(jobsRoot, record, ct);
-                        return 0;
-                    }),
-                jobsRootOverride: jobsRoot);
-
-            await loop.RunAsync(CancellationToken.None);
-
-            Assert.Contains("Job #4242 failed: acme/thing -- boom", console.Output);
-        }
-        finally
-        {
-            if (Directory.Exists(jobsRoot))
-            {
-                Directory.Delete(jobsRoot, recursive: true);
-            }
-        }
+        return (loop, console, history);
     }
 
     [Fact]
     public async Task HandlerException_IsContained_LoopSurvivesAndPrintsError()
     {
-        var (loop, console, history, _) = Build("kaboom\nexit\n",
+        var (loop, console, history) = Build("kaboom\nexit\n",
             registry => registry.Register(verb("kaboom"), "boom",
                 (ctx, ct) => throw new InvalidOperationException("handler-said-no")));
 
@@ -101,7 +59,7 @@ public class SadPath_SessionLoopTests
     public async Task ExternalCancellation_StillEscapesLoop()
     {
         var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var (loop, _, _, _) = Build("slow\n",
+        var (loop, _, _) = Build("slow\n",
             registry => registry.Register(verb("slow"), "slow", async (ctx, ct) =>
             {
                 started.TrySetResult();

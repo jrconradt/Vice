@@ -2,8 +2,6 @@
 
 [1m[33mCOMMANDS:[0m
   [36mexit|quit             [0m Exit the session
-  [36mjobs                  [0m List background jobs
-  [36mcancel {id}           [0m Cancel a background job
   [36mjob run {descriptor}  [0m Run a JSON job descriptor in the foreground; background submissions spawn this command detached.
   [36mhistory               [0m Show command history
   [36mclear                 [0m Clear the screen
