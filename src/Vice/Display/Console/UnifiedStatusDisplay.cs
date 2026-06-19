@@ -7,7 +7,6 @@ internal sealed class UnifiedStatusDisplay : IStatusDisplay
 {
     private static readonly string[] UnicodeFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
     private static readonly string[] AsciiFrames = ["|", "/", "-", "\\"];
-    private const int INTERVAL_MS = 80;
 
     private readonly TerminalCapabilities _capabilities;
     private readonly bool _stderrIsTty;
@@ -76,7 +75,7 @@ internal sealed class UnifiedStatusDisplay : IStatusDisplay
                                        _capabilities,
                                        _stderrIsTty,
                                        _reducedMotion);
-        handle.StartAnimation();
+        handle.Start();
         return handle;
     }
 
@@ -91,18 +90,16 @@ internal sealed class UnifiedStatusDisplay : IStatusDisplay
         private const string SHOW_CURSOR = "\u001b[?25h";
 
         private Snapshot _state;
-        private int _completedFlag;
+        private bool _completed;
         private int _lastLineLength;
         private int _lastAnnouncedPercent;
         private readonly BufferingConsoleWriter _buffered;
         private readonly Stopwatch _stopwatch = Stopwatch.StartNew();
-        private readonly CancellationTokenSource _cts = new();
         private readonly object _consoleLock = new();
-        private Task? _animationTask;
         private readonly TerminalCapabilities _caps;
         private readonly bool _useAnsi;
         private readonly bool _reducedMotion;
-        private readonly string[] _frames;
+        private readonly string _glyph;
         private readonly string _successSymbol;
         private readonly string _failureSymbol;
 
@@ -121,133 +118,111 @@ internal sealed class UnifiedStatusDisplay : IStatusDisplay
             _reducedMotion = reducedMotion;
             _useAnsi = stderrIsTty && caps.SupportsAnsi
                        && !reducedMotion;
-            _frames = caps.SupportsUnicode ? UnicodeFrames : AsciiFrames;
+            _glyph = caps.SupportsUnicode ? UnicodeFrames[0] : AsciiFrames[0];
             _successSymbol = caps.SupportsUnicode ? "✓" : "[OK]";
             _failureSymbol = caps.SupportsUnicode ? "✗" : "[FAIL]";
             _lastAnnouncedPercent = -1;
         }
 
-        public void StartAnimation()
+        public void Start()
         {
-            if (_reducedMotion)
+            lock (_consoleLock)
             {
-                _animationTask = Task.CompletedTask;
-                AnnounceDiscrete($"{_state.Label}...");
-                return;
-            }
-
-            if (_useAnsi)
-            {
-                Console.Error.Write(HIDE_CURSOR);
-            }
-
-            if (!_useAnsi)
-            {
-                _animationTask = Task.CompletedTask;
-                return;
-            }
-
-            var token = _cts.Token;
-            _animationTask = Task.Run(async () =>
-            {
-                int frame = 0;
-                while (!token.IsCancellationRequested)
+                if (_reducedMotion)
                 {
-                    if (Volatile.Read(ref _completedFlag) != 0)
-                    {
-                        break;
-                    }
-
-                    var snap = Volatile.Read(ref _state);
-                    var line = RenderLine(_frames[frame], snap);
-                    var visibleLength = CalculateVisibleLength(_frames[frame], snap);
-                    var padding = Math.Max(0, Volatile.Read(ref _lastLineLength) - visibleLength);
-                    lock (_consoleLock)
-                    {
-                        if (Volatile.Read(ref _completedFlag) != 0)
-                        {
-                            break;
-                        }
-                        Console.Error.Write(padding == 0
-                            ? $"\r{line}"
-                            : $"\r{line}{new string(' ', padding)}");
-                        Volatile.Write(ref _lastLineLength, visibleLength);
-                    }
-                    frame = (frame + 1) % _frames.Length;
-                    try
-                    {
-                        await Task.Delay(INTERVAL_MS, token);
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        break;
-                    }
+                    AnnounceDiscreteLocked($"{_state.Label}...");
+                    return;
                 }
-            }, token);
+
+                if (!_useAnsi)
+                {
+                    return;
+                }
+
+                Console.Error.Write(HIDE_CURSOR);
+                RenderLocked();
+            }
+        }
+
+        private void RenderLocked()
+        {
+            var snap = _state;
+            var line = RenderLine(_glyph, snap);
+            var visibleLength = CalculateVisibleLength(_glyph, snap);
+            var padding = Math.Max(0, _lastLineLength - visibleLength);
+            Console.Error.Write(padding == 0
+                ? $"\r{line}"
+                : $"\r{line}{new string(' ', padding)}");
+            _lastLineLength = visibleLength;
         }
 
         public void UpdateLabel(string label)
         {
             var sanitized = AnsiStripper.Strip(label);
-            Snapshot current, next;
-            do
+            lock (_consoleLock)
             {
-                current = Volatile.Read(ref _state);
-                next = current with { Label = sanitized };
+                if (_completed)
+                {
+                    return;
+                }
+
+                _state = _state with { Label = sanitized };
+                if (_useAnsi)
+                {
+                    RenderLocked();
+                }
             }
-            while (!ReferenceEquals(Interlocked.CompareExchange(ref _state, next, current), current));
         }
 
         public void UpdateProgress(double fraction)
         {
             var clamped = Math.Clamp(fraction, 0.0, 1.0);
-            Snapshot current, next;
-            do
+            lock (_consoleLock)
             {
-                current = Volatile.Read(ref _state);
-                next = current with { Progress = clamped };
-            }
-            while (!ReferenceEquals(Interlocked.CompareExchange(ref _state, next, current), current));
+                if (_completed)
+                {
+                    return;
+                }
 
-            if (_reducedMotion)
-            {
-                AnnounceProgress(clamped);
+                _state = _state with { Progress = clamped };
+                if (_reducedMotion)
+                {
+                    AnnounceProgressLocked(clamped);
+                    return;
+                }
+
+                if (_useAnsi)
+                {
+                    RenderLocked();
+                }
             }
         }
 
         public void Succeed() => Complete(Color.Green, _successSymbol);
         public void Fail() => Complete(Color.Red, _failureSymbol);
 
-        private void AnnounceProgress(double fraction)
+        private void AnnounceProgressLocked(double fraction)
         {
             var percent = (int)Math.Round(fraction * 100);
-            int previous;
-            do
+            if (_lastAnnouncedPercent >= 0
+                && percent < _lastAnnouncedPercent + REDUCED_MOTION_STEP_PERCENT
+                && percent != 100)
             {
-                previous = Volatile.Read(ref _lastAnnouncedPercent);
-                if (previous >= 0
-                    && percent < previous + REDUCED_MOTION_STEP_PERCENT
-                    && percent != 100)
-                {
-                    return;
-                }
+                return;
             }
-            while (Interlocked.CompareExchange(ref _lastAnnouncedPercent, percent, previous) != previous);
 
-            var snap = Volatile.Read(ref _state);
-            AnnounceDiscrete($"{snap.Label} {percent}%");
+            _lastAnnouncedPercent = percent;
+            AnnounceDiscreteLocked($"{_state.Label} {percent}%");
         }
 
-        private void AnnounceDiscrete(string text)
+        private void AnnounceDiscreteLocked(string text)
         {
-            lock (_consoleLock)
+            if (_completed)
             {
-                if (Volatile.Read(ref _completedFlag) != 0)
-                {
-                    return;
-                }
-                Console.Error.WriteLine(text);
+                return;
             }
+
+            Console.Error.WriteLine(text);
         }
 
         private readonly record struct ProgressLayout(
@@ -334,29 +309,21 @@ internal sealed class UnifiedStatusDisplay : IStatusDisplay
 
         private void Complete(Color symbolColor, string rawSymbol)
         {
-            if (Interlocked.Exchange(ref _completedFlag, 1) != 0)
-            {
-                return;
-            }
-
-            try
-            {
-                _cts.Cancel();
-            }
-            catch (ObjectDisposedException ode)
-            {
-                System.Diagnostics.Debug.WriteLine(ode);
-            }
-
-            var snap = Volatile.Read(ref _state);
-            var duration = FormatDuration();
-            var symbol = Colorize(rawSymbol, symbolColor);
-            var line = $"{symbol} {snap.Label} ({duration})";
-            var visibleLength = rawSymbol.Length + 1 + snap.Label.Length + 2 + duration.Length + 1;
-
             lock (_consoleLock)
             {
-                var padding = Math.Max(0, Volatile.Read(ref _lastLineLength) - visibleLength);
+                if (_completed)
+                {
+                    return;
+                }
+
+                _completed = true;
+
+                var snap = _state;
+                var duration = FormatDuration();
+                var symbol = Colorize(rawSymbol, symbolColor);
+                var line = $"{symbol} {snap.Label} ({duration})";
+                var visibleLength = rawSymbol.Length + 1 + snap.Label.Length + 2 + duration.Length + 1;
+                var padding = Math.Max(0, _lastLineLength - visibleLength);
 
                 if (_useAnsi)
                 {
@@ -369,7 +336,7 @@ internal sealed class UnifiedStatusDisplay : IStatusDisplay
                     Console.Error.WriteLine(line);
                 }
 
-                Volatile.Write(ref _lastLineLength, visibleLength);
+                _lastLineLength = visibleLength;
             }
 
             _buffered.Flush();
@@ -395,23 +362,7 @@ internal sealed class UnifiedStatusDisplay : IStatusDisplay
 
         public async ValueTask DisposeAsync()
         {
-            if (Volatile.Read(ref _completedFlag) == 0)
-            {
-                Fail();
-            }
-
-            if (_animationTask is { } t)
-            {
-                try
-                {
-                    await t.ConfigureAwait(false);
-                }
-                catch (Exception ex) when (ex is OperationCanceledException or IOException)
-                {
-                    System.Diagnostics.Debug.WriteLine(ex);
-                }
-            }
-            _cts.Dispose();
+            Fail();
             await _buffered.DisposeAsync().ConfigureAwait(false);
         }
     }
