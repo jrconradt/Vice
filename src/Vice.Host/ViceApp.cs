@@ -27,11 +27,9 @@ public sealed class ViceApp : IViceApp, IAsyncDisposable
     private readonly IOutputSink _outputSink;
     private readonly IStatusDisplay _status;
     private readonly TerminalCapabilities _capabilities;
-    private readonly int _concurrency;
     private readonly IReadOnlyList<IJobRunner> _jobRunners;
     private readonly IReadOnlyDictionary<Type, object> _sessionServices;
     private readonly IViceLogger _logger;
-    private readonly TimeSpan _shutdownTimeout;
     private readonly Dictionary<string, GlobalOption> _options
         = new(StringComparer.OrdinalIgnoreCase);
     private readonly IDisposable? _ownedOutputSink;
@@ -66,22 +64,18 @@ public sealed class ViceApp : IViceApp, IAsyncDisposable
         IOutputSink? outputSink = null,
         IStatusDisplay? status = null,
         TerminalCapabilities? capabilities = null,
-        int concurrency = 3,
         IReadOnlyList<IJobRunner>? jobRunners = null,
         IReadOnlyDictionary<Type, object>? sessionServices = null,
         IReadOnlyList<GlobalOption>? globalOptions = null,
-        IViceLogger? logger = null,
-        TimeSpan? shutdownTimeout = null)
+        IViceLogger? logger = null)
     {
         _name = name;
         _version = version;
         _description = description;
-        _concurrency = concurrency;
         _jobRunners = jobRunners ?? Array.Empty<IJobRunner>();
         _sessionServices = sessionServices ?? new Dictionary<Type, object>();
         _logger = logger ?? NullViceLogger.Instance;
         _registry = new CommandRegistry(_logger);
-        _shutdownTimeout = shutdownTimeout ?? TimeSpan.FromSeconds(10);
 
         foreach (var opt in FrameworkGlobalOptions)
         {
@@ -127,7 +121,9 @@ public sealed class ViceApp : IViceApp, IAsyncDisposable
             }
 
             BuiltinCommands.Register(_registry, this);
-            SessionBuiltins.RegisterChains(_registry);
+            SessionBuiltins.RegisterChains(_registry,
+                                           _jobRunners,
+                                           _logger);
         }
         catch
         {
@@ -139,8 +135,6 @@ public sealed class ViceApp : IViceApp, IAsyncDisposable
     public IReadOnlyCollection<GlobalOption> RegisteredGlobalOptions => _options.Values;
 
     public IViceLogger Logger => _logger;
-
-    public TimeSpan ShutdownTimeout => _shutdownTimeout;
 
     public static ViceAppBuilder Create(string name, string version)
         => new ViceAppBuilder(name, version);
@@ -207,7 +201,10 @@ public sealed class ViceApp : IViceApp, IAsyncDisposable
         }
 
         var state = SessionState.For(_name);
-        var session = SessionContext.OneShot(state, _sessionServices, _logger);
+        var session = SessionContext.OneShot(new JobSpawner(_logger),
+                                             state,
+                                             _sessionServices,
+                                             _logger);
         return await CreateExecutor(session: session).ExecuteAsync(args, ct).ConfigureAwait(false);
     }
 
@@ -257,24 +254,19 @@ public sealed class ViceApp : IViceApp, IAsyncDisposable
     public async Task<int> RunSessionAsync(CancellationToken ct = default)
     {
         var state = SessionState.For(_name);
-        await using var jobManager = new JobManager(_jobRunners, _concurrency, _logger, ct, _shutdownTimeout);
-
-        var sessionCtx = new SessionContext(jobManager, state, _sessionServices, _logger);
+        var sessionCtx = new SessionContext(new JobSpawner(_logger), state, _sessionServices, _logger);
         await using var history = new InputHistory();
 
-        var builtins = new SessionBuiltinRegistry(jobManager, history);
+        var builtins = new SessionBuiltinRegistry(history);
 
         var executor = CreateExecutor(sessionCtx, builtins: builtins);
-        using var loop = new SessionLoop(executor, jobManager, history, _console, System.Console.In, _logger);
+        var loop = new SessionLoop(executor,
+                                   history,
+                                   _console,
+                                   System.Console.In,
+                                   _logger);
 
-        var shouldDaemonize = await loop.RunAsync(ct);
-
-        if (shouldDaemonize)
-        {
-            var daemonCtx = new SessionContext(jobManager, state, _sessionServices, _logger, isInteractive: false);
-            return await RunDaemonInternalAsync(jobManager, state, daemonCtx, ct);
-        }
-
+        await loop.RunAsync(ct);
         return 0;
     }
 
@@ -286,17 +278,18 @@ public sealed class ViceApp : IViceApp, IAsyncDisposable
 
     internal async Task<int> RunDaemonAsync(SessionState state, CancellationToken ct = default)
     {
-        await using var jobManager = new JobManager(_jobRunners, _concurrency, _logger, ct, _shutdownTimeout);
+        var sessionCtx = new SessionContext(new JobSpawner(_logger),
+                                            state,
+                                            _sessionServices,
+                                            _logger,
+                                            isInteractive: false);
 
-        var sessionCtx = new SessionContext(jobManager, state, _sessionServices, _logger, isInteractive: false);
-
-        return await RunDaemonInternalAsync(jobManager, state, sessionCtx, ct);
+        return await RunDaemonInternalAsync(state, sessionCtx, ct);
     }
 
-    private async Task<int> RunDaemonInternalAsync(
-        JobManager jobManager, SessionState state,
-        SessionContext sessionCtx,
-        CancellationToken ct)
+    private async Task<int> RunDaemonInternalAsync(SessionState state,
+                                                   SessionContext sessionCtx,
+                                                   CancellationToken ct)
     {
         PipeClient? existing;
         try
@@ -321,7 +314,6 @@ public sealed class ViceApp : IViceApp, IAsyncDisposable
 
         var handler = new DaemonMessageHandler(
             this,
-            jobManager,
             sessionCtx,
             NullConsoleWriter.Instance,
             DaemonMessageHandler.DaemonControlVerbs);
@@ -345,12 +337,20 @@ public sealed class ViceApp : IViceApp, IAsyncDisposable
 
         Host.Core.SystemdNotify.Ready();
 
-        return await SuperviseAcceptLoopAsync(server, jobManager, _logger, ct).ConfigureAwait(false);
+        return await SuperviseAcceptLoopAsync(server, _logger, ct).ConfigureAwait(false);
     }
 
-    private static async Task<int> SuperviseAcceptLoopAsync(PipeServer server, JobManager jobManager, IViceLogger logger, CancellationToken ct)
+    private static async Task<int> SuperviseAcceptLoopAsync(PipeServer server,
+                                                            IViceLogger logger,
+                                                            CancellationToken ct)
     {
-        var poolWasDegraded = false;
+        var watchdogInterval = Host.Core.SystemdNotify.WatchdogInterval();
+        var cadenceMs = watchdogInterval is { } interval
+            ? (long)interval.TotalMilliseconds
+            : (long?)null;
+        var nextWatchdogPing = cadenceMs is { } seedCadence
+            ? Environment.TickCount64 + seedCadence
+            : (long?)null;
         var tcs = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
         await using (ct.Register(() => tcs.TrySetResult(ViceExitCode.SUCCESS)))
         {
@@ -363,14 +363,28 @@ public sealed class ViceApp : IViceApp, IAsyncDisposable
                     return ViceExitCode.FAILURE;
                 }
 
-                var poolHealth = jobManager.GetWorkerPoolHealth();
-                if (poolHealth.IsDegraded
-                    && !poolWasDegraded)
+                if (cadenceMs is { } cadence
+                    && nextWatchdogPing is { } due
+                    && Environment.TickCount64 >= due)
                 {
-                    logger.Log(ViceLogLevel.Error, $"daemon worker pool degraded: {poolHealth.LiveWorkerCount}/{poolHealth.ConfiguredConcurrency} workers live");
-                }
+                    if (server.IsListening)
+                    {
+                        try
+                        {
+                            Host.Core.SystemdNotify.Watchdog();
+                        }
+                        catch (Exception ex)
+                        {
+                            logger.Log(ViceLogLevel.Warn, "systemd watchdog ping failed; continuing", ex);
+                        }
+                    }
+                    else
+                    {
+                        logger.Log(ViceLogLevel.Error, $"daemon liveness probe failed (listening={server.IsListening}); withholding systemd watchdog ping so the supervisor restarts");
+                    }
 
-                poolWasDegraded = poolHealth.IsDegraded;
+                    nextWatchdogPing = Environment.TickCount64 + cadence;
+                }
 
                 var poll = Task.Delay(TimeSpan.FromMilliseconds(250), CancellationToken.None);
                 var completed = await Task.WhenAny(tcs.Task, poll).ConfigureAwait(false);
@@ -416,6 +430,7 @@ public sealed class ViceApp : IViceApp, IAsyncDisposable
     }
 
     internal CommandRegistry Registry => _registry;
+    internal IReadOnlyList<IJobRunner> JobRunners => _jobRunners;
     internal IConsoleWriter Console => _console;
     internal IStatusDisplay Status => _status;
     internal TerminalCapabilities Capabilities => _capabilities;

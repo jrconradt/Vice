@@ -35,7 +35,30 @@ public static class Router
             opens[i] = SinkFactory.OpenAsync(matched[i].SinkSpec, ct, logger, connectTcp).AsTask();
         }
 
-        var live = new List<ISink>(await Task.WhenAll(opens));
+        List<ISink> live;
+        try
+        {
+            live = new List<ISink>(await Task.WhenAll(opens));
+        }
+        catch
+        {
+            foreach (var open in opens)
+            {
+                if (open.Status == TaskStatus.RanToCompletion)
+                {
+                    try
+                    {
+                        await open.Result.DisposeAsync();
+                    }
+                    catch (Exception disposeEx)
+                    {
+                        Quietly.Swallow(disposeEx, logger);
+                    }
+                }
+            }
+
+            throw;
+        }
 
         var pool = ArrayPool<byte>.Shared;
         var buffer = pool.Rent(chunkSize);
@@ -88,7 +111,14 @@ public static class Router
             pool.Return(buffer);
             foreach (var sink in live)
             {
-                await sink.DisposeAsync();
+                try
+                {
+                    await sink.DisposeAsync();
+                }
+                catch (Exception disposeEx)
+                {
+                    Quietly.Swallow(disposeEx, logger);
+                }
             }
         }
 

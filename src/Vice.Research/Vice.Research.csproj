@@ -10,6 +10,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Vice.Net/Vice.Net.csproj" />
+    <ProjectReference Include="../Vice.Jobs/Vice.Jobs.csproj" />
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Vice.Net.Tests" />

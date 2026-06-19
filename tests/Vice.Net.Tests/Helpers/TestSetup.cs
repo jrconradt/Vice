@@ -10,6 +10,5 @@ internal static class TestSetup
     {
         Environment.SetEnvironmentVariable(SafeNetPolicy.AllowIpsEnvVar, "127.0.0.0/8,::1");
         Environment.SetEnvironmentVariable(SafeNetPolicy.AllowHostsEnvVar, "localhost");
-        SafeOutboundConnection.ResetPolicy();
     }
 }

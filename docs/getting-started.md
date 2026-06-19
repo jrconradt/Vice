@@ -61,7 +61,7 @@ vice search "graph neural networks" on source arxiv
 | Mode | How to enter | Behavior |
 |---|---|---|
 | One-shot | `vice <args>` | Parses args, runs one pipeline, exits with the command's return code. |
-| Session | `vice` (no args) | Opens the REPL. Background jobs are managed in-process. Closing the REPL with active jobs detaches them into a daemon. |
+| Session | `vice` (no args) | Opens the REPL. Background work (downloads) runs as detached child processes that survive REPL exit and terminal close. |
 
 ## Next
 

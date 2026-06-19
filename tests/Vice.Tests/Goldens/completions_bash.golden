@@ -23,7 +23,6 @@ _vice() {
         case "$state:$word" in
             "root:alpha"|"root:a") state="root__alpha"; ;;
             "root:beta") state="root__beta"; ;;
-            "root:cancel") state="root__cancel"; skip=1; ;;
             "root:clear") state="root__clear"; ;;
             "root:completions") state="root__completions"; skip=1; ;;
             "root:daemon") state="root__daemon"; ;;
@@ -31,14 +30,13 @@ _vice() {
             "root:gamma") state="root__gamma"; ;;
             "root:help") state="root__help"; skip=1; ;;
             "root:history") state="root__history"; ;;
-            "root:jobs") state="root__jobs"; ;;
+            "root:job") state="root__job"; ;;
             "root:list") state="root__list"; ;;
             "root:manpage") state="root__manpage"; ;;
-            "root:pause") state="root__pause"; skip=1; ;;
-            "root:resume") state="root__resume"; skip=1; ;;
             "root:status") state="root__status"; ;;
             "root:version") state="root__version"; ;;
             "root__beta:things") state="root__beta__things"; skip=1; ;;
+            "root__job:run") state="root__job__run"; skip=1; ;;
             "root__list:commands") state="root__list__commands"; ;;
             *) state="unknown" ;;
         esac
@@ -51,8 +49,9 @@ _vice() {
     fi
 
     case "$state" in
-        "root") COMPREPLY=( $(compgen -W "alpha a beta cancel clear completions daemon exit quit gamma help history jobs list manpage pause resume status version" -- "$cur") ) ;;
+        "root") COMPREPLY=( $(compgen -W "alpha a beta clear completions daemon exit quit gamma help history job list manpage status version" -- "$cur") ) ;;
         "root__beta") COMPREPLY=( $(compgen -W "things" -- "$cur") ) ;;
+        "root__job") COMPREPLY=( $(compgen -W "run" -- "$cur") ) ;;
         "root__list") COMPREPLY=( $(compgen -W "commands" -- "$cur") ) ;;
         *) COMPREPLY=( $(compgen -f -- "$cur") ) ;;
     esac

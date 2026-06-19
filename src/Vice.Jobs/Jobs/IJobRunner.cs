@@ -2,7 +2,7 @@ namespace Vice.Jobs;
 
 public interface IJobRunner
 {
-    Task RunAsync(JobState job, IProgress<JobProgress> progress, CancellationToken ct);
+    Task RunAsync(JobDescriptor descriptor, CancellationToken ct);
 
     bool CanHandle(JobKind kind);
 }

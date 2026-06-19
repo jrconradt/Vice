@@ -2,7 +2,7 @@ namespace Vice.Contracts;
 
 public sealed class SessionState
 {
-    public const int ProtocolVersion = 1;
+    public const int ProtocolVersion = 2;
 
     public string AppName { get; }
     public string PipeName { get; }
@@ -19,5 +19,16 @@ public sealed class SessionState
     }
 
     public static SessionState For(string appName, string? pipeName = null)
-        => new(appName, pipeName);
+    {
+        if (pipeName is null)
+        {
+            var overridePipe = Environment.GetEnvironmentVariable("VICE_PIPE_NAME");
+            if (!string.IsNullOrWhiteSpace(overridePipe))
+            {
+                pipeName = overridePipe;
+            }
+        }
+
+        return new SessionState(appName, pipeName);
+    }
 }

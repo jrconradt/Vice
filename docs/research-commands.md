@@ -43,7 +43,7 @@ vice fetch P04637 from source uniprot
 
 ## download / dl
 
-Download a result's content to a file. If `to path` is omitted, the file is written to the current directory using the source's default extension (PDF for arXiv, TXT for Gutenberg, XML for PubMed, FASTA for UniProt, PDB for AlphaFold). In session mode, downloads are queued as background jobs (`jobs` to list, `cancel <id>` to stop).
+Download a result's content to a file. If `to path` is omitted, the file is written to the current directory using the source's default extension (PDF for arXiv, TXT for Gutenberg, XML for PubMed, FASTA for UniProt, PDB for AlphaFold). In session mode, the download is spawned as a detached background process; the file appears at the destination when it finishes.
 
 The destination must be inside the current working directory unless `VICE_ALLOWED_ROOTS` widens the allowed set.
 
@@ -64,7 +64,7 @@ vice dl P04637 from source uniprot to path ./tp53.fasta
 
 ## archive
 
-Run a search, then download every result to a directory. In session mode each download becomes its own background job. Out of session, downloads run sequentially with a progress display.
+Run a search, then download every result to a directory. In session mode each download is spawned as its own detached background process. Out of session, downloads run sequentially with a progress display.
 
 ### Synopsis
 

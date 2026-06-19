@@ -30,22 +30,45 @@ public static class TeeCommands
         }
 
         var sinks = new List<ISink>(specs.Count + 1);
+        var opens = new Task<ISink>[specs.Count];
+        for (int i = 0; i < specs.Count; i++)
+        {
+            opens[i] = SinkFactory.OpenAsync(specs[i], ct, ctx.Logger, connectTcp).AsTask();
+        }
+
         try
         {
-            var opens = new Task<ISink>[specs.Count];
-            for (int i = 0; i < specs.Count; i++)
-            {
-                opens[i] = SinkFactory.OpenAsync(specs[i], ct, ctx.Logger, connectTcp).AsTask();
-            }
-
-            sinks.AddRange(await Task.WhenAll(opens));
+            await Task.WhenAll(opens);
             sinks.Add(new StreamSink(Console.OpenStandardOutput(), "stdout", ctx.Logger));
+            sinks.AddRange(opens.Select(open => open.Result));
         }
         catch
         {
             foreach (var s in sinks)
             {
-                await s.DisposeAsync();
+                try
+                {
+                    await s.DisposeAsync();
+                }
+                catch (Exception disposeEx)
+                {
+                    Vice.Logging.Quietly.Swallow(disposeEx, ctx.Logger);
+                }
+            }
+
+            foreach (var open in opens)
+            {
+                if (open.Status == TaskStatus.RanToCompletion)
+                {
+                    try
+                    {
+                        await open.Result.DisposeAsync();
+                    }
+                    catch (Exception disposeEx)
+                    {
+                        Vice.Logging.Quietly.Swallow(disposeEx, ctx.Logger);
+                    }
+                }
             }
 
             throw;
@@ -93,7 +116,14 @@ public static class TeeCommands
             pool.Return(buffer);
             foreach (var s in sinks)
             {
-                await s.DisposeAsync();
+                try
+                {
+                    await s.DisposeAsync();
+                }
+                catch (Exception disposeEx)
+                {
+                    Vice.Logging.Quietly.Swallow(disposeEx, ctx.Logger);
+                }
             }
         }
         return 0;

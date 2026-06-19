@@ -2,5 +2,5 @@ namespace Vice.Session;
 
 internal interface ISessionLoop
 {
-    Task<bool> RunAsync(CancellationToken ct);
+    Task RunAsync(CancellationToken ct);
 }

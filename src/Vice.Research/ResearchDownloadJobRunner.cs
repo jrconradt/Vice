@@ -6,174 +6,124 @@ namespace Vice.Research;
 
 public sealed class ResearchDownloadJobRunner : IJobRunner
 {
-    private const int MAX_DOWNLOAD_RETRIES = 5;
-    private static readonly TimeSpan BASE_RETRY_BACKOFF = TimeSpan.FromMilliseconds(500);
-    private static readonly TimeSpan MAX_RETRY_BACKOFF = TimeSpan.FromSeconds(30);
+    public static readonly JobKind DownloadKind = JobKind.Custom("Download");
 
-    private readonly ResearchSourceRegistry _registry;
-    private readonly Func<HttpClient> _httpFactory;
+    public const string SOURCE_KEY = "source";
+    public const string RESOURCE_ID_KEY = "resourceId";
+    public const string DESTINATION_PATH_KEY = "destinationPath";
+    public const string FORMAT_KEY = "format";
+    public const string EXTENSION_KEY = "extension";
+
+    private readonly ResearchSourceResolver _resolveSource;
+    private readonly Lazy<HttpClient> _http;
     private readonly IViceLogger _logger;
 
-    public ResearchDownloadJobRunner(ResearchSourceRegistry registry,
+    public ResearchDownloadJobRunner(ResearchSourceResolver resolveSource,
                                      Func<HttpClient> httpFactory,
                                      IViceLogger? logger = null)
     {
-        _registry = registry ?? throw new ArgumentNullException(nameof(registry));
-        _httpFactory = httpFactory ?? throw new ArgumentNullException(nameof(httpFactory));
+        _resolveSource = resolveSource ?? throw new ArgumentNullException(nameof(resolveSource));
+        ArgumentNullException.ThrowIfNull(httpFactory);
+        _http = new Lazy<HttpClient>(httpFactory, LazyThreadSafetyMode.ExecutionAndPublication);
         _logger = logger ?? NullViceLogger.Instance;
     }
 
-    public bool CanHandle(JobKind kind) => kind == JobKind.Download;
+    public static JobDescriptor DescriptorFor(string source,
+                                              string resourceId,
+                                              string destinationPath,
+                                              string extension,
+                                              string? format,
+                                              IReadOnlyDictionary<string, string?>? extraOptions = null)
+    {
+        var options = new Dictionary<string, string?>(StringComparer.Ordinal)
+        {
+            [SOURCE_KEY] = source,
+            [RESOURCE_ID_KEY] = resourceId,
+            [DESTINATION_PATH_KEY] = destinationPath,
+            [EXTENSION_KEY] = extension,
+            [FORMAT_KEY] = format,
+        };
 
-    public async Task RunAsync(JobState job,
-                               IProgress<JobProgress> progress,
+        if (extraOptions is not null)
+        {
+            foreach (var pair in extraOptions)
+            {
+                options[pair.Key] = pair.Value;
+            }
+        }
+
+        return new JobDescriptor(DownloadKind,
+                                 $"{source}/{resourceId}",
+                                 options);
+    }
+
+    public bool CanHandle(JobKind kind) => kind == DownloadKind;
+
+    public async Task RunAsync(JobDescriptor descriptor,
                                CancellationToken ct)
     {
-        var source = _registry.Resolve(job.Source);
-        var format = job.Format ?? ExtensionToFormat(Path.GetExtension(job.DestinationPath));
+        var sourceName = Option(descriptor, SOURCE_KEY);
+        var resourceId = Option(descriptor, RESOURCE_ID_KEY);
+        var destinationPath = Option(descriptor, DESTINATION_PATH_KEY);
+        var carriedFormat = NullableOption(descriptor, FORMAT_KEY);
 
-        using var http = _httpFactory();
+        var source = _resolveSource(sourceName);
+        var format = carriedFormat ?? ExtensionToFormat(Path.GetExtension(destinationPath));
+
+        var http = _http.Value;
 
         DownloadTarget target;
         try
         {
-            target = await source.ResolveDownloadAsync(http, job.ResourceId, format, ct, _logger).ConfigureAwait(false);
+            target = await source.ResolveDownloadAsync(http, resourceId, format, ct, _logger).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.Log(ViceLogLevel.Warn,
-                        $"research download could not resolve upstream for {job.Source}/{job.ResourceId}",
+                        $"research download could not resolve upstream for {sourceName}/{resourceId}",
                         ex);
             throw;
         }
 
         _logger.Log(ViceLogLevel.Debug,
-                    $"research download resolved {job.Source}/{job.ResourceId} to {target.Uri} (resume offset {job.BytesDownloaded}) -> {job.DestinationPath}");
-
-        var reporter = new Progress<DownloadProgress>(p =>
-        {
-            progress.Report(new JobProgress(
-                BytesDownloaded: p.BytesDownloaded,
-                TotalBytes: p.TotalBytes,
-                Label: $"{job.Source}/{job.ResourceId} -> {job.DestinationPath}"));
-        });
+                    $"research download resolved {sourceName}/{resourceId} to {target.Uri} -> {destinationPath}");
 
         try
         {
-            var written = await DownloadResumableAsync(http,
-                                                       target.Uri,
-                                                       job.DestinationPath,
-                                                       job.BytesDownloaded,
-                                                       reporter,
-                                                       ct,
-                                                       _logger).ConfigureAwait(false);
+            var written = await ResumableHttpDownload.ToFileAsync(http,
+                                                                  target.Uri,
+                                                                  destinationPath,
+                                                                  null,
+                                                                  _logger,
+                                                                  ct).ConfigureAwait(false);
             _logger.Log(ViceLogLevel.Debug,
-                        $"research download completed {job.Source}/{job.ResourceId} from {target.Uri}: wrote {written} bytes to {job.DestinationPath}");
+                        $"research download completed {sourceName}/{resourceId} from {target.Uri}: wrote {written} bytes to {destinationPath}");
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.Log(ViceLogLevel.Warn,
-                        $"research download failed {job.Source}/{job.ResourceId} from {target.Uri} -> {job.DestinationPath}",
+                        $"research download failed {sourceName}/{resourceId} from {target.Uri} -> {destinationPath}",
                         ex);
             throw;
         }
     }
 
-    private static async Task<long> DownloadResumableAsync(HttpClient http,
-                                                           Uri uri,
-                                                           string destinationPath,
-                                                           long recordedOffset,
-                                                           IProgress<DownloadProgress> progress,
-                                                           CancellationToken ct,
-                                                           IViceLogger logger)
+    private static string Option(JobDescriptor descriptor, string key)
     {
-        var fullPath = AtomicDownload.ResolveDestination(destinationPath);
-        var partial = $"{fullPath}.partial";
-        var resumable = new ResumableHttpStream(http, uri);
-
-        var attempt = 0;
-        while (true)
-        {
-            var startOffset = ResolveResumeOffset(partial, recordedOffset);
-            if (startOffset > 0
-                && !await resumable.SupportsResumeAsync(ct).ConfigureAwait(false))
-            {
-                startOffset = 0;
-            }
-
-            if (startOffset > 0)
-            {
-                logger.Log(ViceLogLevel.Debug,
-                              $"research download resuming {uri} at byte offset {startOffset}");
-            }
-
-            try
-            {
-                return await AtomicDownload.RunAsync(resumable,
-                                                     uri,
-                                                     fullPath,
-                                                     partial,
-                                                     FileMode.OpenOrCreate,
-                                                     startOffset,
-                                                     progress,
-                                                     logger,
-                                                     ct).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (Exception ex) when (IsTransient(ex))
-            {
-                if (attempt >= MAX_DOWNLOAD_RETRIES)
-                {
-                    logger.Log(ViceLogLevel.Error,
-                                  $"research download for {uri} exhausted {MAX_DOWNLOAD_RETRIES} retries",
-                                  ex);
-                    throw new InvalidOperationException(
-                        $"research download for {uri} exhausted {MAX_DOWNLOAD_RETRIES} retries: {ex.Message}",
-                        ex);
-                }
-
-                attempt++;
-                var backoff = ComputeBackoff(attempt);
-                logger.Log(ViceLogLevel.Warn,
-                              $"research download transient failure for {uri} (retry {attempt}/{MAX_DOWNLOAD_RETRIES} after {backoff.TotalMilliseconds:0}ms)",
-                              ex);
-                await Task.Delay(backoff, ct).ConfigureAwait(false);
-            }
-        }
+        return descriptor.Options.TryGetValue(key, out var value) && value is not null
+            ? value
+            : string.Empty;
     }
 
-    private static bool IsTransient(Exception ex)
+    private static string? NullableOption(JobDescriptor descriptor, string key)
     {
-        return ex is HttpRequestException
-            || ex is IOException
-            || (ex is TaskCanceledException && ex.InnerException is TimeoutException);
-    }
-
-    private static TimeSpan ComputeBackoff(int attempt)
-    {
-        var scaled = BASE_RETRY_BACKOFF.TotalMilliseconds * Math.Pow(2, attempt - 1);
-        var capped = Math.Min(scaled, MAX_RETRY_BACKOFF.TotalMilliseconds);
-        var jittered = capped * (0.5 + Random.Shared.NextDouble() * 0.5);
-        return TimeSpan.FromMilliseconds(jittered);
-    }
-
-    private static long ResolveResumeOffset(string partial, long recordedOffset)
-    {
-        if (recordedOffset <= 0)
+        if (descriptor.Options.TryGetValue(key, out var value)
+            && !string.IsNullOrEmpty(value))
         {
-            return 0;
+            return value;
         }
 
-        var info = new FileInfo(partial);
-        if (!info.Exists)
-        {
-            return 0;
-        }
-
-        return Math.Min(info.Length, recordedOffset);
+        return null;
     }
 
     private static string? ExtensionToFormat(string extension)
@@ -200,15 +150,10 @@ public sealed class ResearchDownloadJobRunner : IJobRunner
 
 public static class ResearchJobFactory
 {
-    private static readonly ResearchSourceRegistry DefaultRegistry = new();
-
-    [Vice.Composition.ViceSessionService]
-    public static ResearchSourceRegistry Sources() => DefaultRegistry;
-
     [Vice.Composition.ViceJobRunner]
-    public static ResearchDownloadJobRunner ResearchDownload()
+    public static ResearchDownloadJobRunner ResearchDownload(ResearchHttpService http)
     {
-        return new ResearchDownloadJobRunner(DefaultRegistry,
-                                             () => ResearchHttp.Create(NullViceLogger.Instance));
+        return new ResearchDownloadJobRunner(ResearchSources.Resolve,
+                                             () => http.Client);
     }
 }

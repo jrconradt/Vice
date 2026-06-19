@@ -70,7 +70,7 @@ vice grpc describe service helloworld.Greeter on endpoint localhost:50051
 
 ### call
 
-Invoke a unary, server-streaming, client-streaming, or duplex-streaming method. Request and response bodies are JSON. Method type is auto-detected via reflection. In session mode, server-streaming calls are queued as background jobs.
+Invoke a unary, server-streaming, client-streaming, or duplex-streaming method. Request and response bodies are JSON. Method type is auto-detected via reflection.
 
 ```
 vice grpc call <package.Service/Method> on endpoint <host:port> with data '<json>'

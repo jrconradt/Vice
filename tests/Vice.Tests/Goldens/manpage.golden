@@ -12,17 +12,8 @@ Run \fBvice help\fR for the in-tool command summary, or \fBvice help \fI<command
 .B exit|quit
 Exit the session
 .TP
-.B jobs
-List background jobs
-.TP
-.B pause {id}
-Pause a background job
-.TP
-.B resume {id}
-Resume a paused job
-.TP
-.B cancel {id}
-Cancel a background job
+.B job run {descriptor}
+Run a JSON job descriptor in the foreground; background submissions spawn this command detached.
 .TP
 .B history
 Show command history

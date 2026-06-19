@@ -8,7 +8,9 @@ namespace Vice.Session;
 
 internal static class SessionBuiltins
 {
-    internal static void RegisterChains(CommandRegistry registry)
+    internal static void RegisterChains(CommandRegistry registry,
+                                        IReadOnlyList<IJobRunner> jobRunners,
+                                        IViceLogger logger)
     {
         registry.Register(
             Verbs.Exit(),
@@ -18,30 +20,12 @@ internal static class SessionBuiltins
             showInHelp: true);
 
         registry.Register(
-            Verbs.Jobs(),
-            "List background jobs",
-            (ctx, ct) => Task.FromResult(0),
-            isBuiltin: true,
-            showInHelp: true);
-
-        registry.Register(
-            Verbs.Pause() * Targets.Id,
-            "Pause a background job",
-            (ctx, ct) => Task.FromResult(0),
-            isBuiltin: true,
-            showInHelp: true);
-
-        registry.Register(
-            Verbs.Resume() * Targets.Id,
-            "Resume a paused job",
-            (ctx, ct) => Task.FromResult(0),
-            isBuiltin: true,
-            showInHelp: true);
-
-        registry.Register(
-            Verbs.Cancel() * Targets.Id,
-            "Cancel a background job",
-            (ctx, ct) => Task.FromResult(0),
+            Verbs.Job() > noun("run") * target("descriptor"),
+            "Run a JSON job descriptor in the foreground; background submissions spawn this command detached.",
+            async (ctx, ct) => await JobHarness.RunAsync(jobRunners,
+                                                         ctx.Require("descriptor"),
+                                                         logger,
+                                                         ct).ConfigureAwait(false),
             isBuiltin: true,
             showInHelp: true);
 

@@ -16,61 +16,31 @@ namespace Vice.Tests;
 
 public class DaemonHealthLivenessTests
 {
-    private sealed class NoopRunner : IJobRunner
+    private static (ViceApp App, SessionContext Ctx) BuildApp(string appName)
     {
-        public bool CanHandle(JobKind kind) => true;
-
-        public Task RunAsync(JobState job, IProgress<JobProgress> progress, CancellationToken ct)
-            => Task.CompletedTask;
-    }
-
-    [Fact]
-    public async Task WorkerPool_AfterAllWorkersExit_ReportsDegraded()
-    {
-        var pool = new JobWorkerPool(
-            2,
-            _ => Task.CompletedTask,
-            CancellationToken.None,
-            TimeSpan.FromSeconds(5),
-            NullViceLogger.Instance);
-
-        Assert.False(pool.IsDegraded);
-        Assert.Equal(2, pool.LiveWorkerCount);
-
-        await pool.DrainAsync();
-
-        Assert.True(pool.IsDegraded);
-        Assert.Equal(0, pool.LiveWorkerCount);
-        Assert.Equal(2, pool.ConfiguredConcurrency);
-    }
-
-    [Fact]
-    public async Task HealthResponse_ReflectsDegradedPool_AndSurfacesLivenessFault()
-    {
-        var app = new ViceApp("vice",
+        var app = new ViceApp(appName,
                               "9.9.9",
                               description: null,
                               console: new RecordingConsole(),
-                              status: NullStatusDisplay.Instance,
-                              jobRunners: new[] { (IJobRunner)new NoopRunner() });
+                              status: NullStatusDisplay.Instance);
 
-        await using var jobManager = new JobManager(new[] { (IJobRunner)new NoopRunner() }, 2);
+        var state = new SessionState(appName, $"{appName}-pipe");
+        var sessionCtx = new SessionContext(new JobSpawner(NullViceLogger.Instance, executablePath: "/bin/false"),
+                                            state,
+                                            null,
+                                            NullViceLogger.Instance,
+                                            isInteractive: false);
+        return (app, sessionCtx);
+    }
 
-        var poolField = typeof(JobManager).GetField(
-            "_workerPool",
-            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
-        Assert.NotNull(poolField);
-        var pool = (JobWorkerPool)poolField!.GetValue(jobManager)!;
-        await pool.DrainAsync();
-
-        Assert.True(jobManager.GetWorkerPoolHealth().IsDegraded);
-
-        var state = new SessionState("vice", "vice-test-health-" + Guid.NewGuid().ToString("N"));
-        var sessionCtx = new SessionContext(jobManager, state, null, NullViceLogger.Instance, isInteractive: false);
+    [Fact]
+    public async Task HealthResponse_SurfacesLivenessFault()
+    {
+        var appName = "vice-test-health-" + Guid.NewGuid().ToString("N");
+        var (app, sessionCtx) = BuildApp(appName);
 
         var handler = new DaemonMessageHandler(
             app,
-            jobManager,
             sessionCtx,
             NullConsoleWriter.Instance,
             DaemonMessageHandler.DaemonControlVerbs);
@@ -84,9 +54,6 @@ public class DaemonHealthLivenessTests
 
         var health = Assert.IsType<HealthResponse>(response);
         Assert.Equal("9.9.9", health.Version);
-        Assert.True(health.WorkerPoolDegraded);
-        Assert.Equal(2, health.ConfiguredWorkers);
-        Assert.Equal(0, health.LiveWorkers);
         Assert.True(health.AcceptLoopCrashed);
         Assert.Equal("InvalidOperationException: accept loop failed", health.FaultSummary);
     }
@@ -109,37 +76,22 @@ public class DaemonHealthLivenessTests
     }
 
     [Fact]
-    public async Task StatusCommand_AgainstDegradedDaemon_ReturnsNonZero()
+    public async Task StatusCommand_AgainstCrashedAcceptLoop_ReturnsNonZero()
     {
         var appName = "vice-test-statusdeg-" + Guid.NewGuid().ToString("N");
         var pipeName = SessionState.For(appName).PipeName;
 
-        var hostApp = new ViceApp("vice",
-                                  "9.9.9",
-                                  description: null,
-                                  console: new RecordingConsole(),
-                                  status: NullStatusDisplay.Instance,
-                                  jobRunners: new[] { (IJobRunner)new NoopRunner() });
-
-        await using var jobManager = new JobManager(new[] { (IJobRunner)new NoopRunner() }, 2);
-
-        var poolField = typeof(JobManager).GetField(
-            "_workerPool",
-            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
-        var pool = (JobWorkerPool)poolField!.GetValue(jobManager)!;
-        await pool.DrainAsync();
-
-        var sessionState = new SessionState(appName, pipeName);
-        var sessionCtx = new SessionContext(jobManager, sessionState, null, NullViceLogger.Instance, isInteractive: false);
+        var (hostApp, sessionCtx) = BuildApp(appName);
 
         var msgHandler = new DaemonMessageHandler(
             hostApp,
-            jobManager,
             sessionCtx,
             NullConsoleWriter.Instance,
             DaemonMessageHandler.DaemonControlVerbs);
 
-        msgHandler.BindLiveness(() => new DaemonLiveness(true, false, null));
+        msgHandler.BindLiveness(() => new DaemonLiveness(true,
+                                                         true,
+                                                         "InvalidOperationException: accept loop failed"));
 
         await using var server = new PipeServer(pipeName, msgHandler.HandleAsync, NullViceLogger.Instance);
         using var serverCts = new CancellationTokenSource();
@@ -156,6 +108,6 @@ public class DaemonHealthLivenessTests
 
         Assert.NotEqual(0, exit);
         Assert.Contains("unhealthy", clientConsole.Output);
-        Assert.Contains("degraded", clientConsole.Output);
+        Assert.Contains("crashed", clientConsole.Output);
     }
 }

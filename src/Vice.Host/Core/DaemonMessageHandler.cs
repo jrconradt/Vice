@@ -4,7 +4,6 @@ using Vice.Display;
 using Vice.Display.Rendering;
 using Vice.Foundation.Execution;
 using Vice.Ipc;
-using Vice.Jobs;
 using Vice.Logging;
 using Vice.Parser;
 using Vice.Session;
@@ -14,7 +13,6 @@ namespace Vice.Host.Core;
 internal sealed class DaemonMessageHandler
 {
     private readonly ViceApp _app;
-    private readonly JobManager _jobManager;
     private readonly SessionContext _sessionCtx;
     private readonly IConsoleWriter _nullWriter;
     private readonly IViceLogger _logger;
@@ -25,24 +23,18 @@ internal sealed class DaemonMessageHandler
     public static readonly IReadOnlySet<string> DaemonControlVerbs =
         new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            "jobs",
             "status",
-            "pause",
-            "resume",
-            "cancel",
             "history",
             "clear",
         };
 
     public DaemonMessageHandler(
         ViceApp app,
-        JobManager jobManager,
         SessionContext sessionCtx,
         IConsoleWriter nullWriter,
         IReadOnlySet<string>? verbAllowlist = null)
     {
         _app = app;
-        _jobManager = jobManager;
         _sessionCtx = sessionCtx;
         _nullWriter = nullWriter;
         _logger = app.Logger;
@@ -87,21 +79,8 @@ internal sealed class DaemonMessageHandler
             }
         }
 
-        if (message is JobStatusRequest)
-        {
-            var jobs = _jobManager.GetJobs();
-            var statuses = jobs.Select(j => new JobStatusEntry(
-                j.Id,
-                j.Kind.ToString(),
-                j.Status.ToString(),
-                ComputeProgress(j),
-                j.Source ?? j.Method ?? "")).ToList();
-            return new JobStatusResponse { Jobs = statuses };
-        }
-
         if (message is HealthRequest)
         {
-            var poolHealth = _jobManager.GetWorkerPoolHealth();
             var liveness = _livenessProbe?.Invoke() ?? new DaemonLiveness(true,
                                                                           false,
                                                                           null);
@@ -112,10 +91,6 @@ internal sealed class DaemonMessageHandler
                 AcceptLoopCrashed = liveness.AcceptLoopCrashed,
                 FaultSummary = liveness.FaultSummary,
                 UptimeSeconds = (DateTime.UtcNow - _startedUtc).TotalSeconds,
-                ConfiguredWorkers = poolHealth.ConfiguredConcurrency,
-                LiveWorkers = poolHealth.LiveWorkerCount,
-                WorkerPoolDegraded = poolHealth.IsDegraded,
-                JobCount = _jobManager.GetJobs().Count
             };
         }
 
@@ -213,17 +188,5 @@ internal sealed class DaemonMessageHandler
             (PipeMessage)response,
             PipeMessageJsonContext.Default.PipeMessage);
         return serialized.Length <= PipeProtocol.MAX_MESSAGE_BYTES;
-    }
-
-    private static double? ComputeProgress(JobState job)
-    {
-        if (job.Kind == JobKind.Download
-            && job.TotalBytes is { } total
-            && total > 0)
-        {
-            return (double)job.BytesDownloaded / total;
-        }
-
-        return null;
     }
 }

@@ -10,7 +10,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Vice/Vice.csproj" />
-    <ProjectReference Include="../Vice.Jobs/Vice.Jobs.csproj" />
     <ProjectReference Include="../Vice.Foundation/Vice.Foundation.csproj" />
   </ItemGroup>
   <ItemGroup>

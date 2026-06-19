@@ -1,6 +1,7 @@
 using System.Threading.Channels;
 using Grpc.Core;
 using Grpc.Net.Client;
+using Vice.Concurrency;
 using Vice.Display.Rendering;
 using Vice.Logging;
 using Vice.Net.Requests.Grpc;
@@ -284,7 +285,7 @@ internal sealed class GrpcBidiSession
     {
         try
         {
-            await Task.Delay(ComputeReconnectBackoff(attempt), ct).ConfigureAwait(false);
+            await Task.Delay(RetryBackoff.Exponential(BaseReconnectBackoff, MaxReconnectBackoff, attempt), ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -301,14 +302,6 @@ internal sealed class GrpcBidiSession
             _logger.Log(ViceLogLevel.Warn, $"bidi session: reconnect to {endpoint} found no channel", ex);
             return false;
         }
-    }
-
-    private static TimeSpan ComputeReconnectBackoff(int attempt)
-    {
-        var scaled = BaseReconnectBackoff.TotalMilliseconds * Math.Pow(2, attempt - 1);
-        var capped = Math.Min(scaled, MaxReconnectBackoff.TotalMilliseconds);
-        var jittered = capped * (0.5 + Random.Shared.NextDouble() * 0.5);
-        return TimeSpan.FromMilliseconds(jittered);
     }
 
     private static Method<byte[], byte[]> BuildMethod(string method)

@@ -45,7 +45,11 @@ it; the graph is a DAG with no cycles:
 - **Leaves:** `Vice.Foundation` (logging, concurrency, persistence,
   exit codes), `Vice.Parser` (lexer/parser), `Vice.Generators` (Roslyn
   source generators)
-- **`Vice.Jobs`** — background job model, manager, worker pool
+- **`Vice.Jobs`** — detached fire-and-forget job model: a spawner that
+  launches `job run` child processes and an in-child harness that runs one
+  runner to completion. No tracking, no ledger, no status records — the
+  work's output on disk is the only result; a runaway is stopped with
+  shell `kill`
 - **`Vice`** — the framework root every consumer references: contracts,
   composition, command registry, options, display, help, manpages,
   completions, streaming, pipeline execution

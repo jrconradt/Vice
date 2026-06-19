@@ -17,9 +17,10 @@ shared primitives), `Vice.Parser` (BCL-only lexer + resolver), and
 producing no runtime assembly reference). `Vice.Jobs` sits just above
 `Vice.Foundation`. The framework root `Vice` references `Vice.Foundation`,
 `Vice.Jobs`, and `Vice.Parser`. `Vice.Host` adds the session REPL on top of
-`Vice` and `Vice.Jobs`. Feature libraries (`Vice.Net`, `Vice.Files`,
-`Vice.Build`, `Vice.Mux`) build on `Vice` and `Vice.Foundation` — `Vice.Net`
-also reaches `Vice.Jobs` for background work. The two entry-point CLIs compose
+`Vice` and `Vice.Jobs`. Feature libraries (`Vice.Net`, `Vice.Research`,
+`Vice.Files`, `Vice.Build`, `Vice.Mux`) build on `Vice` and `Vice.Foundation` —
+`Vice.Research` also references `Vice.Jobs` directly for background download
+work, building on `Vice.Net` for the rest. The two entry-point CLIs compose
 the libraries they need.
 
 Each project and the `ProjectReference` edges it declares (the `Vice.Generators`
@@ -33,10 +34,11 @@ Vice.Jobs        -> Vice.Foundation
 Vice             -> Vice.Foundation, Vice.Jobs, Vice.Parser
 Vice.Host        -> Vice, Vice.Jobs, Vice.Foundation
 Vice.Net         -> Vice, Vice.Jobs, Vice.Foundation
+Vice.Research    -> Vice.Net
 Vice.Files       -> Vice, Vice.Foundation
 Vice.Build       -> Vice, Vice.Foundation
 Vice.Mux         -> Vice, Vice.Foundation
-Vice.Cli         -> Vice, Vice.Host, Vice.Net, Vice.Files, Vice.Build, Vice.Mux
+Vice.Cli         -> Vice, Vice.Host, Vice.Net, Vice.Research, Vice.Files, Vice.Build, Vice.Mux
 Vice.Mux.Cli     -> Vice, Vice.Host, Vice.Mux
 ```
 
@@ -91,7 +93,7 @@ use any lower folder. Listed lowest first.
 | Assembly | Folders | Role |
 | --- | --- | --- |
 | `Vice.Foundation` | `Concurrency`, `Execution`, `Logging`, `Persistence`, `Sinks` | BCL-only primitives: wait-free helpers, low-level execution scaffolding, structured logging and log sinks, and path-gating + atomic-file write primitives (`SafeWriteRoots`, `AtomicFile`, `FileAccessControl`) consumed by every assembly above. |
-| `Vice.Jobs` | `Jobs` | The background-job model — job state, scheduling, and lifecycle. References `Vice.Foundation` only. |
+| `Vice.Jobs` | `Jobs` | The detached job model — each job is a child process re-executing the host binary as `job run <descriptor>`; the job id is the child pid. `JobSpawner` (`IJobSubmitter`) launches the detached child and `JobHarness` runs inside it, dispatching to the registered `IJobRunner` and returning an exit code. Nothing is tracked: the job's output on disk is the only result. References `Vice.Foundation` only. |
 | `Vice` | `Lexicon`, `Options`, `Core`, `Nodes`, `Composition`, `Display`, `Commands`, `Execution`, `Streaming`, `Help`, `Completions`, `Manpages`, `Contracts`, `Sinks` | The framework. The parsing surface (`Lexicon`, `Options`, `Core`'s `Dsl` / `TargetDef`) over `Vice.Parser`; the DSL node tree and expression composition (`Nodes`, `Composition`); terminal rendering (`Display`); the command registry and pipeline execution (`Commands`, `Execution`, `Streaming`); and help, shell-completion, and man-page generation (`Help`, `Completions`, `Manpages`). |
 | `Vice.Host` | `Core`, `Ipc`, `Plugins`, `Session`, `ViceApp` / `ViceAppBuilder` | Daemon liveness and message handling (`Core`), pipe-server IPC, external-plugin dispatch, the session REPL, and the `ViceApp` / `ViceAppBuilder` surface that wires everything into a runnable interactive application. |
 
@@ -115,9 +117,11 @@ the type graph still spans.
 
 ## Rule for new feature work
 
-A feature module (`Vice.Net`, `Vice.Files`, `Vice.Build`, `Vice.Mux`) references
-`Vice` and `Vice.Foundation`, reaching parsing or execution only through the
-public surface those layers expose; it does not reach into `Vice.Host`. When a
+A feature module (`Vice.Net`, `Vice.Research`, `Vice.Files`, `Vice.Build`,
+`Vice.Mux`) references `Vice` and `Vice.Foundation`, reaching parsing or
+execution only through the public surface those layers expose; it does not reach
+into `Vice.Host`. `Vice.Research` reaches `Vice` and `Vice.Foundation` through
+`Vice.Net` rather than referencing them directly. When a
 feature needs a capability that today lives deep in a lower assembly, surface it
 on the owning layer rather than reaching across layers — that keeps the acyclic
 assembly graph and the internal layering both intact.

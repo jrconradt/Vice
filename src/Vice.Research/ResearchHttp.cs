@@ -1,6 +1,4 @@
-using System.Net.Http.Headers;
 using Vice.Logging;
-using Vice.Net.Requests.Grpc;
 using Vice.Net.Requests.Http;
 
 namespace Vice.Research;
@@ -33,27 +31,11 @@ internal static class ResearchHttp
 
     public static HttpClient Create(IViceLogger logger)
     {
-        ArgumentNullException.ThrowIfNull(logger);
-
-        var inner = new SocketsHttpHandler
-        {
-            ConnectCallback = (context, ct) => SafeOutboundConnection.ConnectAsync(context, ct, logger),
-            AutomaticDecompression = System.Net.DecompressionMethods.All,
-        };
-
-        var polite = new PoliteHandler(inner,
-                                       minInterval: TimeSpan.FromSeconds(1),
-                                       maxRetries: 3,
-                                       logger: logger,
-                                       hostMinIntervals: BuildHostMinIntervals());
-
-        var client = new HttpClient(polite, disposeHandler: true)
-        {
-            Timeout = RequestTimeout,
-            MaxResponseContentBufferSize = MaxResponseContentBufferBytes,
-        };
-        client.DefaultRequestHeaders.UserAgent.ParseAdd(ResolveUserAgent());
-        return client;
+        return SafeHttpClient.Create(logger,
+                                     ResolveUserAgent(),
+                                     requestTimeout: RequestTimeout,
+                                     maxResponseContentBufferBytes: MaxResponseContentBufferBytes,
+                                     hostMinIntervals: BuildHostMinIntervals());
     }
 
     internal static string ResolveUserAgent()

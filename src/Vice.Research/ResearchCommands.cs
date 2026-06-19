@@ -1,38 +1,23 @@
-using System.Collections.Concurrent;
 using Vice.Composition;
 using Vice.Contracts;
 using Vice.Core;
 using Vice.Execution;
 using Vice.Foundation.Execution;
-using Vice.Jobs;
 using Vice.Lexicon;
 using Vice.Logging;
 using Vice.Net.Requests.Http;
-using Vice.Streaming;
 
 namespace Vice.Research;
 
 [ViceCommandPack]
 public static class ResearchCommands
 {
-    private static readonly ResearchSourceRegistry DefaultSources = new();
-
-    private static IResearchSource ResolveSource(ICommandContext ctx,
-                                                 string name)
-    {
-        var registry = ctx.Session?.GetService<ResearchSourceRegistry>() ?? DefaultSources;
-        return registry.Resolve(name);
-    }
-
-    private static readonly ConcurrentDictionary<IViceLogger, HttpClient> HttpByLogger =
-        new(ReferenceEqualityComparer.Instance);
-
-    private static readonly ConcurrentDictionary<string, Lazy<Task<IReadOnlyList<SearchHit>>>> InFlightSearches =
-        new(StringComparer.Ordinal);
-
     private static HttpClient HttpFor(ICommandContext ctx)
     {
-        return HttpByLogger.GetOrAdd(ctx.Logger, ResearchHttp.Create);
+        var service = ctx.Session?.GetService<ResearchHttpService>()
+            ?? throw new InvalidOperationException(
+                $"Research commands require a {nameof(ResearchHttpService)} session service; register one on the host.");
+        return service.Client;
     }
 
     public static void Register(IViceApp app)
@@ -185,7 +170,7 @@ public static class ResearchCommands
     {
         return RunGuarded(ctx, ct, async () =>
         {
-            var source = ResolveSource(ctx, Require(ctx, "source"));
+            var source = ResearchSources.Resolve(Require(ctx, "source"));
             var id = Require(ctx, "id");
             using var cts = LinkTimeout(ctx, ct);
 
@@ -211,7 +196,7 @@ public static class ResearchCommands
     {
         return RunGuarded(ctx, ct, async () =>
         {
-            var source = ResolveSource(ctx, Require(ctx, "source"));
+            var source = ResearchSources.Resolve(Require(ctx, "source"));
             var id = Require(ctx, "id");
             var format = ResearchOptions.GetFormat(ctx);
             var timeout = ResearchOptions.GetTimeout(ctx);
@@ -219,16 +204,17 @@ public static class ResearchCommands
 
             var http = HttpFor(ctx);
             var target = await source.ResolveDownloadAsync(http, id, format, cts.Token, ctx.Logger).ConfigureAwait(false);
-            var destination = ResearchDownloader.BuildDestinationPath(ctx["path"], source.Name, id, target.Extension);
+            var destination = ResearchDownloadPaths.BuildDestinationPath(ctx["path"], source.Name, id, target.Extension);
 
             if (TrySubmitJob(ctx, source.Name, id, destination, target.Extension, format, timeout, ct, out var jobTask))
             {
-                ctx.Console.WriteLine($"Queued download {source.Name}/{id} -> {destination}.");
-                return await jobTask.ConfigureAwait(false);
+                var jobId = await jobTask.ConfigureAwait(false);
+                ctx.Console.WriteLine($"Queued download {source.Name}/{id} -> {destination} (#{jobId}).");
+                return ViceExitCode.SUCCESS;
             }
 
             var reporter = ctx.Quiet ? null : ProgressLine(ctx, $"{source.Name}/{id}");
-            await ResearchDownloader.DownloadToFileAsync(http, target.Uri, destination, reporter, ctx.Logger, cts.Token).ConfigureAwait(false);
+            await ResumableHttpDownload.ToFileAsync(http, target.Uri, destination, reporter, ctx.Logger, cts.Token).ConfigureAwait(false);
             ctx.Console.WriteLine($"Saved {source.Name}/{id} -> {destination}.");
             return ViceExitCode.SUCCESS;
         });
@@ -239,7 +225,7 @@ public static class ResearchCommands
     {
         return RunGuarded(ctx, ct, async () =>
         {
-            var source = ResolveSource(ctx, Require(ctx, "source"));
+            var source = ResearchSources.Resolve(Require(ctx, "source"));
             if (!source.Searchable)
             {
                 throw new BadArgument($"Source '{source.Name}' is not searchable and cannot be archived; use 'fetch' or 'download' with an id.");
@@ -265,23 +251,17 @@ public static class ResearchCommands
                 try
                 {
                     var target = await source.ResolveDownloadAsync(HttpFor(ctx), hit.Id, format, cts.Token, ctx.Logger).ConfigureAwait(false);
-                    var destination = ResearchDownloader.BuildDestinationPath(directory, source.Name, hit.Id, target.Extension);
+                    var destination = ResearchDownloadPaths.BuildDestinationPath(directory, source.Name, hit.Id, target.Extension);
 
                     if (TrySubmitJob(ctx, source.Name, hit.Id, destination, target.Extension, format, timeout, ct, out var jobTask))
                     {
-                        ctx.Console.WriteLine($"Queued {source.Name}/{hit.Id} -> {destination}.");
-                        var exitCode = await jobTask.ConfigureAwait(false);
-                        if (exitCode != ViceExitCode.SUCCESS)
-                        {
-                            failures++;
-                            ctx.Console.WriteError($"Failed {source.Name}/{hit.Id}: queued download exited with code {exitCode}.");
-                        }
-
+                        var jobId = await jobTask.ConfigureAwait(false);
+                        ctx.Console.WriteLine($"Queued {source.Name}/{hit.Id} -> {destination} (#{jobId}).");
                         continue;
                     }
 
                     var reporter = ctx.Quiet ? null : ProgressLine(ctx, $"{source.Name}/{hit.Id}");
-                    await ResearchDownloader.DownloadToFileAsync(HttpFor(ctx), target.Uri, destination, reporter, ctx.Logger, cts.Token).ConfigureAwait(false);
+                    await ResumableHttpDownload.ToFileAsync(HttpFor(ctx), target.Uri, destination, reporter, ctx.Logger, cts.Token).ConfigureAwait(false);
                     ctx.Console.WriteLine($"Saved {source.Name}/{hit.Id} -> {destination}.");
                 }
                 catch (OperationCanceledException) when (!ct.IsCancellationRequested)
@@ -324,10 +304,10 @@ public static class ResearchCommands
             using var cts = LinkTimeout(ctx, ct);
 
             var fileName = RawDownloadFileName(uri);
-            var destination = ResearchDownloader.BuildUrlDestinationPath(ctx["path"], fileName);
+            var destination = ResearchDownloadPaths.BuildUrlDestinationPath(ctx["path"], fileName);
 
             var reporter = ctx.Quiet ? null : ProgressLine(ctx, uri.Host);
-            await ResearchDownloader.DownloadToFileAsync(HttpFor(ctx), uri, destination, reporter, ctx.Logger, cts.Token).ConfigureAwait(false);
+            await ResumableHttpDownload.ToFileAsync(HttpFor(ctx), uri, destination, reporter, ctx.Logger, cts.Token).ConfigureAwait(false);
             ctx.Console.WriteLine($"Saved {uri} -> {destination}.");
             return ViceExitCode.SUCCESS;
         });
@@ -371,32 +351,7 @@ public static class ResearchCommands
         var http = HttpFor(ctx);
         var paging = ResearchOptions.GetPaging(ctx);
         var timeout = ResearchOptions.GetTimeout(ctx);
-        var inflightKey = $"{source.Name}|{query}|{paging.Limit}|{paging.Offset}";
-        var lazy = InFlightSearches.GetOrAdd(inflightKey, k => new Lazy<Task<IReadOnlyList<SearchHit>>>(
-            () => CoalescedFetchAsync(http, source, query, paging, timeout, k),
-            LazyThreadSafetyMode.ExecutionAndPublication));
-
-        return await lazy.Value.WaitAsync(ct).ConfigureAwait(false);
-    }
-
-    private static async Task<IReadOnlyList<SearchHit>> CoalescedFetchAsync(HttpClient http,
-                                                                            IResearchSource source,
-                                                                            string query,
-                                                                            ResearchPaging paging,
-                                                                            TimeSpan timeout,
-                                                                            string inflightKey)
-    {
-        try
-        {
-            return await FetchSearchAsync(http, source, query, paging, timeout, CancellationToken.None).ConfigureAwait(false);
-        }
-        finally
-        {
-            if (InFlightSearches.TryGetValue(inflightKey, out var stored))
-            {
-                InFlightSearches.TryRemove(new KeyValuePair<string, Lazy<Task<IReadOnlyList<SearchHit>>>>(inflightKey, stored));
-            }
-        }
+        return await FetchSearchAsync(http, source, query, paging, timeout, ct).ConfigureAwait(false);
     }
 
     private static async Task<IReadOnlyList<SearchHit>> FetchSearchAsync(HttpClient http,
@@ -413,7 +368,7 @@ public static class ResearchCommands
 
     private static (IResearchSource source, string query) ResolveSearch(ICommandContext ctx)
     {
-        var source = ResolveSource(ctx, Require(ctx, "source"));
+        var source = ResearchSources.Resolve(Require(ctx, "source"));
         var query = Require(ctx, "query");
         return (source, query);
     }
@@ -442,12 +397,12 @@ public static class ResearchCommands
             [TimeoutOptionKey] = ((long)timeout.TotalMilliseconds).ToString(System.Globalization.CultureInfo.InvariantCulture),
         };
 
-        var descriptor = JobDescriptor.ForDownload(source,
-                                                   id,
-                                                   destination,
-                                                   extension,
-                                                   format,
-                                                   options);
+        var descriptor = ResearchDownloadJobRunner.DescriptorFor(source,
+                                                                 id,
+                                                                 destination,
+                                                                 extension,
+                                                                 format,
+                                                                 options);
         jobTask = session.Jobs.SubmitAsync(descriptor, ct);
         return true;
     }

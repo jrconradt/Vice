@@ -6,9 +6,10 @@ namespace Vice.Cli.Tests;
 
 public class DaemonCrossProcessEndToEndTests
 {
-    private static readonly IReadOnlyDictionary<string, string> QuietEnv = new Dictionary<string, string>
+    private readonly IReadOnlyDictionary<string, string> _env = new Dictionary<string, string>
     {
         ["VICE_LOG_LEVEL"] = "error",
+        ["VICE_PIPE_NAME"] = "vice-e2e-daemon-" + Guid.NewGuid().ToString("N"),
     };
 
     [Fact]
@@ -23,7 +24,6 @@ public class DaemonCrossProcessEndToEndTests
             Assert.Contains("vice daemon", status.StdOut, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("healthy", status.StdOut, StringComparison.Ordinal);
             Assert.Contains("listening: yes", status.StdOut, StringComparison.Ordinal);
-            Assert.Contains("No jobs.", status.StdOut, StringComparison.Ordinal);
             Assert.DoesNotContain("No vice daemon running.", status.StdOut, StringComparison.Ordinal);
         }
         finally
@@ -37,13 +37,13 @@ public class DaemonCrossProcessEndToEndTests
         var afterShutdown = await CliProcess.RunAsync(
             CliProcess.ViceCliDll,
             new[] { "status" },
-            environment: QuietEnv);
+            environment: _env);
 
         Assert.Equal(ViceExitCode.SUCCESS, afterShutdown.ExitCode);
         Assert.Contains("No vice daemon running.", afterShutdown.StdOut, StringComparison.Ordinal);
     }
 
-    private static Process StartDaemon()
+    private Process StartDaemon()
     {
         var psi = new ProcessStartInfo("dotnet")
         {
@@ -55,7 +55,7 @@ public class DaemonCrossProcessEndToEndTests
         };
         psi.ArgumentList.Add(CliProcess.ViceCliDll);
         psi.ArgumentList.Add("--daemon");
-        foreach (var (key, value) in QuietEnv)
+        foreach (var (key, value) in _env)
         {
             psi.Environment[key] = value;
         }
@@ -70,7 +70,7 @@ public class DaemonCrossProcessEndToEndTests
         return process;
     }
 
-    private static async Task<CliResult> PollForHealthyDaemon(TimeSpan budget)
+    private async Task<CliResult> PollForHealthyDaemon(TimeSpan budget)
     {
         var sw = Stopwatch.StartNew();
         CliResult last = new(ViceExitCode.FAILURE, string.Empty, string.Empty);
@@ -79,7 +79,7 @@ public class DaemonCrossProcessEndToEndTests
             last = await CliProcess.RunAsync(
                 CliProcess.ViceCliDll,
                 new[] { "status" },
-                environment: QuietEnv);
+                environment: _env);
 
             if (last.ExitCode == ViceExitCode.SUCCESS
                 && last.StdOut.Contains("healthy", StringComparison.Ordinal)

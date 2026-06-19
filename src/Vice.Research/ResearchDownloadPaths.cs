@@ -1,40 +1,7 @@
-using Vice.Logging;
-using Vice.Net.Requests.Http;
-using Vice.Persistence;
-
 namespace Vice.Research;
 
-internal static class ResearchDownloader
+internal static class ResearchDownloadPaths
 {
-    public static async Task<long> DownloadToFileAsync(HttpClient http,
-                                                       Uri uri,
-                                                       string destinationPath,
-                                                       IProgress<DownloadProgress>? progress,
-                                                       IViceLogger logger,
-                                                       CancellationToken ct)
-    {
-        var fullPath = AtomicDownload.ResolveDestination(destinationPath);
-        var partial = $"{fullPath}.{Guid.NewGuid():N}.partial";
-        var resumable = new ResumableHttpStream(http, uri);
-        try
-        {
-            return await AtomicDownload.RunAsync(resumable,
-                                                 uri,
-                                                 fullPath,
-                                                 partial,
-                                                 FileMode.CreateNew,
-                                                 startOffset: 0,
-                                                 progress,
-                                                 logger,
-                                                 ct).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            SafeFile.TryDelete(partial);
-            throw;
-        }
-    }
-
     public static string BuildUrlDestinationPath(string? toPath,
                                                  string fileName)
     {

@@ -16,9 +16,7 @@ public sealed class ViceAppBuilder
     private IOutputSink? _outputSink;
     private IStatusDisplay? _status;
     private TerminalCapabilities? _capabilities;
-    private int _concurrency = 3;
     private IViceLogger? _logger;
-    private TimeSpan _shutdownTimeout = TimeSpan.FromSeconds(10);
     private readonly List<IJobRunner> _jobRunners = new();
     private readonly Dictionary<Type, object> _sessionServices = new();
 
@@ -58,21 +56,9 @@ public sealed class ViceAppBuilder
         return this;
     }
 
-    public ViceAppBuilder WithConcurrency(int maxConcurrency)
-    {
-        _concurrency = maxConcurrency;
-        return this;
-    }
-
     public ViceAppBuilder WithLogger(IViceLogger logger)
     {
         _logger = logger;
-        return this;
-    }
-
-    public ViceAppBuilder WithShutdownTimeout(TimeSpan timeout)
-    {
-        _shutdownTimeout = timeout;
         return this;
     }
 
@@ -108,11 +94,9 @@ public sealed class ViceAppBuilder
             console: _console,
             outputSink: _outputSink,
             status: _status, capabilities: _capabilities,
-            concurrency: _concurrency,
             jobRunners: _jobRunners.ToArray(),
             sessionServices: new Dictionary<Type, object>(_sessionServices),
             globalOptions: _globalOptions.ToArray(),
-            logger: _logger,
-            shutdownTimeout: _shutdownTimeout);
+            logger: _logger);
     }
 }

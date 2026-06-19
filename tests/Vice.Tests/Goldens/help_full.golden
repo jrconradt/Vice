@@ -1,15 +1,12 @@
 [1mvice v9.9.9 - test app[0m
 
 [1m[33mCOMMANDS:[0m
-  [36mexit|quit           [0m Exit the session
-  [36mjobs                [0m List background jobs
-  [36mpause {id}          [0m Pause a background job
-  [36mresume {id}         [0m Resume a paused job
-  [36mcancel {id}         [0m Cancel a background job
-  [36mhistory             [0m Show command history
-  [36mclear               [0m Clear the screen
-  [36malpha|a             [0m alpha description
-  [36mbeta things {path}  [0m beta description
+  [36mexit|quit             [0m Exit the session
+  [36mjob run {descriptor}  [0m Run a JSON job descriptor in the foreground; background submissions spawn this command detached.
+  [36mhistory               [0m Show command history
+  [36mclear                 [0m Clear the screen
+  [36malpha|a               [0m alpha description
+  [36mbeta things {path}    [0m beta description
 
 [1m[33mGLOBAL OPTIONS:[0m
   [36m--chunk-size <chunk-size>  [0m Byte-stream chunk size in bytes

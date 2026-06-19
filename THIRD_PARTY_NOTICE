@@ -4,9 +4,11 @@ Copyright 2026 Infalligence Labs LLC
 This product includes software developed at Infalligence Labs LLC.
 
 This product includes software from the following third-party projects,
-redistributed in the shipped `vice` tool and `Vice` package. Each is listed
-with its license; the full text of each non-Apache-2.0 license appears at the
-end of this file.
+redistributed in the shipped `vice` tool via Vice.Net. They are not bundled
+in or packed by the `Vice` NuGet package, which redistributes only the
+bundled Foundation, Jobs, and Host assemblies and the packed Vice.Generators
+analyzer. Each is listed with its license; the full text of each non-Apache-2.0
+license appears at the end of this file.
 
 Redistributed under the Apache License, Version 2.0:
 
@@ -22,6 +24,8 @@ Redistributed under the BSD 3-Clause License:
 Redistributed under the MIT License:
 
 - Microsoft.CodeAnalysis.CSharp 4.14.0 (Copyright Microsoft Corporation) — compiled into the bundled Vice.Generators analyzer DLL packed by the `Vice` package
+- Microsoft.Extensions.DependencyInjection.Abstractions 8.0.0 (Copyright (c) Microsoft Corporation) — transitive via Grpc.Net.Client
+- Microsoft.Extensions.Logging.Abstractions 8.0.0 (Copyright (c) Microsoft Corporation) — transitive via Grpc.Net.Client
 
 Development and test-only dependencies (NOT redistributed in any shipped artifact):
 

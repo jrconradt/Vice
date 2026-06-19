@@ -44,6 +44,15 @@ public class SafeWriteRootsTests
     }
 
     [Fact]
+    public void CurrentDirectory_IsAllowedByDefault()
+    {
+        var cwd = Directory.GetCurrentDirectory();
+        var target = Path.Combine(cwd, $"vice-cwd-write-{Guid.NewGuid():N}.bin");
+        var allowed = SafeWriteRoots.IsAllowed(target, out var reason);
+        Assert.True(allowed, reason);
+    }
+
+    [Fact]
     public void ClearlyOutsidePath_IsRejectedWithReason()
     {
         var root = SyntheticRoot();
@@ -52,6 +61,32 @@ public class SafeWriteRootsTests
         var allowed = SafeWriteRoots.IsAllowed(outside, out var reason);
         Assert.False(allowed);
         Assert.False(string.IsNullOrEmpty(reason));
+    }
+
+    [Fact]
+    public void DotDotEscapeAboveRoot_IsRejected()
+    {
+        var root = SyntheticRoot();
+        using var _ = new EnvScope(_serial, ("VICE_ALLOWED_ROOTS", root));
+        var escape = Path.Combine(root, "..", "vice-escape.bin");
+        var allowed = SafeWriteRoots.IsAllowed(escape, out var reason);
+        Assert.False(allowed);
+        Assert.Contains("outside allowed roots", reason);
+    }
+
+    [UnixOnlyFact]
+    public void SymlinkTargetingOutsideRoot_IsRejected()
+    {
+        using var dir = new TempDir();
+        using var _ = new EnvScope(_serial, ("VICE_ALLOWED_ROOTS", dir.Path));
+        var outsideTarget = $"/vice-symlink-target-{Guid.NewGuid():N}/file.bin";
+        var link = Path.Combine(dir.Path, "escape-link");
+        File.CreateSymbolicLink(link, outsideTarget);
+
+        var allowed = SafeWriteRoots.IsAllowed(link, out var reason);
+
+        Assert.False(allowed);
+        Assert.Contains("outside allowed roots", reason);
     }
 
     private static string SyntheticRoot()

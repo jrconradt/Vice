@@ -20,28 +20,56 @@ internal sealed class GutenbergSource : IResearchSource
                                                             int offset,
                                                             CancellationToken ct)
     {
-        var page = offset / Math.Max(1, limit) + 1;
-        var url = $"https://gutendex.com/books?search={WebUtility.UrlEncode(query)}&page={page}";
-        var json = await http.GetStringAsync(url, ct).ConfigureAwait(false);
-        using var doc = JsonDocument.Parse(json);
-
         var hits = new List<SearchHit>();
-        if (!doc.RootElement.TryGetProperty("results", out var results))
+        if (limit <= 0)
         {
             return hits;
         }
 
-        foreach (var book in results.EnumerateArray())
+        var index = 0;
+
+        for (var page = 1; ; page++)
         {
             if (hits.Count >= limit)
             {
                 break;
             }
 
-            var id = book.TryGetProperty("id", out var idEl) ? idEl.GetRawText() : string.Empty;
-            var title = book.TryGetProperty("title", out var titleEl) ? titleEl.GetString() ?? string.Empty : string.Empty;
-            var authors = AuthorNames(book);
-            hits.Add(new SearchHit(id, title, authors));
+            var url = $"https://gutendex.com/books?search={WebUtility.UrlEncode(query)}&page={page}";
+            var json = await http.GetStringAsync(url, ct).ConfigureAwait(false);
+            using var doc = JsonDocument.Parse(json);
+
+            if (!doc.RootElement.TryGetProperty("results", out var results)
+                || results.ValueKind != JsonValueKind.Array)
+            {
+                break;
+            }
+
+            var pageHadResults = false;
+            foreach (var book in results.EnumerateArray())
+            {
+                pageHadResults = true;
+                var absolute = index++;
+                if (absolute < offset)
+                {
+                    continue;
+                }
+
+                if (hits.Count >= limit)
+                {
+                    break;
+                }
+
+                var id = book.TryGetProperty("id", out var idEl) ? idEl.GetRawText() : string.Empty;
+                var title = book.TryGetProperty("title", out var titleEl) ? titleEl.GetString() ?? string.Empty : string.Empty;
+                var authors = AuthorNames(book);
+                hits.Add(new SearchHit(id, title, authors));
+            }
+
+            if (!pageHadResults)
+            {
+                break;
+            }
         }
 
         return hits;

@@ -48,8 +48,6 @@ Wiring these into the host is consumer-side. The framework doesn't auto-instanti
 3. DNS-resolve the host.
 4. For each resolved IP: `deny` matches → refuse; `allow` matches → accept; otherwise the built-in `IsPrivateOrLocal` check applies.
 
-Consumers can also set `SafeOutboundConnection.Policy` directly (for example, in test fixtures) to bypass the env-var / file path entirely.
-
 ## Pager wrapping
 
 Commands that emit long output can opt into pager wrapping:
