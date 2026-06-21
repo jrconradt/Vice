@@ -9,7 +9,7 @@ internal static class ResearchHttp
 
     public const string ContactEmailEnvVar = "VICE_CONTACT_EMAIL";
 
-    private const string ProjectUrl = "https://lab.freya.cintile.io/atelier/vice";
+    private const string ProjectUrl = "https://github.com/jrconradt/Vice";
 
     private const long MaxResponseContentBufferBytes = 8L * 1024 * 1024;
 

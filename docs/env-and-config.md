@@ -139,13 +139,13 @@ Every outbound research request carries a `User-Agent` header, set on the resear
 The default header (no override) is:
 
 ```
-User-Agent: Vice/<version> (+https://lab.freya.cintile.io/atelier/vice)
+User-Agent: Vice/<version> (+https://github.com/jrconradt/Vice)
 ```
 
 When `VICE_CONTACT_EMAIL` is set, the default becomes:
 
 ```
-User-Agent: Vice/<version> (+https://lab.freya.cintile.io/atelier/vice; mailto:<email>)
+User-Agent: Vice/<version> (+https://github.com/jrconradt/Vice; mailto:<email>)
 ```
 
 Setting `VICE_CONTACT_EMAIL` discloses that address to every research host in the `User-Agent` header of every request. The address is personal data sent to third parties; leave the variable unset if you do not want it transmitted. The email is never placed in query strings or request bodies.
