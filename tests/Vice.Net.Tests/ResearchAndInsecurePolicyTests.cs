@@ -40,7 +40,7 @@ public sealed class ResearchAndInsecurePolicyTests
             var ua = ResearchHttp.ResolveUserAgent();
 
             Assert.StartsWith("Vice/", ua);
-            Assert.Contains("lab.freya.cintile.io/atelier/vice", ua);
+            Assert.Contains("github.com/jrconradt/Vice", ua);
             Assert.DoesNotContain("github.com/vice-cli", ua);
         }
         finally
