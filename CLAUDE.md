@@ -11,10 +11,6 @@ command lines like `vice search "graph neural networks" on source arxiv
 backpressured streaming channels, run as background jobs, and share a
 session REPL.
 
-This repo is Vice only. It is not part of Syzygy/ExSpectra — the
-`~/ecosystem/CLAUDE.md` one directory up describes a different project
-and none of its rules apply here.
-
 ## Build
 
 ```bash

@@ -1,5 +1,7 @@
 # Vice
 
+[![CI](https://github.com/jrconradt/Vice/actions/workflows/ci.yml/badge.svg)](https://github.com/jrconradt/Vice/actions/workflows/ci.yml) ![.NET](https://img.shields.io/badge/.NET-10-512BD4) [![License](https://img.shields.io/badge/License-Apache_2.0-blue)](LICENSE)
+
 **A .NET CLI framework with a natural-language command grammar, and the tools built on it.**
 
 Vice parses natural-language command lines:
@@ -247,6 +249,10 @@ Requires the .NET 10 SDK.
 To compare throughput run-over-run automatically, pass `--gate`: the harness diffs each benchmark's mean against the committed `bench/Vice.Benchmarks/baseline.json` and exits non-zero when any benchmark slows past the tolerance (`VICE_BENCH_TOLERANCE`, default `0.05` for 5%, capped at `0.50`); a missing baseline is seeded from the current run. Pass `--update-baseline` to rewrite the baseline from the current run when an intended change shifts the numbers.
 
 ---
+
+## Status
+
+Active development; the framework API is still evolving. Library packages (`Vice`, `Vice.Parser`) publish to NuGet from CI on push to `main`.
 
 ## License
 
