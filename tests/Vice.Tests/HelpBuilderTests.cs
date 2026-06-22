@@ -1,4 +1,5 @@
 using Vice.Display;
+using Vice.Display.Rendering;
 using Vice.Host;
 using Vice.TestSupport;
 using Xunit;
@@ -8,11 +9,19 @@ namespace Vice.Tests;
 
 public class HelpBuilderTests
 {
+    private static readonly TerminalCapabilities TestCapabilities = new(
+        supportsAnsi: true,
+        supportsColor: true,
+        colorDepth: ColorDepth.Basic8,
+        width: 80,
+        isInteractive: true,
+        supportsUnicode: true);
+
     private static (ViceApp App, RecordingConsole Console) Build()
     {
         var c = new RecordingConsole();
         return (new ViceApp("vice", "9.9.9", description: "test app",
-            console: c, status: NullStatusDisplay.Instance), c);
+            console: c, status: NullStatusDisplay.Instance, capabilities: TestCapabilities), c);
     }
 
     [Fact]
