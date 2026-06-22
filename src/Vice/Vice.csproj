@@ -6,6 +6,7 @@
     <Nullable>enable</Nullable>
     <PackageId>Vice</PackageId>
     <Description>Vice — fluent CLI framework with natural-language command DSL</Description>
+    <PackageTags>cli;command-line;dotnet;natural-language;repl;source-generator;pipeline;streaming</PackageTags>
     <IsAotCompatible>true</IsAotCompatible>
     <IsTrimmable>true</IsTrimmable>
     <TargetsForTfmSpecificBuildOutput>$(TargetsForTfmSpecificBuildOutput);_BundleViceLibrariesForPack</TargetsForTfmSpecificBuildOutput>
