@@ -252,7 +252,7 @@ To compare throughput run-over-run automatically, pass `--gate`: the harness dif
 
 ## Status
 
-Active development; the framework API is still evolving. Library packages (`Vice`, `Vice.Parser`) publish to NuGet from CI on push to `main`.
+Active development; the framework API is still evolving. The `Vice` library package publishes to NuGet from CI on push to `main`.
 
 ## License
 

@@ -84,10 +84,10 @@ no ambient static service locators. Logging goes through the injected
   never commit a `packages.lock.json`. Central package management
   (`Directory.Packages.props`) pins versions. If lock files appear,
   remove the property and delete the files.
-- **CI publishes the libraries.** `.github/workflows/ci.yml` builds and
-  packs `Vice.slnx` and pushes the library packages (`Vice`,
-  `Vice.Parser`) to NuGet on push to `main` via the `nuget` environment's
-  `NUGET_API_KEY` secret. The CLI projects are not packed.
+- **CI publishes the library.** `.github/workflows/ci.yml` builds and
+  packs `src/Vice/Vice.csproj` and pushes the `Vice` package to NuGet on
+  push to `main` via the `nuget` environment's `NUGET_API_KEY` secret. The
+  CLI and parser projects are not packed.
 - **Don't hand-edit generator output.** Generated composition wiring
   comes from `Vice.Generators`; change the generator, rebuild.
 - **Local packing is scripted.** `scripts/release.sh` and
